@@ -27,7 +27,7 @@ func shellTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "shell",
-			Description: "在 EasyAgent 所在服务器执行一条 Shell 命令，用于读取和搜索文件、构建、测试、脚本、CLI 和软件安装；不要用它代替普通文本回答。",
+			Description: "在 EasyAgent 所在服务器执行一条 Shell 命令，用于读取和搜索文件、构建、测试、脚本、CLI 和软件安装。结果中的 ok=false 或非零 exit_code 表示失败，必须检查参数并按需重试；不要用它代替普通文本回答。",
 			Parameters: objectSchema(map[string]any{
 				"command": stringSchema("必填，要执行的完整 Shell 命令"),
 				"working_directory": map[string]any{
@@ -126,6 +126,7 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 	}
 
 	result := struct {
+		OK               bool   `json:"ok"`
 		Command          string `json:"command"`
 		WorkingDirectory string `json:"working_directory"`
 		ExitCode         int    `json:"exit_code"`
@@ -133,9 +134,15 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		DurationMS       int64  `json:"duration_ms"`
 		Stdout           string `json:"stdout"`
 		Stderr           string `json:"stderr"`
+		Error            string `json:"error,omitempty"`
 	}{
-		Command: arguments.Command, WorkingDirectory: directory, ExitCode: exitCode,
+		OK: exitCode == 0 && !timedOut, Command: arguments.Command, WorkingDirectory: directory, ExitCode: exitCode,
 		TimedOut: timedOut, DurationMS: duration.Milliseconds(), Stdout: stdout.String(), Stderr: stderr.String(),
+	}
+	if timedOut {
+		result.Error = fmt.Sprintf("Shell 运行超过 %d 秒，已终止", int(timeout/time.Second))
+	} else if exitCode != 0 {
+		result.Error = fmt.Sprintf("Shell 命令执行失败，退出码 %d", exitCode)
 	}
 	encoded, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -146,6 +153,9 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 	}
 	if parent.Err() != nil {
 		return string(encoded), fmt.Errorf("Shell 已取消: %w", parent.Err())
+	}
+	if exitCode != 0 {
+		return string(encoded), errors.New(result.Error)
 	}
 	return string(encoded), nil
 }

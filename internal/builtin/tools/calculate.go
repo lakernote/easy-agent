@@ -35,6 +35,8 @@ func calculateTool() agent.Tool {
 			if expression == "" {
 				return "", errors.New("expression 不能为空")
 			}
+			// 接受用户和模型常用的排版运算符，再转换成 Go 表达式解析器认识的字符。
+			expression = strings.NewReplacer("×", "*", "÷", "/", "−", "-", "＋", "+").Replace(expression)
 			if len(expression) > 4096 {
 				return "", errors.New("expression 最长为 4096 个字符")
 			}

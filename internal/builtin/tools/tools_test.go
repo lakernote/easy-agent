@@ -33,6 +33,13 @@ func TestCalculate(t *testing.T) {
 	}
 }
 
+func TestCalculateAcceptsTypographicOperators(t *testing.T) {
+	output, err := calculateTool().Run(context.Background(), json.RawMessage(`{"expression":"8＋8−30×1"}`))
+	if err != nil || !strings.Contains(output, `"result": "-14"`) {
+		t.Fatalf("排版运算符计算错误: output=%s err=%v", output, err)
+	}
+}
+
 func TestCalculateRejectsDivisionByZero(t *testing.T) {
 	_, err := calculateTool().Run(context.Background(), json.RawMessage(`{"expression":"1 / 0"}`))
 	if err == nil || !strings.Contains(err.Error(), "除以零") {
@@ -46,10 +53,10 @@ func TestShellCapturesExitCodeAndDirectory(t *testing.T) {
 		"command": "pwd; printf problem >&2; exit 7", "working_directory": directory,
 	})
 	output, err := shellTool().Run(context.Background(), raw)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "退出码 7") {
+		t.Fatalf("非零退出码应该明确返回失败: %v", err)
 	}
-	for _, expected := range []string{`"exit_code": 7`, filepath.Clean(directory), `"stderr": "problem"`} {
+	for _, expected := range []string{`"ok": false`, `"exit_code": 7`, filepath.Clean(directory), `"stderr": "problem"`, `"error": "Shell 命令执行失败，退出码 7"`} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("Shell 结果缺少 %q: %s", expected, output)
 		}
@@ -71,5 +78,13 @@ func TestOutputCaptureKeepsHeadAndTail(t *testing.T) {
 	output := capture.String()
 	if !strings.HasPrefix(output, "abcde") || !strings.HasSuffix(output, "lmnop") || !strings.Contains(output, "截断") {
 		t.Fatalf("输出截断错误: %q", output)
+	}
+}
+
+func TestParseDuckDuckGoResultsResolvesRealURL(t *testing.T) {
+	body := `<div class="result"><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Flakernote%2Feasy%2Dpostman&amp;rut=abc"><b>EasyPostman</b> - GitHub</a><a class="result__snippet" href="x">An <b>open-source</b> API tool.</a></div>`
+	results := parseDuckDuckGoResults(body, 5)
+	if len(results) != 1 || results[0].URL != "https://github.com/lakernote/easy-postman" || results[0].Title != "EasyPostman - GitHub" || results[0].Snippet != "An open-source API tool." {
+		t.Fatalf("搜索结果解析错误: %+v", results)
 	}
 }

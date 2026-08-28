@@ -352,6 +352,7 @@ func TestOllamaFocusesOneRelevantTool(t *testing.T) {
 		{Spec: agent.ToolSpec{Name: "current_time"}},
 		{Spec: agent.ToolSpec{Name: "weather"}},
 		{Spec: agent.ToolSpec{Name: "calculate"}},
+		{Spec: agent.ToolSpec{Name: "web_search"}},
 		{Spec: agent.ToolSpec{Name: "shell"}},
 		{Spec: agent.ToolSpec{Name: "load_skill"}},
 	}
@@ -363,11 +364,31 @@ func TestOllamaFocusesOneRelevantTool(t *testing.T) {
 	if len(weatherTools) != 1 || weatherTools[0].Spec.Name != "weather" {
 		t.Fatalf("天气任务应只披露天气工具: %+v", weatherTools)
 	}
+	mathTools := focusOllamaTools("ollama", "8+8-30*1 等于多少", tools)
+	if len(mathTools) != 1 || mathTools[0].Spec.Name != "calculate" {
+		t.Fatalf("直接输入算式时应披露计算工具: %+v", mathTools)
+	}
+	githubTools := focusOllamaTools("ollama", "查看 GitHub 仓库 star", tools)
+	if len(githubTools) != 2 || githubTools[0].Spec.Name != "web_search" || githubTools[1].Spec.Name != "shell" {
+		t.Fatalf("GitHub 任务应披露发现和读取工具: %+v", githubTools)
+	}
 	if cloudTools := focusOllamaTools("openai", "设计 REST API", tools); len(cloudTools) != len(tools) {
 		t.Fatalf("云端模型不应被本地模型策略过滤: %+v", cloudTools)
 	}
 	if general := focusOllamaTools("ollama", "解释 Go interface", tools); len(general) != 0 {
 		t.Fatalf("稳定知识不应携带无关工具 Schema: %+v", general)
+	}
+}
+
+func TestRecentUserIntentKeepsEntityFromPreviousTurn(t *testing.T) {
+	messages := []store.Message{
+		{Role: "user", Content: "查看 easypostman 在 GitHub 上的 star"},
+		{Role: "assistant", Content: "第一次查询失败"},
+		{Role: "user", Content: "请换个方法重新查询"},
+	}
+	intent := recentUserIntent(messages)
+	if !strings.Contains(intent, "GitHub") || !strings.Contains(intent, "重新查询") {
+		t.Fatalf("最近用户意图丢失跨轮实体: %q", intent)
 	}
 }
 

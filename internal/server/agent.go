@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -144,7 +145,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	// 本地小模型在一次看到多个复杂 Tool Schema 时，可能只生成隐藏推理而没有
 	// Tool Call 或正文。Ollama 模式按当前任务聚焦到一个最相关工具；云端模型仍
 	// 保留完整工具集。它不是固定工作流，Runner 的 ReAct 循环完全不变。
-	allTools = focusOllamaTools(settings.Provider, latestUserMessage(session.Messages), allTools)
+	allTools = focusOllamaTools(settings.Provider, recentUserIntent(session.Messages), allTools)
 
 	apiKey := settings.APIKey
 	if settings.APIKeyEnv != "" {
@@ -359,13 +360,21 @@ func makeTitle(message string) string {
 	return string(runes[:36]) + "…"
 }
 
-func latestUserMessage(messages []store.Message) string {
-	for index := len(messages) - 1; index >= 0; index-- {
+// recentUserIntent 为工具路由保留最近三条用户消息。很多追问只写“重新查一下”或
+// “换个方法”，单看最后一句会丢掉上一轮的 GitHub、天气等实体，导致该披露的工具
+// 被过滤掉。这里只影响工具选择，不改写真正发送给模型的聊天历史。
+func recentUserIntent(messages []store.Message) string {
+	const maxUserMessages = 3
+	parts := make([]string, 0, maxUserMessages)
+	for index := len(messages) - 1; index >= 0 && len(parts) < maxUserMessages; index-- {
 		if messages[index].Role == string(agent.RoleUser) {
-			return messages[index].Content
+			parts = append(parts, messages[index].Content)
 		}
 	}
-	return ""
+	for left, right := 0, len(parts)-1; left < right; left, right = left+1, right-1 {
+		parts[left], parts[right] = parts[right], parts[left]
+	}
+	return strings.Join(parts, "\n")
 }
 
 // expandContinuation 只改变本轮发给模型的短指令，不修改 SQLite 中的用户原话。
@@ -403,6 +412,15 @@ func focusOllamaTools(provider, task string, tools []agent.Tool) []agent.Tool {
 		}
 		return nil
 	}
+	selectTools := func(names ...string) []agent.Tool {
+		selected := make([]agent.Tool, 0, len(names))
+		for _, name := range names {
+			if tool, ok := byName[name]; ok {
+				selected = append(selected, tool)
+			}
+		}
+		return selected
+	}
 	containsAny := func(values ...string) bool {
 		for _, value := range values {
 			if strings.Contains(lower, value) {
@@ -416,19 +434,27 @@ func focusOllamaTools(provider, task string, tools []agent.Tool) []agent.Tool {
 		return selectTool("weather")
 	case containsAny("几点", "星期几", "今天几号", "当前时间", "current time", "what time", "date today"):
 		return selectTool("current_time")
-	case containsAny("计算", "算一下", "calculate", "sqrt(", "sin(", "cos("):
+	case looksLikeMathExpression(lower) || containsAny("计算", "算一下", "calculate", "sqrt(", "sin(", "cos("):
 		return selectTool("calculate")
-	case containsAny("rest api", "http api", "接口设计", "api 设计", "最新资料", "官方文档", "查一下", "调研"):
-		return selectTool("load_skill")
 	case containsAny("mcp", "github", "gitlab", "sentry"):
 		if selected := selectTool("load_mcp"); len(selected) > 0 {
 			return selected
 		}
-		return selectTool("shell")
+		return selectTools("web_search", "shell")
+	case containsAny("rest api", "http api", "接口设计", "api 设计"):
+		return selectTool("load_skill")
+	case containsAny("最新资料", "官方文档", "查一下", "调研"):
+		return selectTools("web_search", "load_skill")
 	case containsAny("shell", "命令", "执行", "安装", "编译", "运行测试", "读取文件", "目录", "仓库", "代码"):
 		return selectTool("shell")
 	default:
 		// 普通知识、解释和写作不需要工具；不暴露无关 Schema 也能减少 Token。
 		return nil
 	}
+}
+
+var arithmeticExpressionPattern = regexp.MustCompile(`(?:^|[^[:alnum:]_.])[-+]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)\s*[+*/%×÷-]\s*[-+]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)`)
+
+func looksLikeMathExpression(value string) bool {
+	return arithmeticExpressionPattern.MatchString(value)
 }

@@ -29,7 +29,7 @@ type Info struct {
 }
 
 func Catalog(skills SkillSource) []agent.Tool {
-	result := []agent.Tool{currentTimeTool(), weatherTool(), calculateTool(), shellTool()}
+	result := []agent.Tool{currentTimeTool(), weatherTool(), calculateTool(), webSearchTool(), shellTool()}
 	if skills != nil {
 		result = append(result, loadSkillTool(skills))
 	}

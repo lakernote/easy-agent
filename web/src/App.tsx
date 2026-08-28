@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
@@ -6,6 +6,8 @@ import type { Bootstrap, MCPConfig, ModelSettings, Session, Skill, TraceEvent } 
 
 type Page = 'chat' | 'skills' | 'capabilities'
 const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
+const MathMarkdown = lazy(() => import('./MathMarkdown'))
+const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
 
 function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
@@ -55,16 +57,20 @@ function App() {
   if (loading) return <div className="boot"><span className="spinner" />正在启动 EasyAgent…</div>
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
+  const usesOllama = data.model.provider === 'ollama' || data.model.baseUrl.includes(':11434')
+  const modelReady = Boolean(data.model.model) && (!usesOllama || data.ollama.running)
+  const modelLabel = !data.model.model ? '未配置模型' : usesOllama && !data.ollama.running ? 'Ollama 未运行' : data.model.model
+
   return <div className="app-shell">
-    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} />
+    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onError={setError} />
     <main className="main-canvas">
       <header className="topbar">
         <div className="mobile-brand">EA</div>
         <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : page === 'skills' ? 'Skills' : '模型与工具'}</div>
-        <div className="topbar-actions"><span className={`model-dot ${data.model.model ? 'ready' : ''}`} /><span className="model-name">{data.model.model || '未配置模型'}</span>{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
+        <div className="topbar-actions"><span className={`model-dot ${modelReady ? 'ready' : ''}`} /><span className="model-name">{modelLabel}</span>{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
       </header>
-      {error && <div className="toast" onClick={() => setError('')}>{error}<span>×</span></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} />}
+      {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onOpenCapabilities={() => setPage('capabilities')} />}
       {page === 'skills' && <Skills data={data} onRefresh={refresh} onError={setError} />}
       {page === 'capabilities' && <Capabilities data={data} onRefresh={refresh} onError={setError} />}
     </main>
@@ -72,14 +78,75 @@ function App() {
   </div>
 }
 
-function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onRefresh: () => Promise<Bootstrap> }) {
-  const remove = async (id: string, event: React.MouseEvent) => {
-    event.stopPropagation()
-    if (!window.confirm('删除这条会话及 Trace？')) return
-    await api.deleteSession(id)
-    if (session?.id === id) onNew()
-    await onRefresh()
+function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onError }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
+  const [managing, setManaging] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  const visibleSessions = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase()
+    return data.sessions
+      .filter((item) => !keyword || item.title.toLocaleLowerCase().includes(keyword) || (item.model || '').toLocaleLowerCase().includes(keyword))
+      .slice()
+      .sort((left, right) => {
+        const difference = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()
+        return sort === 'newest' ? -difference : difference
+      })
+  }, [data.sessions, query, sort])
+
+  const selectableSessions = visibleSessions.filter((item) => !isActive(item.status))
+  const selectedCount = selectableSessions.filter((item) => selectedIds.has(item.id)).length
+  const allSelected = selectableSessions.length > 0 && selectableSessions.every((item) => selectedIds.has(item.id))
+
+  const showFeedback = (value: string) => {
+    setFeedback(value)
+    window.setTimeout(() => setFeedback(''), 2400)
   }
+
+  const remove = async (item: Session) => {
+    if (!window.confirm(`删除会话“${item.title}”及其全部 Trace？\n\n此操作不能撤销。`)) return
+    try {
+      await api.deleteSession(item.id)
+      if (session?.id === item.id) onNew()
+      await onRefresh()
+      showFeedback('会话已删除')
+    } catch (reason) { onError((reason as Error).message) }
+  }
+
+  const toggleSelected = (id: string) => setSelectedIds((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  const toggleAll = () => setSelectedIds((current) => {
+    const next = new Set(current)
+    if (allSelected) selectableSessions.forEach((item) => next.delete(item.id))
+    else selectableSessions.forEach((item) => next.add(item.id))
+    return next
+  })
+
+  const removeSelected = async () => {
+    const targets = selectableSessions.filter((item) => selectedIds.has(item.id))
+    if (!targets.length || !window.confirm(`确认删除选中的 ${targets.length} 条会话及全部 Trace？\n\n此操作不能撤销。`)) return
+    setDeleting(true); onError('')
+    let removed = 0
+    try {
+      for (const item of targets) { await api.deleteSession(item.id); removed += 1 }
+      if (session && selectedIds.has(session.id)) onNew()
+      setSelectedIds(new Set()); setManaging(false)
+      await onRefresh()
+      showFeedback(`已删除 ${removed} 条会话`)
+    } catch (reason) {
+      await onRefresh().catch(() => undefined)
+      onError(`${removed ? `已删除 ${removed} 条；` : ''}${(reason as Error).message}`)
+    } finally { setDeleting(false) }
+  }
+
+  const leaveManaging = () => { setManaging(false); setSelectedIds(new Set()) }
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark">E</div><div><strong>EasyAgent</strong><small>一个核心智能体</small></div></div>
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
@@ -88,16 +155,27 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh }: { pa
       <button className={page === 'skills' ? 'active' : ''} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em>{data.skills.filter((item) => item.enabled).length}</em></button>
       <button className={page === 'capabilities' ? 'active' : ''} onClick={() => onPage('capabilities')}><Icon name="plug" />模型与工具</button>
     </nav>
-    <div className="session-label"><span>最近会话</span><button onClick={() => onRefresh()}>↻</button></div>
+    <div className="session-label"><span>会话 <small>{data.sessions.length}</small></span><div><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
+    <div className="session-controls">
+      <label className="session-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedIds(new Set()) }} placeholder="搜索标题或模型" aria-label="搜索会话" /></label>
+      <select value={sort} onChange={(event) => setSort(event.target.value as 'newest' | 'oldest')} aria-label="按时间排序"><option value="newest">最新</option><option value="oldest">最早</option></select>
+    </div>
+    {managing && <div className="session-manage"><button onClick={toggleAll} disabled={!selectableSessions.length}>{allSelected ? '取消全选' : '全选'}</button><span>已选 {selectedCount}</span><button className="manage-delete" onClick={removeSelected} disabled={!selectedCount || deleting}>{deleting ? '删除中…' : `删除${selectedCount ? ` (${selectedCount})` : ''}`}</button></div>}
     <div className="session-list">
       {data.sessions.length === 0 && <div className="empty-list">还没有对话</div>}
-      {data.sessions.map((item) => <button key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''}`} onClick={() => onOpen(item.id)}><span className={`status ${item.status}`} /><span className="session-copy"><strong>{item.title}</strong><small>{formatTime(item.updatedAt)} · {item.model}</small></span>{!isActive(item.status) && <span className="session-delete" role="button" onClick={(event) => remove(item.id, event)}>×</span>}</button>)}
+      {data.sessions.length > 0 && visibleSessions.length === 0 && <div className="empty-list"><strong>没有匹配的会话</strong><button onClick={() => setQuery('')}>清空搜索</button></div>}
+      {visibleSessions.map((item) => <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${managing ? 'managing' : ''}`}>
+        {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${item.title}`} /></label>}
+        <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={item.title}><span className={`status ${item.status}`} /><span className="session-copy"><strong>{item.title}</strong><small>{formatTime(item.updatedAt)} · {statusLabel(item.status)}{item.model ? ` · ${item.model}` : ''}</small></span></button>
+        {!managing && !isActive(item.status) && <button className="session-delete" aria-label={`删除会话 ${item.title}`} title="删除会话" onClick={() => remove(item)}><TrashIcon /></button>}
+      </div>)}
     </div>
+    <div className="sidebar-feedback" aria-live="polite">{feedback}</div>
     <div className="sidebar-foot"><span className="service-dot" />本地服务正常 <small>v0.1</small></div>
   </aside>
 }
 
-function Chat({ session, data, onSession, onRefresh, onError }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
+function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onOpenCapabilities: () => void }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
@@ -121,10 +199,13 @@ function Chat({ session, data, onSession, onRefresh, onError }: { session: Sessi
       {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued"><i /><i /><i /><span>任务正在排队，等待本地执行槽…</span></div></div>}
       {session?.status === 'running' && (session.partialOutput
-        ? <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><ReactMarkdown remarkPlugins={[remarkGfm]}>{session.partialOutput}</ReactMarkdown></div></div></div>
+        ? <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>
         : <div className="assistant-row"><Avatar /><div className="thinking"><i /><i /><i /><span>Agent 正在思考和使用工具…</span></div></div>)}
-      {session?.status === 'failed' && <div className="run-error"><strong>本轮没有完成</strong><span>{session.error}</span></div>}
-      {session?.status === 'canceled' && <div className="run-error canceled"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div>}
+      {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
+        const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
+        if (lastUserMessage?.content) send(lastUserMessage.content)
+      }} onOpenCapabilities={onOpenCapabilities} />}
+      {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
       <div ref={endRef} />
     </div>
     <div className="composer-wrap"><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="给 EasyAgent 发消息…" rows={1} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }} /><div className="composer-foot"><span>{data.skills.filter((item) => item.enabled).length} Skills · {data.builtinTools.length} 常驻工具 · {data.mcps.filter((item) => item.enabled).length} MCP</span><button disabled={!draft.trim() || sending || isActive(session?.status)} onClick={() => send()}>↑</button></div></div><small className="composer-hint">Enter 发送 · Shift + Enter 换行 · MCP 仅在任务需要时连接</small></div>
@@ -135,10 +216,14 @@ function MessageView({ message }: { message: Session['messages'][number] }) {
   if (message.role === 'tool') return <details className="tool-result"><summary><span>⌁</span>{message.name || '工具'} 返回结果</summary><Payload value={message.content || ''} /></details>
   if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.content}</div></div>
   if (message.role !== 'assistant') return null
-  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => <span key={call.id}>调用 {call.name}</span>)}</div>}{message.content && <div className="answer-text"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>}</div></div>
+  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => <span key={call.id}>调用 {call.name}</span>)}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
 }
 
 function Avatar() { return <div className="avatar">E</div> }
+function Markdown({ children }: { children: string }) {
+  if (hasMath(children)) return <Suspense fallback={<ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>}><MathMarkdown>{children}</MathMarkdown></Suspense>
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+}
 
 function ContextBar({ session }: { session: Session }) {
   const context = session.context
@@ -313,8 +398,40 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
   </section>
 }
 
+function RunError({ error, ollamaRunning, retrying, onRetry, onOpenCapabilities }: { error?: string; ollamaRunning: boolean; retrying: boolean; onRetry: () => void; onOpenCapabilities: () => void }) {
+  const explanation = explainRunError(error, ollamaRunning)
+  return <div className="run-error" role="alert">
+    <div className="run-error-mark" aria-hidden="true">!</div>
+    <div className="run-error-copy"><strong>{explanation.title}</strong><span>{explanation.message}</span>
+      <div className="run-error-actions"><button className="primary-button" disabled={retrying} onClick={onRetry}>{retrying ? '正在重试…' : '重新发送'}</button><button className="ghost-button" onClick={onOpenCapabilities}>检查模型配置</button></div>
+      {error && <details><summary>查看技术详情</summary><code>{error}</code></details>}
+    </div>
+  </div>
+}
+
+function explainRunError(error?: string, ollamaRunning = false) {
+  const value = error || '没有收到具体错误信息'
+  if (/(?:127\.0\.0\.1|localhost):11434/i.test(value) && /(connection refused|connect: connection refused|ECONNREFUSED)/i.test(value)) {
+    return ollamaRunning
+      ? { title: '本地模型连接已恢复', message: '该轮执行时无法连接 Ollama；现在服务已经恢复，直接点击“重新发送”即可，不需要新建会话。' }
+      : { title: '无法连接本地模型', message: 'EasyAgent 正常运行，但 Ollama 没有启动。启动 Ollama 后点击“重新发送”即可，不需要新建会话。' }
+  }
+  if (/(context deadline exceeded|Client\.Timeout|timeout|timed out)/i.test(value)) {
+    return { title: '模型响应超时', message: '模型在设定时间内没有返回。可直接重试，或到“模型与工具”增加超时时间、换用更小的模型。' }
+  }
+  return { title: '本轮没有完成', message: 'Agent 执行过程中遇到错误。可以查看技术详情后重试，或检查模型与工具配置。' }
+}
+
+function friendlyError(error: string) {
+  const explanation = explainRunError(error)
+  if (explanation.title !== '本轮没有完成') return `${explanation.title}：${explanation.message}`
+  return error
+}
+
+function TrashIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg> }
 function Icon({ name }: { name: string }) { const paths: Record<string, string> = { chat: 'M4 5h16v11H8l-4 4V5Z', skill: 'M6 3h12v18H6zM9 8h6M9 12h6', plug: 'M9 3v6m6-6v6M7 9h10v3a5 5 0 0 1-10 0V9Zm5 8v4' }; return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg> }
 function formatTime(value: string) { const date = new Date(value); return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
+function statusLabel(value: Session['status']) { return value === 'idle' ? '完成' : value === 'queued' ? '排队中' : value === 'running' ? '运行中' : value === 'failed' ? '失败' : '已停止' }
 function formatDuration(ms: number) { return ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms` }
 function formatTokens(value: number) { return value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k` : value.toLocaleString() }
 function historyModeLabel(value: string) { return value === 'full_history' ? '完整历史' : value === 'provider_continuation' ? 'Provider 续接' : value === 'responses_full_input' ? 'Responses 全量' : value === 'summary_history' ? '摘要 + 最近历史' : '等待识别' }
