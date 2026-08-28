@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+.vscode/
+
+bin/
+web/dist/
+web/node_modules/
+
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/backup-*/
+data/workspaces/
+
+*.log
+coverage.out
+*.tsbuildinfo

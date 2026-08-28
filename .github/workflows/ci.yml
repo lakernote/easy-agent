@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify Go dependencies
+        run: go mod verify
+      - name: Install and build frontend
+        working-directory: web
+        run: npm ci && npm run build
+      - name: Vet backend
+        run: go vet ./...
+      - name: Test backend with race detector
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Audit production frontend dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: Build release binary
+        run: go build -trimpath -ldflags="-s -w" -o bin/easyagent ./cmd/easyagent
+
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build container image
+        run: docker build --tag easyagent:test .

@@ -1,0 +1,20 @@
+name: Feature request
+description: 提议一个真实使用场景或扩展点
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 请描述当前工作流、阻塞点和受影响用户，而不只是功能名称。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的替代方式

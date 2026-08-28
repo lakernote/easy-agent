@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.playwright-cli
+bin
+data
+output
+web/dist
+web/node_modules
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*

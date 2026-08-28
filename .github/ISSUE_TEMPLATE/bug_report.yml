@@ -1,0 +1,29 @@
+name: Bug report
+description: 报告可复现的 EasyAgent 问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: 版本与部署方式
+      description: 提交 SHA、操作系统、二进制或 Docker。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      description: 请先删除 Token、密码、Webhook Secret、API Key 和业务敏感数据。
