@@ -1,14 +1,14 @@
-# Security Policy
+# 安全策略
 
-## Supported versions
+## 支持版本
 
 EasyAgent 目前处于 v0.1 Alpha，仅维护最新提交。尚未提供公网管理面的登录/RBAC，因此默认部署模型是本机或受保护内网。
 
-## Reporting a vulnerability
+## 报告漏洞
 
 请使用 GitHub 仓库的 **Security → Report a vulnerability** 私下提交报告，不要创建公开 Issue。报告请包含受影响版本、复现步骤、影响范围和可行的缓解方式。维护者会尽快确认收到，并在完成修复和发布协调前保持信息私密。
 
-## Deployment boundary
+## 部署边界
 
 - 默认监听 `127.0.0.1:8080`。v0.1 没有登录、RBAC 或多租户隔离；不要直接暴露到公网。
 - 直接填写的模型 Key、MCP Token 和密码保存在 SQLite 中，API 只返回“已配置”状态，但数据库尚未静态加密。优先使用模型 Key 环境变量，并限制数据库文件权限。

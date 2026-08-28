@@ -1,4 +1,4 @@
-# EasyAgent Runtime
+# EasyAgent 运行原理
 
 EasyAgent 只有一个核心 Agent，`Runner` 只实现以下循环：
 

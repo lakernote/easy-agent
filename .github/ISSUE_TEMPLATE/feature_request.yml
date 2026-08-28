@@ -1,6 +1,6 @@
-name: Feature request
+name: 功能建议
 description: 提议一个真实使用场景或扩展点
-title: "[Feature] "
+title: "[功能] "
 labels: [enhancement]
 body:
   - type: textarea

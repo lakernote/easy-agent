@@ -1,6 +1,6 @@
-name: Bug report
+name: 问题报告
 description: 报告可复现的 EasyAgent 问题
-title: "[Bug] "
+title: "[问题] "
 labels: [bug]
 body:
   - type: textarea

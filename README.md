@@ -1,6 +1,8 @@
 # EasyAgent
 
-EasyAgent 是一个可以部署在个人电脑或 Linux 服务器上的轻量通用 Agent：一个 Go 二进制、一个 SQLite 数据库、一个 Web 页面。
+> 一个核心循环，一个 Go 二进制，把模型、Tool、Skill 和 MCP 组合成部署在自己服务器上的轻量通用 Agent。
+
+EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以直接对话，也能按需调用工具、读取 Skill、连接 MCP；不要求先搭建复杂工作流，不依赖外部数据库。
 
 它只有一个核心循环：
 
@@ -9,6 +11,28 @@ EasyAgent 是一个可以部署在个人电脑或 Linux 服务器上的轻量通
 ```
 
 不需要先创建项目，也不引入 Graph、多 Agent 编排或工作流 DSL。
+
+## 为什么做 EasyAgent
+
+- **安装简单**：发布包只有一个 Go 二进制，页面已经嵌入其中；运行数据保存到一个 SQLite 文件。
+- **模型自由**：支持 OpenAI Chat Completions、OpenAI Responses 以及兼容接口，可连接 OpenAI、DeepSeek、Ollama 等模型服务。
+- **能力可扩展**：高频能力做成内置 Tool，任务方法写成 Skill，外部系统通过 MCP 接入。
+- **过程可解释**：每次模型和工具调用都能查看输入输出、Token、缓存、耗时与错误。
+- **保持轻量**：只有一个 Agent 循环，不引入 Graph、多 Agent 编排和复杂中间件。
+
+## 界面预览
+
+### 多轮对话与工具调用
+
+![EasyAgent 多轮对话与工具调用](docs/images/conversation.png)
+
+### 按需加载和编辑 Skill
+
+![EasyAgent Skill 管理](docs/images/skills.png)
+
+### 配置模型、内置工具与 MCP
+
+![EasyAgent 模型与工具配置](docs/images/model-and-tools.png)
 
 ## 功能
 
@@ -87,7 +111,7 @@ make build         # 当前平台单二进制
 make build-linux   # Linux amd64；LINUX_ARCH=arm64 可切换架构
 ```
 
-代码结构与 Agent 循环见 [Agent Runtime](docs/agent-runtime.md)。
+代码结构与 Agent 循环见 [Agent 运行原理](docs/agent-runtime.md)。
 
 ## 当前边界
 
@@ -95,6 +119,6 @@ make build-linux   # Linux amd64；LINUX_ARCH=arm64 可切换架构
 - Responses 暂未流式显示；暂无登录系统、Webhook、Cron、项目工作区和自动创建 PR。
 - 模型能力取决于所选模型、上下文、Skill 和工具质量。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
