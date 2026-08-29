@@ -39,7 +39,7 @@ EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以
 
 - 多轮对话；Chat Completions 支持流式显示，也支持 Responses 及兼容接口。
 - 可使用 OpenAI、DeepSeek、Ollama 或其他兼容模型服务。
-- 内置时间、天气、计算、Shell 和 Skill 加载工具。
+- 内置 `read / grep / find / ls / edit / write` 文件工具，以及时间、天气、计算、Shell 和 Skill 加载工具。
 - 页面创建、编辑、启停 Skill；按需加载正文，减少无效 Token。
 - 接入 STDIO / HTTP MCP，支持 Bearer Token、用户名密码、Header 和环境变量。
 - 完整 Agent Trace：模型和工具输入输出、Token、缓存命中、耗时与错误。
@@ -49,7 +49,14 @@ EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以
 
 ## 快速开始
 
-需要 Go 1.26.7+ 和 Node.js 22+：
+最简单的方式是从 GitHub Releases 下载对应平台的单文件，Linux 服务器不需要安装 Go、Node.js、Python、Git 或 SQLite：
+
+```bash
+chmod +x easyagent
+./easyagent
+```
+
+从源码构建才需要 Go 1.26.7+ 和 Node.js 22+：
 
 ```bash
 git clone https://github.com/lakernote/easy-agent.git
@@ -78,7 +85,7 @@ docker run --rm -p 8080:8080 -v easyagent-data:/data easyagent
 打开「模型与工具」：
 
 1. 使用 Ollama 时，先启动 Ollama 并下载模型，然后在页面点击「使用」。
-2. 使用云模型时，可以先点 OpenRouter、Gemini 或 Groq 免费模板，再填写 API Key；也可以完全自定义兼容接口。
+2. 使用云模型时，可以先点 Gemini、Groq、Cerebras 或 OpenRouter 免费额度模板，再填写 API Key；也可以完全自定义兼容接口。
 3. API Key 可以直接保存到本机 SQLite，也可以填写环境变量名。
 4. 保存前点击「测试当前模型」；EasyAgent 会真实验证原生 Function Calling、工具结果回传和最终回答，而不只是检查端口是否连通。
 
@@ -97,9 +104,10 @@ export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
 
 页面内置的云端免费模板会随版本集中维护：
 
-- OpenRouter Free Router：自动选择适合本轮工具能力的免费模型；需 `OPENROUTER_API_KEY`。
-- Gemini 2.5 Flash-Lite：Google 免费层；需 `GEMINI_API_KEY`。
+- Gemini 2.5 Flash-Lite：免费云模型首选；需 `GEMINI_API_KEY`。
 - Groq GPT-OSS 20B：Groq 免费开发额度；需 `GROQ_API_KEY`。
+- Cerebras GPT-OSS 120B：Cerebras 高速免费额度；需 `CEREBRAS_API_KEY`。
+- OpenRouter Free Router：随机选择满足能力的免费模型，标记为实验性；需 `OPENROUTER_API_KEY`。
 
 免费额度、速率限制和地区可用性由厂商决定，可能变化。EasyAgent 不内置或共享第三方密钥。
 
@@ -109,13 +117,15 @@ export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
 - **Skill**：可在页面编辑的任务方法，Agent 需要时通过 `load_skill` 读取。
 - **MCP**：外部系统能力，启用前会验证认证、连接和工具列表，再按需加载。
 
-服务器不需要安装 SQLite、Python 或 Git。但 `shell` 调用 Git、Python、Maven 等命令时，服务器仍需安装对应程序；STDIO MCP 也需要自己的启动运行时。
+工作区文件读、搜、改不依赖外部命令；`read / grep / find / ls / edit / write` 直接编译进 Go 二进制。Filesystem MCP 只用于额外挂载目录，不是日常代码操作的前置依赖。
+
+服务器不需要安装 SQLite、Python 或 Git。但 `shell` 调用 Git、Python、Maven 等命令时，服务器仍需安装对应程序；Playwright、Filesystem 等 STDIO MCP 也需要各自的 Node.js 运行时。
 
 ## 数据与安全
 
 - 默认只监听 `127.0.0.1`，当前没有登录、RBAC 或多租户隔离，请不要直接暴露到公网。
 - API Key、MCP 密钥、会话和 Trace 保存在本机 SQLite；数据库尚未静态加密。
-- Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，不是安全沙箱。
+- 文件工具限制在 EasyAgent 工作区内，并以相对路径写入 Trace；Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，不是安全沙箱。
 - 生产部署建议使用低权限账号、限制数据库文件权限，并优先通过环境变量提供密钥。
 
 更多说明见 [Security Policy](SECURITY.md)。

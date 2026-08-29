@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,10 +58,76 @@ func TestShellCapturesExitCodeAndDirectory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "退出码 7") {
 		t.Fatalf("非零退出码应该明确返回失败: %v", err)
 	}
-	for _, expected := range []string{`"ok": false`, `"exit_code": 7`, filepath.Clean(directory), `"stderr": "problem"`, `"error": "Shell 命令执行失败，退出码 7"`} {
+	for _, expected := range []string{`"ok": false`, `"exit_code": 7`, `"working_directory": "\u003cexternal\u003e/`, `"stderr": "problem"`, `"error": "Shell 命令执行失败，退出码 7"`} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("Shell 结果缺少 %q: %s", expected, output)
 		}
+	}
+	if strings.Contains(output, filepath.Clean(directory)) {
+		t.Fatalf("Shell Trace 不应暴露绝对工作目录: %s", output)
+	}
+}
+
+func TestFileToolsReadSearchEditAndWrite(t *testing.T) {
+	root := t.TempDir()
+	root, _ = filepath.EvalSymlinks(root)
+	if err := os.Mkdir(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "src", "service.go")
+	if err := os.WriteFile(path, []byte("package src\n\nfunc Answer() int { return 41 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := &fileWorkspace{root: root, reads: map[string][sha256.Size]byte{}}
+
+	readOutput, err := workspace.read(context.Background(), json.RawMessage(`{"path":"src/service.go","offset":3,"limit":1}`))
+	if err != nil || !strings.Contains(readOutput, `"content": "func Answer() int { return 41 }"`) {
+		t.Fatalf("read 结果错误: %s, %v", readOutput, err)
+	}
+	grepOutput, err := workspace.grep(context.Background(), json.RawMessage(`{"query":"Answer","glob":"*.go"}`))
+	if err != nil || !strings.Contains(grepOutput, `"line": 3`) || !strings.Contains(grepOutput, `"path": "src/service.go"`) {
+		t.Fatalf("grep 结果错误: %s, %v", grepOutput, err)
+	}
+	findOutput, err := workspace.find(context.Background(), json.RawMessage(`{"pattern":"src/**/*.go"}`))
+	if err != nil || !strings.Contains(findOutput, `"src/service.go"`) {
+		t.Fatalf("find 结果错误: %s, %v", findOutput, err)
+	}
+	editOutput, err := workspace.edit(context.Background(), json.RawMessage(`{"path":"src/service.go","old_text":"return 41","new_text":"return 42"}`))
+	if err != nil || !strings.Contains(editOutput, `"replacements": 1`) {
+		t.Fatalf("edit 结果错误: %s, %v", editOutput, err)
+	}
+	updated, _ := os.ReadFile(path)
+	if !strings.Contains(string(updated), "return 42") {
+		t.Fatalf("edit 未写入文件: %s", updated)
+	}
+
+	writePath := filepath.Join(root, "README.md")
+	if err := os.WriteFile(writePath, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.write(context.Background(), json.RawMessage(`{"path":"README.md","content":"new","overwrite":true}`)); err == nil || !strings.Contains(err.Error(), "先调用 read") {
+		t.Fatalf("覆盖未读取文件应该失败: %v", err)
+	}
+	if _, err := workspace.read(context.Background(), json.RawMessage(`{"path":"README.md"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.write(context.Background(), json.RawMessage(`{"path":"README.md","content":"new","overwrite":true}`)); err != nil {
+		t.Fatalf("读取后应该允许覆盖: %v", err)
+	}
+}
+
+func TestFileToolsRejectOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	root, _ = filepath.EvalSymlinks(root)
+	workspace := &fileWorkspace{root: root, reads: map[string][sha256.Size]byte{}}
+	outside := filepath.Join(filepath.Dir(root), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(outside) })
+	input, _ := json.Marshal(map[string]string{"path": outside})
+	if _, err := workspace.read(context.Background(), input); err == nil || !strings.Contains(err.Error(), "超出") {
+		t.Fatalf("工作区外文件应该被拒绝: %v", err)
 	}
 }
 

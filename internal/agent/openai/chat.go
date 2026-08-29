@@ -34,11 +34,14 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Name       string         `json:"name,omitempty"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ToolCalls        []chatToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type chatTool struct {
@@ -85,9 +88,12 @@ type chatUsage struct {
 }
 
 type chatStreamDelta struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	ToolCalls []struct {
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	Reasoning        string          `json:"reasoning"`
+	ReasoningContent string          `json:"reasoning_content"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details"`
+	ToolCalls        []struct {
 		Index    int    `json:"index"`
 		ID       string `json:"id"`
 		Type     string `json:"type"`
@@ -197,6 +203,8 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	}
 	partialTools := map[int]*partialToolCall{}
 	content := strings.Builder{}
+	reasoning := strings.Builder{}
+	reasoningDetails := make([]json.RawMessage, 0)
 	chunks := make([]json.RawMessage, 0, 32)
 	chunkBytes := 0
 	responseID, model := "", payload.Model
@@ -241,6 +249,12 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 				content.WriteString(choice.Delta.Content)
 				onTextDelta(choice.Delta.Content)
 			}
+			if choice.Delta.Reasoning != "" {
+				reasoning.WriteString(choice.Delta.Reasoning)
+			} else if choice.Delta.ReasoningContent != "" {
+				reasoning.WriteString(choice.Delta.ReasoningContent)
+			}
+			reasoningDetails = appendReasoningDetails(reasoningDetails, choice.Delta.ReasoningDetails)
 			for _, call := range choice.Delta.ToolCalls {
 				partial := partialTools[call.Index]
 				if partial == nil {
@@ -264,7 +278,10 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	encodedChunks, _ := json.Marshal(map[string]any{"stream": true, "chunks": chunks})
 	exchange.Response = string(encodedChunks)
 	exchange.Duration = time.Since(startedAt)
-	message := core.Message{Role: core.RoleAssistant, Content: content.String()}
+	message := core.Message{Role: core.RoleAssistant, Content: content.String(), Reasoning: reasoning.String()}
+	if len(reasoningDetails) > 0 {
+		message.ReasoningDetails, _ = json.Marshal(reasoningDetails)
+	}
 	indexes := make([]int, 0, len(partialTools))
 	for index := range partialTools {
 		indexes = append(indexes, index)
@@ -306,7 +323,10 @@ func argumentFragment(raw json.RawMessage) string {
 func encodeChatMessages(messages []core.Message) []chatMessage {
 	result := make([]chatMessage, 0, len(messages))
 	for _, message := range messages {
-		item := chatMessage{Role: string(message.Role), Content: message.Content, ToolCallID: message.ToolCallID, Name: message.Name}
+		item := chatMessage{
+			Role: string(message.Role), Content: message.Content, ToolCallID: message.ToolCallID, Name: message.Name,
+			Reasoning: message.Reasoning, ReasoningDetails: message.ReasoningDetails,
+		}
 		for _, call := range message.ToolCalls {
 			arguments := call.Arguments
 			if len(arguments) == 0 {
@@ -329,7 +349,11 @@ func decodeChatResponse(body []byte) (core.Response, error) {
 		return core.Response{}, errors.New("模型没有返回 choices")
 	}
 	wire := payload.Choices[0].Message
-	message := core.Message{Role: core.RoleAssistant, Content: wire.Content}
+	reasoning := wire.Reasoning
+	if reasoning == "" {
+		reasoning = wire.ReasoningContent
+	}
+	message := core.Message{Role: core.RoleAssistant, Content: wire.Content, Reasoning: reasoning, ReasoningDetails: wire.ReasoningDetails}
 	for _, call := range wire.ToolCalls {
 		arguments, err := normalizeArguments(call.Function.Arguments)
 		if err != nil {
@@ -339,6 +363,22 @@ func decodeChatResponse(body []byte) (core.Response, error) {
 	}
 	usage := usageFromChat(payload.Usage)
 	return core.Response{ID: payload.ID, Message: message, Usage: usage}, nil
+}
+
+// appendReasoningDetails 保留 OpenRouter 等兼容网关在流式 Tool Call 中返回的
+// reasoning_details。工具结果回传时需要原样带回，模型才能继续同一段推理。
+func appendReasoningDetails(current []json.RawMessage, raw json.RawMessage) []json.RawMessage {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return current
+	}
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) != nil {
+		return current
+	}
+	for _, value := range values {
+		current = append(current, append(json.RawMessage(nil), value...))
+	}
+	return current
 }
 
 func usageFromChat(payload chatUsage) core.Usage {

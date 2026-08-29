@@ -33,6 +33,10 @@ type Message struct {
 	ToolCalls  []ToolCall
 	ToolCallID string
 	Name       string
+	// Reasoning 与 ReasoningDetails 只用于同一轮工具调用之间保留兼容
+	// Provider 返回的推理上下文，不写入 Trace，也不作为可见思维过程展示。
+	Reasoning        string
+	ReasoningDetails json.RawMessage
 }
 
 // ToolCall 是模型希望运行的一次函数调用。Arguments 保留原始 JSON，直到真正

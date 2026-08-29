@@ -26,14 +26,8 @@ type Preset struct {
 func Catalog() []Preset {
 	return []Preset{
 		{
-			ID: "openrouter-free", Name: "OpenRouter Free", Provider: "openrouter",
-			Description: "自动选择支持本轮能力的免费模型；适合低频试用。",
-			Protocol:    "chat_completions", BaseURL: "https://openrouter.ai/api/v1",
-			Model: "openrouter/free", APIKeyEnv: "OPENROUTER_API_KEY", Thinking: "", Free: true,
-		},
-		{
 			ID: "gemini-flash-lite", Name: "Gemini 2.5 Flash-Lite", Provider: "gemini",
-			Description: "Google Gemini API 免费层；速度快，适合通用对话和工具调用。",
+			Description: "免费云模型首选；速度快，支持通用对话和工具调用。",
 			Protocol:    "chat_completions", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 			Model: "gemini-2.5-flash-lite", APIKeyEnv: "GEMINI_API_KEY", Thinking: "", Free: true,
 		},
@@ -42,6 +36,18 @@ func Catalog() []Preset {
 			Description: "Groq 免费开发额度；推理速度快，但有每分钟和每日限额。",
 			Protocol:    "chat_completions", BaseURL: "https://api.groq.com/openai/v1",
 			Model: "openai/gpt-oss-20b", APIKeyEnv: "GROQ_API_KEY", Thinking: "", Free: true,
+		},
+		{
+			ID: "cerebras-gpt-oss", Name: "Cerebras GPT-OSS 120B", Provider: "cerebras",
+			Description: "高速免费额度；模型更大，适合 Agent 与代码任务试用。",
+			Protocol:    "chat_completions", BaseURL: "https://api.cerebras.ai/v1",
+			Model: "gpt-oss-120b", APIKeyEnv: "CEREBRAS_API_KEY", Thinking: "", Free: true,
+		},
+		{
+			ID: "openrouter-free", Name: "OpenRouter Free · 实验", Provider: "openrouter",
+			Description: "随机选择可用免费模型，能力和延迟可能变化；仅适合低频试验。",
+			Protocol:    "chat_completions", BaseURL: "https://openrouter.ai/api/v1",
+			Model: "openrouter/free", APIKeyEnv: "OPENROUTER_API_KEY", Thinking: "", Free: true,
 		},
 	}
 }

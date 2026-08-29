@@ -24,13 +24,13 @@ func Catalog() []Preset {
 	return []Preset{
 		{
 			ID: "playwright", Name: "Playwright", Description: "复现网页问题，操作页面并检查结构与请求",
-			Transport: "stdio", Command: "npx", Args: []string{"-y", "@playwright/mcp@latest", "--headless", "--isolated"},
-			Action: "install", Requirement: "Node.js 20+ · 自动下载并连接测试", RequiredCommands: []string{"node", "npx"}, MinimumNodeMajor: 20,
+			Transport: "stdio", Command: "npx", Args: []string{"-y", "@playwright/mcp@0.0.79", "--headless", "--isolated"},
+			Action: "install", Requirement: "Node.js 20+ · 固定版本 0.0.79 · 启用时验证握手与工具列表", RequiredCommands: []string{"node", "npx"}, MinimumNodeMajor: 20,
 		},
 		{
-			ID: "filesystem", Name: "Filesystem", Description: "只读取和修改明确允许的服务器目录",
+			ID: "filesystem", Name: "Filesystem · 外部目录", Description: "外部目录兼容 MCP；日常工作区文件操作已由内置 Tools 提供",
 			Transport: "stdio", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed-directory"},
-			Action: "configure", Requirement: "需要填写允许访问的绝对目录", RequiredCommands: []string{"node", "npx"},
+			Action: "configure", Requirement: "仅在需要访问额外挂载目录时配置 · 需要 Node.js 和允许目录", RequiredCommands: []string{"node", "npx"},
 		},
 		{
 			ID: "github", Name: "GitHub", Description: "读取仓库、Issue、PR 和 Actions 上下文",

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +18,22 @@ import (
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/store"
 )
+
+func TestTraceRedactsWorkspaceAndHomePaths(t *testing.T) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(workingDirectory, "internal", "server") + " " + filepath.Join(home, "private.txt")
+	output := redactTracePaths(input)
+	if strings.Contains(output, workingDirectory) || strings.Contains(output, home) || !strings.Contains(output, "<workspace>") || !strings.Contains(output, "<home>") {
+		t.Fatalf("Trace 路径脱敏错误: %s", output)
+	}
+}
 
 // TestUnknownAPIIsNotSPA 确保接口地址拼错时返回可识别的 JSON 404，
 // 而不是被前端 history fallback 吞掉后返回 index.html 和 200。

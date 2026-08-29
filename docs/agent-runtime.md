@@ -27,7 +27,7 @@ internal/builtin/
 ├── prompt/system.md         # 常规 Agent 的稳定基础 Prompt
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
-├── tools/                   # 时间、天气、计算、Shell 和 Skill 加载
+├── tools/                   # 文件、时间、天气、计算、Shell 和 Skill 加载
 └── mcp/                     # 页面一键安装预设
 
 internal/mcpclient/          # 把远端 MCP Tool 转为 agent.Tool
@@ -52,6 +52,8 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 
 Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。流的原始 JSON Chunks、Usage 和耗时进入 Trace；若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
 
+OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoning_details`。适配器会在同一轮工具循环中原样保留并回传这些不可见字段，避免工具结果回来后丢失推理上下文；它们不会作为思维过程展示到对话或 Trace。
+
 达到配置阈值（默认窗口的 75%）后，Server 会在普通 Agent 循环前调用同一个模型生成结构化检查点：
 
 ```text
@@ -74,7 +76,9 @@ Skill 使用渐进式加载：模型先看到元数据；任务相关时调用 `
 
 内置 Tool 以固定顺序注册，每轮使用原生 `tool_choice=auto`，由模型根据任务语义决定直接回答还是调用工具。宿主只负责工具是否启用、参数校验、超时和执行，不再使用关键词替模型判断意图。固定工具前缀也更利于 Provider 的 Prompt Cache；Skill 正文和 MCP 真实工具仍按需加载，避免把大型动态能力集塞进每轮请求。
 
-`calculate` 使用 Go 标准库执行常见数学表达式，不要求服务器安装 Python。`shell` 使用服务器自带的 `/bin/sh`，支持工作目录与最长 300 秒超时；标准输出和错误输出分别限制为 64 KiB，并保留开头和结尾。任务取消时会终止整个命令进程组。命令、参数、退出码、输出与耗时都会进入 Agent Trace。
+工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。路径解析会校验真实符号链接目标，拒绝访问工作区之外的位置；返回结果只使用相对路径。
+
+`calculate` 使用 Go 标准库执行常见数学表达式，不要求服务器安装 Python。`shell` 使用服务器自带的 `/bin/sh`，只负责构建、测试、Git、脚本、CLI 和安装任务，支持工作目录与最长 300 秒超时；标准输出和错误输出分别限制为 64 KiB，并保留开头和结尾。任务取消时会终止整个命令进程组。工作区和用户主目录会在结构化结果中脱敏，命令、退出码、输出与耗时仍会进入 Agent Trace。
 
 页面对内置 Skill 的修改作为 SQLite 覆盖保存；删除覆盖即可恢复编译进二进制的版本。自定义 Skill 也保存在同一张表。
 
@@ -88,7 +92,7 @@ mcp__<server_id>__<remote_tool_name>
 
 每轮开始时不会连接全部 MCP。模型先看到一个 `load_mcp(id)` 工具和服务元数据；只有调用它时，`Loader` 才连接指定服务，并通过 `Runner.AddTools` 把真实工具加入下一轮模型请求。这样普通问答不承担远端工具 Schema 的 Token 成本。
 
-认证、进程环境和连接生命周期都停留在 MCP 适配层。启用配置前必须完成认证校验、连接和 `tools/list`；一轮任务结束后关闭本轮实际打开的连接。Agent 最终仍只看到普通 `agent.Tool`。
+认证、进程环境和连接生命周期都停留在 MCP 适配层。启用配置前必须完成认证校验、连接和 `tools/list`；一轮任务结束后关闭本轮实际打开的连接。Agent 最终仍只看到普通 `agent.Tool`。Filesystem MCP 只作为额外挂载目录的兼容能力；普通工作区文件操作不需要启动 Node.js MCP 进程。
 
 ## 排队与取消
 

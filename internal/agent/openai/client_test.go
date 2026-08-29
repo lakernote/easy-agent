@@ -102,6 +102,19 @@ func TestChatCompletionsStreamsToolCallArguments(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsPreservesReasoningDetailsForToolContinuation(t *testing.T) {
+	result, err := decodeChatResponse([]byte(`{
+		"choices":[{"message":{"role":"assistant","content":"","reasoning":"检查实时信息","reasoning_details":[{"type":"reasoning.text","text":"opaque"}],"tool_calls":[{"id":"call-1","type":"function","function":{"name":"current_time","arguments":"{}"}}]}}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := encodeChatMessages([]core.Message{result.Message})
+	if len(encoded) != 1 || encoded[0].Reasoning != "检查实时信息" || !strings.Contains(string(encoded[0].ReasoningDetails), `"opaque"`) {
+		t.Fatalf("reasoning 上下文没有原样回传: %+v", encoded)
+	}
+}
+
 func TestChatCompletionsUsesNativeToolMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/chat/completions" {

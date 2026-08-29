@@ -183,7 +183,7 @@ export type Bootstrap = {
   modelPresets: ModelPreset[]
   modelRules: ModelRules
   skills: Skill[]
-  builtinTools: { name: string; description: string; source: string }[]
+  builtinTools: { name: string; description: string; source: string; category: string }[]
   mcpPresets: MCPPreset[]
   mcps: MCPConfig[]
   systemPrompt: string

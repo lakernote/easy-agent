@@ -26,10 +26,16 @@ type Info struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"`
+	Category    string `json:"category"`
 }
 
 func Catalog(skills SkillSource) []agent.Tool {
-	result := []agent.Tool{currentTimeTool(), weatherTool(), calculateTool(), webSearchTool(), shellTool()}
+	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
+	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
+	files := newFileWorkspace()
+	result := []agent.Tool{currentTimeTool(), weatherTool(), calculateTool(), webSearchTool()}
+	result = append(result, files.tools()...)
+	result = append(result, shellTool())
 	if skills != nil {
 		result = append(result, loadSkillTool(skills))
 	}
@@ -40,9 +46,24 @@ func InfoList(skills SkillSource) []Info {
 	tools := Catalog(skills)
 	result := make([]Info, 0, len(tools))
 	for _, tool := range tools {
-		result = append(result, Info{Name: tool.Spec.Name, Description: tool.Spec.Description, Source: "内置"})
+		result = append(result, Info{Name: tool.Spec.Name, Description: tool.Spec.Description, Source: "内置", Category: toolCategory(tool.Spec.Name)})
 	}
 	return result
+}
+
+func toolCategory(name string) string {
+	switch name {
+	case "read", "grep", "find", "ls", "edit", "write":
+		return "文件"
+	case "shell", "calculate":
+		return "执行"
+	case "current_time", "weather", "web_search":
+		return "信息"
+	case "load_skill":
+		return "扩展"
+	default:
+		return "内置"
+	}
 }
 
 func loadSkillTool(source SkillSource) agent.Tool {

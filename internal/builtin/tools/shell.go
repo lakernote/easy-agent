@@ -27,11 +27,11 @@ func shellTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "shell",
-			Description: "在 EasyAgent 所在服务器执行一条 Shell 命令，用于读取和搜索文件、构建、测试、脚本、CLI 和软件安装。结果中的 ok=false 或非零 exit_code 表示失败，必须检查参数并按需重试；不要用它代替普通文本回答。",
+			Description: "在 EasyAgent 服务器执行构建、测试、Git、脚本、CLI 或软件安装命令。文件读取、搜索和小范围修改优先使用 read/grep/find/ls/edit/write。",
 			Parameters: objectSchema(map[string]any{
 				"command": stringSchema("必填，要执行的完整 Shell 命令"),
 				"working_directory": map[string]any{
-					"type": "string", "description": "可选工作目录；相对路径以 EasyAgent 进程目录为基准",
+					"type": "string", "description": "可选工作目录；相对路径以 EasyAgent 工作区为基准",
 				},
 				"timeout_seconds": map[string]any{
 					"type": "integer", "description": "可选超时秒数，默认 60，最大 300", "minimum": 1, "maximum": 300,
@@ -75,6 +75,9 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		absolute, err := filepath.Abs(directory)
 		if err != nil {
 			return "", fmt.Errorf("解析工作目录失败: %w", err)
+		}
+		if resolved, resolveErr := filepath.EvalSymlinks(absolute); resolveErr == nil {
+			absolute = resolved
 		}
 		info, err := os.Stat(absolute)
 		if err != nil {
@@ -125,6 +128,15 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		}
 	}
 
+	root, _ := os.Getwd()
+	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolved
+	}
+	displayDirectory := redactPath(directory, root)
+	redactOutput := func(value string) string {
+		value = strings.ReplaceAll(value, directory, displayDirectory)
+		return redactText(value, root)
+	}
 	result := struct {
 		OK               bool   `json:"ok"`
 		Command          string `json:"command"`
@@ -136,8 +148,8 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		Stderr           string `json:"stderr"`
 		Error            string `json:"error,omitempty"`
 	}{
-		OK: exitCode == 0 && !timedOut, Command: arguments.Command, WorkingDirectory: directory, ExitCode: exitCode,
-		TimedOut: timedOut, DurationMS: duration.Milliseconds(), Stdout: stdout.String(), Stderr: stderr.String(),
+		OK: exitCode == 0 && !timedOut, Command: redactText(arguments.Command, root), WorkingDirectory: displayDirectory, ExitCode: exitCode,
+		TimedOut: timedOut, DurationMS: duration.Milliseconds(), Stdout: redactOutput(stdout.String()), Stderr: redactOutput(stderr.String()),
 	}
 	if timedOut {
 		result.Error = fmt.Sprintf("Shell 运行超过 %d 秒，已终止", int(timeout/time.Second))
@@ -158,6 +170,27 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		return string(encoded), errors.New(result.Error)
 	}
 	return string(encoded), nil
+}
+
+func redactPath(value, root string) string {
+	value, root = filepath.Clean(value), filepath.Clean(root)
+	if relative, err := filepath.Rel(root, value); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		if relative == "." {
+			return "<workspace>"
+		}
+		return "<workspace>/" + filepath.ToSlash(relative)
+	}
+	return "<external>/" + filepath.Base(value)
+}
+
+func redactText(value, root string) string {
+	if strings.TrimSpace(root) != "" {
+		value = strings.ReplaceAll(value, filepath.Clean(root), "<workspace>")
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		value = strings.ReplaceAll(value, filepath.Clean(home), "<home>")
+	}
+	return value
 }
 
 // outputCapture 保留输出的开头和结尾，避免某个失控命令耗尽服务器内存；

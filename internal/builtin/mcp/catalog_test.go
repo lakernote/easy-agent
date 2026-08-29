@@ -1,13 +1,16 @@
 package mcp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPlaywrightPresetCanBeInstalledAutomatically(t *testing.T) {
 	preset, found := Find("playwright")
 	if !found {
 		t.Fatal("缺少 Playwright 预设")
 	}
-	if preset.Action != "install" || preset.Command != "npx" || preset.MinimumNodeMajor != 20 {
+	if preset.Action != "install" || preset.Command != "npx" || preset.MinimumNodeMajor != 20 || len(preset.Args) < 2 || strings.Contains(preset.Args[1], "@latest") {
 		t.Fatalf("Playwright 安装信息不完整: %+v", preset)
 	}
 }
