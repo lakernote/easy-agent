@@ -162,7 +162,7 @@ func makeCompactionPlan(session store.Session, settings store.ModelSettings, sys
 
 func compressionThreshold(settings store.ModelSettings) int {
 	if settings.CompressionThresholdPercent == 0 {
-		return 75
+		return store.DefaultCompressionThresholdPercent
 	}
 	return settings.CompressionThresholdPercent
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
+	builtinmodels "github.com/lakernote/easy-agent/internal/builtin/models"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
 	"github.com/lakernote/easy-agent/internal/mcpclient"
@@ -22,14 +23,26 @@ import (
 )
 
 type bootstrapPayload struct {
-	Sessions     []store.Session       `json:"sessions"`
-	Model        store.ModelSettings   `json:"model"`
-	Skills       []store.SkillOverride `json:"skills"`
-	BuiltinTools []builtintools.Info   `json:"builtinTools"`
-	MCPPresets   []builtinmcp.Preset   `json:"mcpPresets"`
-	MCPs         []store.MCPConfig     `json:"mcps"`
-	SystemPrompt string                `json:"systemPrompt"`
-	Ollama       ollamaStatus          `json:"ollama"`
+	Sessions     []store.Session        `json:"sessions"`
+	Model        store.ModelSettings    `json:"model"`
+	Skills       []store.SkillOverride  `json:"skills"`
+	BuiltinTools []builtintools.Info    `json:"builtinTools"`
+	MCPPresets   []builtinmcp.Preset    `json:"mcpPresets"`
+	ModelPresets []builtinmodels.Preset `json:"modelPresets"`
+	ModelRules   modelRulesPayload      `json:"modelRules"`
+	MCPs         []store.MCPConfig      `json:"mcps"`
+	SystemPrompt string                 `json:"systemPrompt"`
+	Ollama       ollamaStatus           `json:"ollama"`
+}
+
+type modelRulesPayload struct {
+	DefaultMaxOutputTokens             int `json:"defaultMaxOutputTokens"`
+	DefaultRequestTimeoutSeconds       int `json:"defaultRequestTimeoutSeconds"`
+	MinRequestTimeoutSeconds           int `json:"minRequestTimeoutSeconds"`
+	MaxRequestTimeoutSeconds           int `json:"maxRequestTimeoutSeconds"`
+	DefaultCompressionThresholdPercent int `json:"defaultCompressionThresholdPercent"`
+	MinCompressionThresholdPercent     int `json:"minCompressionThresholdPercent"`
+	MaxCompressionThresholdPercent     int `json:"maxCompressionThresholdPercent"`
 }
 
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
@@ -64,9 +77,21 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
 		Sessions: sessions, Model: publicModel(model), Skills: catalog.All(),
-		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(),
+		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelPresets: publicModelPresets(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: detectOllama(request.Context()),
 	})
+}
+
+func modelRules() modelRulesPayload {
+	return modelRulesPayload{
+		DefaultMaxOutputTokens:             store.DefaultMaxOutputTokens,
+		DefaultRequestTimeoutSeconds:       store.DefaultRequestTimeoutSeconds,
+		MinRequestTimeoutSeconds:           store.MinRequestTimeoutSeconds,
+		MaxRequestTimeoutSeconds:           store.MaxRequestTimeoutSeconds,
+		DefaultCompressionThresholdPercent: store.DefaultCompressionThresholdPercent,
+		MinCompressionThresholdPercent:     store.MinCompressionThresholdPercent,
+		MaxCompressionThresholdPercent:     store.MaxCompressionThresholdPercent,
+	}
 }
 
 func (server *Server) getSession(response http.ResponseWriter, request *http.Request) {
@@ -199,16 +224,8 @@ func (server *Server) saveModel(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	current, _ := server.store.Model()
-	if input.APIKey == "" {
-		input.APIKey = current.APIKey
-	}
-	if input.APIKeyEnv != "" {
-		if _, exists := os.LookupEnv(input.APIKeyEnv); !exists {
-			writeError(response, http.StatusBadRequest, "环境变量 "+input.APIKeyEnv+" 不存在")
-			return
-		}
-	}
-	if err := validateModel(input); err != nil {
+	input, err := prepareModelInput(input, current)
+	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -218,6 +235,11 @@ func (server *Server) saveModel(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	writeJSON(response, http.StatusOK, publicModel(enrichOllamaContextWindow(request.Context(), input)))
+}
+
+func sameModelEndpoint(left, right store.ModelSettings) bool {
+	return strings.EqualFold(strings.TrimSpace(left.Provider), strings.TrimSpace(right.Provider)) &&
+		strings.EqualFold(strings.TrimRight(strings.TrimSpace(left.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(right.BaseURL), "/"))
 }
 
 func (server *Server) saveSkill(response http.ResponseWriter, request *http.Request) {
@@ -468,7 +490,7 @@ func (server *Server) getOllama(response http.ResponseWriter, request *http.Requ
 
 func detectOllama(parent context.Context) ollamaStatus {
 	_, lookupErr := exec.LookPath("ollama")
-	status := ollamaStatus{Installed: lookupErr == nil, BaseURL: "http://127.0.0.1:11434", Models: []ollamaModel{}}
+	status := ollamaStatus{Installed: lookupErr == nil, BaseURL: ollamaServerURL(), Models: []ollamaModel{}}
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, status.BaseURL+"/api/tags", nil)
@@ -494,11 +516,33 @@ func detectOllama(parent context.Context) ollamaStatus {
 	return status
 }
 
+// ollamaServerURL 允许服务器通过环境变量连接另一个 Ollama 实例。
+// 默认仍是本机，不要求用户增加配置；路径统一在这里处理，避免 API 各处
+// 写死 127.0.0.1。
+func ollamaServerURL() string {
+	value := strings.TrimSpace(os.Getenv("EASYAGENT_OLLAMA_URL"))
+	if value == "" {
+		value = strings.TrimSuffix(store.DefaultOllamaBaseURL, "/v1")
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	return strings.TrimRight(value, "/")
+}
+
+func publicModelPresets() []builtinmodels.Preset {
+	result := builtinmodels.Catalog()
+	for index := range result {
+		result[index].Ready = strings.TrimSpace(os.Getenv(result[index].APIKeyEnv)) != ""
+	}
+	return result
+}
+
 // enrichOllamaContextWindow 从 /api/ps 读取当前真正加载的上下文窗口。
 // /api/show 的 context_length 是模型理论上限，不一定等于 Ollama 根据显存实际
 // 选择的窗口；用理论值做压缩阈值会在小窗口机器上过晚压缩。
 func enrichOllamaContextWindow(parent context.Context, value store.ModelSettings) store.ModelSettings {
-	if !strings.EqualFold(strings.TrimSpace(value.Provider), "ollama") || strings.TrimSpace(value.Model) == "" {
+	if !value.IsOllama() || strings.TrimSpace(value.Model) == "" {
 		return value
 	}
 	baseURL := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(value.BaseURL), "/"), "/v1")
@@ -557,7 +601,9 @@ func (server *Server) useOllama(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, "模型尚未下载")
 		return
 	}
-	model := store.ModelSettings{Provider: "ollama", Protocol: "chat_completions", BaseURL: "http://127.0.0.1:11434/v1", Model: input.Model, Thinking: "disabled", MaxOutputTokens: 1600, RequestTimeoutSeconds: 300, CompressionThresholdPercent: 75}
+	model := store.DefaultModelSettings()
+	model.BaseURL = strings.TrimRight(status.BaseURL, "/") + "/v1"
+	model.Model = input.Model
 	if err := server.store.SaveModel(model); err != nil {
 		writeError(response, 500, err.Error())
 		return
@@ -595,8 +641,8 @@ func validateModel(value store.ModelSettings) error {
 	if value.MaxOutputTokens <= 0 {
 		return errors.New("最大输出 Token 必须大于 0")
 	}
-	if value.RequestTimeoutSeconds < 30 || value.RequestTimeoutSeconds > 600 {
-		return errors.New("模型超时必须在 30 到 600 秒之间")
+	if value.RequestTimeoutSeconds < store.MinRequestTimeoutSeconds || value.RequestTimeoutSeconds > store.MaxRequestTimeoutSeconds {
+		return errors.New("模型超时必须在 " + strconv.Itoa(store.MinRequestTimeoutSeconds) + " 到 " + strconv.Itoa(store.MaxRequestTimeoutSeconds) + " 秒之间")
 	}
 	if value.ContextWindowTokens < 0 {
 		return errors.New("上下文窗口 Token 不能小于 0")
@@ -604,8 +650,8 @@ func validateModel(value store.ModelSettings) error {
 	if value.ContextWindowTokens > 0 && value.ContextWindowTokens <= value.MaxOutputTokens {
 		return errors.New("上下文窗口必须大于最大输出 Token")
 	}
-	if value.CompressionThresholdPercent < 50 || value.CompressionThresholdPercent > 90 {
-		return errors.New("自动压缩阈值必须在 50% 到 90% 之间")
+	if value.CompressionThresholdPercent < store.MinCompressionThresholdPercent || value.CompressionThresholdPercent > store.MaxCompressionThresholdPercent {
+		return errors.New("自动压缩阈值必须在 " + strconv.Itoa(store.MinCompressionThresholdPercent) + "% 到 " + strconv.Itoa(store.MaxCompressionThresholdPercent) + "% 之间")
 	}
 	return nil
 }

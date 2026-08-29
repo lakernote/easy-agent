@@ -15,6 +15,8 @@ type responsesRequest struct {
 	Instructions       string         `json:"instructions,omitempty"`
 	Input              []any          `json:"input"`
 	Tools              []functionTool `json:"tools,omitempty"`
+	ToolChoice         any            `json:"tool_choice,omitempty"`
+	PromptCacheKey     string         `json:"prompt_cache_key,omitempty"`
 	Temperature        float64        `json:"temperature,omitempty"`
 	MaxOutputTokens    int            `json:"max_output_tokens,omitempty"`
 	PreviousResponseID string         `json:"previous_response_id,omitempty"`
@@ -59,6 +61,7 @@ func (client *Client) generateResponse(ctx context.Context, request core.Request
 	_, input := encodeResponsesInput(messages, false)
 	payload := responsesRequest{
 		Model: request.Model, Instructions: instructions, Input: input, Tools: toolSpecs(request.Tools),
+		ToolChoice: encodeResponsesToolChoice(request.ToolChoice), PromptCacheKey: request.PromptCacheKey,
 		Temperature: request.Temperature, MaxOutputTokens: request.MaxOutputTokens, PreviousResponseID: request.PreviousResponseID,
 	}
 	if client.disableThinking {
@@ -67,6 +70,18 @@ func (client *Client) generateResponse(ctx context.Context, request core.Request
 		payload.Reasoning = map[string]any{"effort": request.ReasoningEffort}
 	}
 	return client.post(ctx, "/responses", payload, string(Responses), decodeResponsesResponse)
+}
+
+func encodeResponsesToolChoice(choice core.ToolChoice) any {
+	if choice.Name != "" {
+		return map[string]string{"type": "function", "name": choice.Name}
+	}
+	switch choice.Mode {
+	case core.ToolChoiceAuto, core.ToolChoiceNone, core.ToolChoiceRequired:
+		return choice.Mode
+	default:
+		return nil
+	}
 }
 
 func encodeResponsesInput(messages []core.Message, includeSystem bool) (string, []any) {

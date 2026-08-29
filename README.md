@@ -16,6 +16,7 @@ EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以
 
 - **安装简单**：发布包只有一个 Go 二进制，页面已经嵌入其中；运行数据保存到一个 SQLite 文件。
 - **模型自由**：支持 OpenAI Chat Completions、OpenAI Responses 以及兼容接口，可连接 OpenAI、DeepSeek、Ollama 等模型服务。
+- **模型自主决策**：使用原生 Function Calling 和 `tool_choice=auto`，不通过关键词替模型选择工具。
 - **能力可扩展**：高频能力做成内置 Tool，任务方法写成 Skill，外部系统通过 MCP 接入。
 - **过程可解释**：每次模型和工具调用都能查看输入输出、Token、缓存、耗时与错误。
 - **保持轻量**：只有一个 Agent 循环，不引入 Graph、多 Agent 编排和复杂中间件。
@@ -42,6 +43,7 @@ EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以
 - 页面创建、编辑、启停 Skill；按需加载正文，减少无效 Token。
 - 接入 STDIO / HTTP MCP，支持 Bearer Token、用户名密码、Header 和环境变量。
 - 完整 Agent Trace：模型和工具输入输出、Token、缓存命中、耗时与错误。
+- 固定核心 Prompt 与 Tool 顺序；OpenAI 使用稳定缓存键，缓存命中率以模型服务真实上报为准。
 - 长会话自动生成上下文检查点；SQLite 始终保留全部原始消息。
 - 单机任务排队、主动停止和 SQLite 持久化。
 
@@ -76,8 +78,9 @@ docker run --rm -p 8080:8080 -v easyagent-data:/data easyagent
 打开「模型与工具」：
 
 1. 使用 Ollama 时，先启动 Ollama 并下载模型，然后在页面点击「使用」。
-2. 使用云模型时，填写 Provider、Base URL、模型名、协议、API Key 和请求超时。
+2. 使用云模型时，可以先点 OpenRouter、Gemini 或 Groq 免费模板，再填写 API Key；也可以完全自定义兼容接口。
 3. API Key 可以直接保存到本机 SQLite，也可以填写环境变量名。
+4. 保存前点击「测试当前模型」；EasyAgent 会真实验证原生 Function Calling、工具结果回传和最终回答，而不只是检查端口是否连通。
 
 Ollama 示例：
 
@@ -85,6 +88,20 @@ Ollama 示例：
 ollama serve
 ollama pull qwen3:8b
 ```
+
+Ollama 不需要 API Key，也是唯一无需注册即可完整测试 Tool Calling 的方案。若 Ollama 不在本机，可在启动 EasyAgent 前设置：
+
+```bash
+export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
+```
+
+页面内置的云端免费模板会随版本集中维护：
+
+- OpenRouter Free Router：自动选择适合本轮工具能力的免费模型；需 `OPENROUTER_API_KEY`。
+- Gemini 2.5 Flash-Lite：Google 免费层；需 `GEMINI_API_KEY`。
+- Groq GPT-OSS 20B：Groq 免费开发额度；需 `GROQ_API_KEY`。
+
+免费额度、速率限制和地区可用性由厂商决定，可能变化。EasyAgent 不内置或共享第三方密钥。
 
 ## 扩展能力
 

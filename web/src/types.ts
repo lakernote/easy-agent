@@ -95,6 +95,30 @@ export type ModelSettings = {
   secretConfigured?: boolean
 }
 
+export type ModelPreset = {
+  id: string
+  name: string
+  description: string
+  provider: string
+  protocol: 'chat_completions' | 'responses'
+  baseUrl: string
+  model: string
+  apiKeyEnv: string
+  thinking: string
+  free: boolean
+  ready: boolean
+}
+
+export type ModelRules = {
+  defaultMaxOutputTokens: number
+  defaultRequestTimeoutSeconds: number
+  minRequestTimeoutSeconds: number
+  maxRequestTimeoutSeconds: number
+  defaultCompressionThresholdPercent: number
+  minCompressionThresholdPercent: number
+  maxCompressionThresholdPercent: number
+}
+
 export type Skill = {
   name: string
   description: string
@@ -156,6 +180,8 @@ export type OllamaStatus = {
 export type Bootstrap = {
   sessions: Session[]
   model: ModelSettings
+  modelPresets: ModelPreset[]
+  modelRules: ModelRules
   skills: Skill[]
   builtinTools: { name: string; description: string; source: string }[]
   mcpPresets: MCPPreset[]

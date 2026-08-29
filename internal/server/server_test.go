@@ -347,48 +347,29 @@ func TestSummaryTruncationKeepsUTF8Valid(t *testing.T) {
 	}
 }
 
-func TestOllamaFocusesOneRelevantTool(t *testing.T) {
-	tools := []agent.Tool{
-		{Spec: agent.ToolSpec{Name: "current_time"}},
-		{Spec: agent.ToolSpec{Name: "weather"}},
-		{Spec: agent.ToolSpec{Name: "calculate"}},
-		{Spec: agent.ToolSpec{Name: "web_search"}},
-		{Spec: agent.ToolSpec{Name: "shell"}},
-		{Spec: agent.ToolSpec{Name: "load_skill"}},
+func TestPromptCacheKeyOnlyTargetsOpenAI(t *testing.T) {
+	if key := promptCacheKey(store.ModelSettings{Provider: "custom", BaseURL: "https://api.openai.com/v1"}); key != "easyagent-core-v1" {
+		t.Fatalf("OpenAI 应使用稳定缓存键: %q", key)
 	}
-	apiTools := focusOllamaTools("ollama", "设计一个 REST API", tools)
-	if len(apiTools) != 1 || apiTools[0].Spec.Name != "load_skill" {
-		t.Fatalf("API 任务应只披露 Skill 工具: %+v", apiTools)
-	}
-	weatherTools := focusOllamaTools("ollama", "上海今天天气", tools)
-	if len(weatherTools) != 1 || weatherTools[0].Spec.Name != "weather" {
-		t.Fatalf("天气任务应只披露天气工具: %+v", weatherTools)
-	}
-	mathTools := focusOllamaTools("ollama", "8+8-30*1 等于多少", tools)
-	if len(mathTools) != 1 || mathTools[0].Spec.Name != "calculate" {
-		t.Fatalf("直接输入算式时应披露计算工具: %+v", mathTools)
-	}
-	githubTools := focusOllamaTools("ollama", "查看 GitHub 仓库 star", tools)
-	if len(githubTools) != 2 || githubTools[0].Spec.Name != "web_search" || githubTools[1].Spec.Name != "shell" {
-		t.Fatalf("GitHub 任务应披露发现和读取工具: %+v", githubTools)
-	}
-	if cloudTools := focusOllamaTools("openai", "设计 REST API", tools); len(cloudTools) != len(tools) {
-		t.Fatalf("云端模型不应被本地模型策略过滤: %+v", cloudTools)
-	}
-	if general := focusOllamaTools("ollama", "解释 Go interface", tools); len(general) != 0 {
-		t.Fatalf("稳定知识不应携带无关工具 Schema: %+v", general)
+	if key := promptCacheKey(store.ModelSettings{Provider: "openai", BaseURL: "https://compatible.example.com/v1"}); key != "" {
+		t.Fatalf("兼容 Provider 不应收到它可能不支持的缓存字段: %q", key)
 	}
 }
 
-func TestRecentUserIntentKeepsEntityFromPreviousTurn(t *testing.T) {
-	messages := []store.Message{
-		{Role: "user", Content: "查看 easypostman 在 GitHub 上的 star"},
-		{Role: "assistant", Content: "第一次查询失败"},
-		{Role: "user", Content: "请换个方法重新查询"},
+func TestModelSecretIsOnlyKeptForSameEndpoint(t *testing.T) {
+	current := store.ModelSettings{Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "secret"}
+	if !sameModelEndpoint(store.ModelSettings{Provider: "OpenAI", BaseURL: "https://api.openai.com/v1/"}, current) {
+		t.Fatal("同一模型端点应允许保留已有密钥")
 	}
-	intent := recentUserIntent(messages)
-	if !strings.Contains(intent, "GitHub") || !strings.Contains(intent, "重新查询") {
-		t.Fatalf("最近用户意图丢失跨轮实体: %q", intent)
+	if sameModelEndpoint(store.ModelSettings{Provider: "openrouter", BaseURL: "https://openrouter.ai/api/v1"}, current) {
+		t.Fatal("切换模型服务时不能继承旧密钥")
+	}
+}
+
+func TestOllamaURLCanBeConfigured(t *testing.T) {
+	t.Setenv("EASYAGENT_OLLAMA_URL", "models.internal:11434/")
+	if value := ollamaServerURL(); value != "http://models.internal:11434" {
+		t.Fatalf("Ollama 地址没有正确归一化: %q", value)
 	}
 }
 

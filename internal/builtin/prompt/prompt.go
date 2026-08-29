@@ -37,10 +37,9 @@ type MCPMeta struct {
 }
 
 type Context struct {
-	Now              time.Time
-	WorkingDirectory string
-	Skills           []SkillMeta
-	MCPs             []MCPMeta
+	Now    time.Time
+	Skills []SkillMeta
+	MCPs   []MCPMeta
 }
 
 // Render 生成一轮会话使用的 System Prompt。日期、星期和时区是稳定运行时事实；
@@ -53,10 +52,6 @@ func Render(context Context) string {
 	zone, offset := now.Zone()
 	runtime := fmt.Sprintf("当前日期：%s；星期：%s；时区：%s（UTC%+03d:%02d）。精确当前时间请调用 current_time。",
 		now.Format("2006-01-02"), weekday(now.Weekday()), zone, offset/3600, abs(offset%3600)/60)
-	if directory := strings.TrimSpace(context.WorkingDirectory); directory != "" {
-		runtime += " EasyAgent 服务器工作目录：" + directory + "。"
-	}
-
 	var skills strings.Builder
 	if len(context.Skills) == 0 {
 		skills.WriteString("- 无")

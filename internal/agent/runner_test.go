@@ -41,12 +41,18 @@ func TestRunnerFeedsToolResultBackAsToolMessage(t *testing.T) {
 	if second.PreviousResponseID != "resp-1" || len(second.NewMessages) != 1 || second.NewMessages[0].Role != RoleTool || second.NewMessages[0].ToolCallID != "call-1" {
 		t.Fatalf("tool result was not preserved: %+v", second)
 	}
+	if requests[0].ToolChoice.Mode != ToolChoiceAuto || len(requests[0].Tools) != 1 {
+		t.Fatalf("普通轮次应把稳定工具集交给模型自主选择: %+v", requests[0])
+	}
 }
 
 func TestRunnerDisablesToolsOnLastStep(t *testing.T) {
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
 		if len(request.Tools) != 0 {
 			t.Fatalf("last step should not expose tools: %+v", request.Tools)
+		}
+		if request.ToolChoice.Mode != ToolChoiceNone {
+			t.Fatalf("最后收敛轮应明确禁用工具: %+v", request.ToolChoice)
 		}
 		return Response{Message: Message{Content: "已收敛"}}, nil
 	})

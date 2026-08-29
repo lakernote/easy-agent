@@ -139,6 +139,38 @@ func TestChatCompletionsUsesNativeToolMessages(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsEncodesAutoToolChoiceAndCacheKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["tool_choice"] != "auto" || body["prompt_cache_key"] != "easyagent-core-v1" {
+			t.Fatalf("Chat 工具选择或缓存键错误: %+v", body)
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("Chat 应发送完整稳定工具集: %+v", body["tools"])
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "ok"}}},
+		})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Protocol: ChatCompletions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Generate(context.Background(), core.Request{
+		Model: "fixture", Messages: []core.Message{{Role: core.RoleUser, Content: "hi"}},
+		Tools:      []core.ToolSpec{{Name: "current_time", Parameters: map[string]any{"type": "object"}}},
+		ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAuto}, PromptCacheKey: "easyagent-core-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatCacheReportedDistinguishesMissingFromZero(t *testing.T) {
 	withZero, err := decodeChatResponse([]byte(`{
 		"choices":[{"message":{"role":"assistant","content":"ok"}}],
@@ -181,6 +213,9 @@ func TestResponsesUsesPreviousResponseAndFunctionOutput(t *testing.T) {
 		if body["instructions"] != "始终使用中文" {
 			t.Fatalf("Responses 续聊必须重新发送 instructions: %+v", body)
 		}
+		if body["tool_choice"] != "auto" || body["prompt_cache_key"] != "easyagent-core-v1" {
+			t.Fatalf("Responses 工具选择或缓存键错误: %+v", body)
+		}
 		item := body["input"].([]any)[0].(map[string]any)
 		if item["type"] != "function_call_output" || item["call_id"] != "call-1" {
 			t.Fatalf("wrong Responses tool output: %+v", item)
@@ -205,6 +240,7 @@ func TestResponsesUsesPreviousResponseAndFunctionOutput(t *testing.T) {
 		Model: "fixture", PreviousResponseID: "resp-1",
 		Messages:    []core.Message{{Role: core.RoleSystem, Content: "始终使用中文"}},
 		NewMessages: []core.Message{{Role: core.RoleTool, ToolCallID: "call-1", Content: "ok"}},
+		ToolChoice:  core.ToolChoice{Mode: core.ToolChoiceAuto}, PromptCacheKey: "easyagent-core-v1",
 	})
 	if err != nil || response.ID != "resp-2" || response.Message.Content != "完成" {
 		t.Fatalf("unexpected response: %+v, %v", response, err)

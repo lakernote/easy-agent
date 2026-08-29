@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -52,10 +51,11 @@ func (server *Server) queue(id, userMessage string, model store.ModelSettings) e
 			_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
 			return
 		}
-		ctx, cancel := context.WithTimeout(taskContext, 10*time.Minute)
-		defer cancel()
 		usage := store.Usage{}
-		if err := server.run(ctx, id, model, &usage); err != nil {
+		// 不再给整轮 Agent 叠加一个固定总超时。每次模型请求和工具调用都有
+		// 自己的超时，循环也有最大步数；用户还可以随时点击“停止”。固定总
+		// 超时会让合法的多步任务在最后阶段被无故中断。
+		if err := server.run(taskContext, id, model, &usage); err != nil {
 			_ = server.store.FailSession(id, err, usage, time.Now())
 		}
 	}()
@@ -142,11 +142,6 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if !loader.Empty() {
 		allTools = append(allTools, loader.Tool())
 	}
-	// 本地小模型在一次看到多个复杂 Tool Schema 时，可能只生成隐藏推理而没有
-	// Tool Call 或正文。Ollama 模式按当前任务聚焦到一个最相关工具；云端模型仍
-	// 保留完整工具集。它不是固定工作流，Runner 的 ReAct 循环完全不变。
-	allTools = focusOllamaTools(settings.Provider, recentUserIntent(session.Messages), allTools)
-
 	apiKey := settings.APIKey
 	if settings.APIKeyEnv != "" {
 		apiKey = os.Getenv(settings.APIKeyEnv)
@@ -159,9 +154,8 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
-	workingDirectory, _ := os.Getwd()
 	systemPrompt := prompt.Render(prompt.Context{
-		Now: time.Now(), WorkingDirectory: workingDirectory, Skills: skillMeta, MCPs: mcpMeta,
+		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta,
 	})
 	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, usage)
 	if err != nil {
@@ -197,13 +191,14 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	previousID := ""
 	// Ollama 的 Responses 兼容端点目前不支持 previous_response_id，
 	// 因此继续发送完整 input；真正支持服务端会话的 Provider 才续接 ID。
-	if !didCompact && settings.Protocol == "responses" && session.ProviderKey == providerKey && !strings.EqualFold(strings.TrimSpace(settings.Provider), "ollama") {
+	if !didCompact && settings.Protocol == "responses" && session.ProviderKey == providerKey && !settings.IsOllama() {
 		previousID = session.ResponseID
 	}
 	newMessages := []agent.Message{coreMessages[len(coreMessages)-1]}
 	result, err := runner.Run(ctx, agent.RunRequest{
 		Messages: coreMessages, NewMessages: newMessages, PreviousResponseID: previousID,
-		OnTextDelta: func(delta string) { server.appendTaskPartial(id, delta) },
+		PromptCacheKey: promptCacheKey(settings),
+		OnTextDelta:    func(delta string) { server.appendTaskPartial(id, delta) },
 	})
 	if err != nil {
 		return err
@@ -214,6 +209,15 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 		}
 	}
 	return server.store.FinishSession(id, result.ResponseID, providerKey, *usage, time.Now())
+}
+
+// promptCacheKey 仅发送给已知支持该字段的 OpenAI 服务。缓存键跨会话稳定，
+// 真正是否命中仍由请求前缀决定，并以 Provider 返回的 cached_tokens 为准。
+func promptCacheKey(settings store.ModelSettings) string {
+	if settings.IsOfficialOpenAI() {
+		return "easyagent-core-v1"
+	}
+	return ""
 }
 
 func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
@@ -360,23 +364,6 @@ func makeTitle(message string) string {
 	return string(runes[:36]) + "…"
 }
 
-// recentUserIntent 为工具路由保留最近三条用户消息。很多追问只写“重新查一下”或
-// “换个方法”，单看最后一句会丢掉上一轮的 GitHub、天气等实体，导致该披露的工具
-// 被过滤掉。这里只影响工具选择，不改写真正发送给模型的聊天历史。
-func recentUserIntent(messages []store.Message) string {
-	const maxUserMessages = 3
-	parts := make([]string, 0, maxUserMessages)
-	for index := len(messages) - 1; index >= 0 && len(parts) < maxUserMessages; index-- {
-		if messages[index].Role == string(agent.RoleUser) {
-			parts = append(parts, messages[index].Content)
-		}
-	}
-	for left, right := 0, len(parts)-1; left < right; left, right = left+1, right-1 {
-		parts[left], parts[right] = parts[right], parts[left]
-	}
-	return strings.Join(parts, "\n")
-}
-
 // expandContinuation 只改变本轮发给模型的短指令，不修改 SQLite 中的用户原话。
 // 小模型容易把“继续”当成缺少目标；显式指出它引用紧邻历史，可稳定多轮体验。
 func expandContinuation(role agent.Role, content string) string {
@@ -390,71 +377,4 @@ func expandContinuation(role agent.Role, content string) string {
 	default:
 		return content
 	}
-}
-
-// focusOllamaTools 是小模型的工具渐进披露：根据明确意图只暴露一个候选工具，
-// 降低 Schema Token 和错误调用。用户直接写工具名时始终优先遵从。
-func focusOllamaTools(provider, task string, tools []agent.Tool) []agent.Tool {
-	if !strings.EqualFold(strings.TrimSpace(provider), "ollama") || len(tools) <= 1 {
-		return tools
-	}
-	lower := strings.ToLower(task)
-	byName := make(map[string]agent.Tool, len(tools))
-	for _, tool := range tools {
-		byName[tool.Spec.Name] = tool
-		if strings.Contains(lower, strings.ToLower(tool.Spec.Name)) {
-			return []agent.Tool{tool}
-		}
-	}
-	selectTool := func(name string) []agent.Tool {
-		if tool, ok := byName[name]; ok {
-			return []agent.Tool{tool}
-		}
-		return nil
-	}
-	selectTools := func(names ...string) []agent.Tool {
-		selected := make([]agent.Tool, 0, len(names))
-		for _, name := range names {
-			if tool, ok := byName[name]; ok {
-				selected = append(selected, tool)
-			}
-		}
-		return selected
-	}
-	containsAny := func(values ...string) bool {
-		for _, value := range values {
-			if strings.Contains(lower, value) {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case containsAny("天气", "weather", "气温", "温度"):
-		return selectTool("weather")
-	case containsAny("几点", "星期几", "今天几号", "当前时间", "current time", "what time", "date today"):
-		return selectTool("current_time")
-	case looksLikeMathExpression(lower) || containsAny("计算", "算一下", "calculate", "sqrt(", "sin(", "cos("):
-		return selectTool("calculate")
-	case containsAny("mcp", "github", "gitlab", "sentry"):
-		if selected := selectTool("load_mcp"); len(selected) > 0 {
-			return selected
-		}
-		return selectTools("web_search", "shell")
-	case containsAny("rest api", "http api", "接口设计", "api 设计"):
-		return selectTool("load_skill")
-	case containsAny("最新资料", "官方文档", "查一下", "调研"):
-		return selectTools("web_search", "load_skill")
-	case containsAny("shell", "命令", "执行", "安装", "编译", "运行测试", "读取文件", "目录", "仓库", "代码"):
-		return selectTool("shell")
-	default:
-		// 普通知识、解释和写作不需要工具；不暴露无关 Schema 也能减少 Token。
-		return nil
-	}
-}
-
-var arithmeticExpressionPattern = regexp.MustCompile(`(?:^|[^[:alnum:]_.])[-+]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)\s*[+*/%×÷-]\s*[-+]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)`)
-
-func looksLikeMathExpression(value string) bool {
-	return arithmeticExpressionPattern.MatchString(value)
 }

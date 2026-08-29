@@ -56,6 +56,21 @@ type Tool struct {
 	Run  func(context.Context, json.RawMessage) (string, error)
 }
 
+// ToolChoice 描述模型如何选择工具。默认运行使用 auto，让模型根据语义决定
+// 直接回答还是调用工具；none 用于最后收敛轮，required/name 留给确定性策略。
+// 不把协议 JSON 放进核心类型，因为 Chat Completions 与 Responses 的指定工具
+// 写法不同，具体编码由各自适配器完成。
+type ToolChoice struct {
+	Mode string
+	Name string
+}
+
+const (
+	ToolChoiceAuto     = "auto"
+	ToolChoiceNone     = "none"
+	ToolChoiceRequired = "required"
+)
+
 // Usage 统一不同模型协议的 Token 数据。CachedInputTokens 用于页面计算缓存率。
 type Usage struct {
 	InputTokens       int
@@ -89,6 +104,8 @@ type Request struct {
 	Messages           []Message
 	NewMessages        []Message
 	Tools              []ToolSpec
+	ToolChoice         ToolChoice
+	PromptCacheKey     string
 	Temperature        float64
 	MaxOutputTokens    int
 	ReasoningEffort    string
@@ -143,9 +160,12 @@ type RunRequest struct {
 	// PreviousResponseID 续接服务端上下文；首次运行可留空。
 	NewMessages        []Message
 	PreviousResponseID string
-	MaxSteps           int
-	ToolTimeout        time.Duration
-	OnTextDelta        func(string)
+	// PromptCacheKey 只是一致的 Provider 缓存路由键，不参与 Agent 决策。
+	// 不支持该字段的兼容 Provider 应由外层留空。
+	PromptCacheKey string
+	MaxSteps       int
+	ToolTimeout    time.Duration
+	OnTextDelta    func(string)
 }
 
 // RunResult 返回最终回答和可继续多轮会话的完整消息。

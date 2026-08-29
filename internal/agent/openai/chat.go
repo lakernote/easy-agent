@@ -20,6 +20,8 @@ type chatRequest struct {
 	Model           string         `json:"model"`
 	Messages        []chatMessage  `json:"messages"`
 	Tools           []chatTool     `json:"tools,omitempty"`
+	ToolChoice      any            `json:"tool_choice,omitempty"`
+	PromptCacheKey  string         `json:"prompt_cache_key,omitempty"`
 	Temperature     float64        `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
@@ -109,6 +111,7 @@ func (client *Client) generateChat(ctx context.Context, request core.Request) (c
 	payload := chatRequest{
 		Model: request.Model, Messages: encodeChatMessages(request.Messages), Temperature: request.Temperature,
 		MaxTokens: request.MaxOutputTokens, ReasoningEffort: request.ReasoningEffort,
+		ToolChoice: encodeChatToolChoice(request.ToolChoice), PromptCacheKey: request.PromptCacheKey,
 	}
 	for _, tool := range request.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: chatToolFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters}})
@@ -124,6 +127,18 @@ func (client *Client) generateChat(ctx context.Context, request core.Request) (c
 		return client.streamChat(ctx, payload, request.OnTextDelta)
 	}
 	return client.post(ctx, "/chat/completions", payload, string(ChatCompletions), decodeChatResponse)
+}
+
+func encodeChatToolChoice(choice core.ToolChoice) any {
+	if choice.Name != "" {
+		return map[string]any{"type": "function", "function": map[string]string{"name": choice.Name}}
+	}
+	switch choice.Mode {
+	case core.ToolChoiceAuto, core.ToolChoiceNone, core.ToolChoiceRequired:
+		return choice.Mode
+	default:
+		return nil
+	}
 }
 
 // streamChat 读取 OpenAI Chat Completions 标准 SSE。每个可见文本增量立即交给

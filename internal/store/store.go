@@ -128,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 		return err
 	}
 	if count == 0 {
-		return store.SaveModel(ModelSettings{Provider: "ollama", Protocol: "chat_completions", BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen3:8b", Thinking: "disabled", MaxOutputTokens: 1600, RequestTimeoutSeconds: 300, CompressionThresholdPercent: 75})
+		return store.SaveModel(DefaultModelSettings())
 	}
 	return nil
 }
@@ -144,13 +144,7 @@ func (store *Store) Model() (ModelSettings, error) {
 	if err := json.Unmarshal(data, &result); err != nil {
 		return ModelSettings{}, err
 	}
-	if result.CompressionThresholdPercent == 0 {
-		result.CompressionThresholdPercent = 75
-	}
-	if result.RequestTimeoutSeconds == 0 {
-		result.RequestTimeoutSeconds = 300
-	}
-	return result, nil
+	return result.WithDefaults(), nil
 }
 
 func (store *Store) SaveModel(value ModelSettings) error {

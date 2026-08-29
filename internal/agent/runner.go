@@ -115,12 +115,18 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			return RunResult{}, err
 		}
 		tools := runner.modelToolSpecs
+		toolChoice := ToolChoice{Mode: ToolChoiceNone}
+		if len(tools) > 0 {
+			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
+		}
 		if step == maxSteps {
 			tools = nil
+			toolChoice = ToolChoice{Mode: ToolChoiceNone}
 		}
 		runner.emit(Event{Kind: EventModelStart, Step: step, StartedAt: time.Now()})
 		request := Request{
 			Model: runner.ModelName, Messages: messages, NewMessages: pending, Tools: tools,
+			ToolChoice: toolChoice, PromptCacheKey: input.PromptCacheKey,
 			Temperature: runner.Temperature, MaxOutputTokens: runner.MaxOutputTokens,
 			ReasoningEffort: runner.ReasoningEffort, PreviousResponseID: previousResponseID,
 			OnTextDelta: input.OnTextDelta,

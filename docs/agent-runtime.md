@@ -23,6 +23,7 @@ internal/agent/
     └── responses.go         # Responses
 
 internal/builtin/
+├── models/                   # 可替换的免费模型配置模板
 ├── prompt/system.md         # 常规 Agent 的稳定基础 Prompt
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
@@ -71,7 +72,7 @@ Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量�
 
 Skill 使用渐进式加载：模型先看到元数据；任务相关时调用 `load_skill(name)` 读取全文。因此十个 Skill 不等于每一轮都把十份正文放进 Prompt。
 
-Ollama 本地小模型还会对 Tool Schema 做渐进披露：根据本轮明确意图只提供时间、天气、计算、Shell、Skill 或 MCP 中最相关的一项；普通问答不携带工具。云端模型仍收到完整启用工具集。该策略只缩小当轮候选集，不改变同一个 Runner 的循环，也不把任务写成固定工作流。
+内置 Tool 以固定顺序注册，每轮使用原生 `tool_choice=auto`，由模型根据任务语义决定直接回答还是调用工具。宿主只负责工具是否启用、参数校验、超时和执行，不再使用关键词替模型判断意图。固定工具前缀也更利于 Provider 的 Prompt Cache；Skill 正文和 MCP 真实工具仍按需加载，避免把大型动态能力集塞进每轮请求。
 
 `calculate` 使用 Go 标准库执行常见数学表达式，不要求服务器安装 Python。`shell` 使用服务器自带的 `/bin/sh`，支持工作目录与最长 300 秒超时；标准输出和错误输出分别限制为 64 KiB，并保留开头和结尾。任务取消时会终止整个命令进程组。命令、参数、退出码、输出与耗时都会进入 Agent Trace。
 
@@ -93,6 +94,12 @@ mcp__<server_id>__<remote_tool_name>
 
 单机默认只有一个执行槽。消息先进入 `queued`，拿到槽位后才进入 `running`；页面会分别展示这两个状态。用户停止任务时，Server 取消对应 `context.Context`，模型 HTTP 请求、内置 Tool 和 MCP Tool 会收到同一个取消信号，SQLite 保留 `canceled` 状态和已经发生的 Trace。
 
+整轮 Agent 不设置隐藏的固定总超时：每次模型请求使用页面配置的超时，每次 Tool 自己声明超时，Runner 还有最大循环步数，用户也能主动停止。这样长任务不会被一个与页面配置无关的总计时器提前杀掉。
+
+模型默认值和校验范围集中在 `internal/store/model.go`。免费模型端点与型号集中在 `internal/builtin/models`，它们只是帮助填表的可更新目录，不参与 Agent 的工具路由。切换 Provider 或 Base URL 时不会继承旧服务的 API Key。
+
+页面的“测试当前模型”会执行一次无副作用的两阶段诊断：要求模型返回原生 `tool_calls`，回传固定工具结果，再确认模型能读取结果并生成最终文本。把工具调用 JSON 写在普通回答里的模型会被明确判定为不适合，而不会显示成“连接成功”。
+
 ## Trace
 
 `Runner.Observer` 公开四种核心循环事件：
@@ -106,7 +113,7 @@ Server 另外记录 `compaction_start` 和 `compaction_end`，使独立的摘要
 
 应用层把真实模型请求、响应、工具参数、结果、错误、耗时和 Token 保存到 `ea_events`。页面默认显示汇总，展开事件后格式化 JSON。Trace 不依赖“根因”“处理人”或“修复”这些业务字段，所以能用于任意任务。
 
-缓存 Token 仅在 Provider 响应真实包含缓存字段时统计。已兼容 OpenAI `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens`、DeepSeek `prompt_cache_hit_tokens` 以及常见的 cache read/write 兼容字段。“未上报”与“已上报 0”是两种不同状态。
+缓存 Token 仅在 Provider 响应真实包含缓存字段时统计。已兼容 OpenAI `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens`、DeepSeek `prompt_cache_hit_tokens` 以及常见的 cache read/write 兼容字段。“未上报”与“已上报 0”是两种不同状态。OpenAI 请求使用稳定 `prompt_cache_key`；其他兼容服务不发送厂商专属字段。
 
 ## 为什么不用 Graph
 
