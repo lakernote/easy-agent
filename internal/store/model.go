@@ -158,7 +158,9 @@ type Usage struct {
 type Event struct {
 	ID               int64     `json:"id"`
 	Kind             string    `json:"kind"`
+	Turn             int       `json:"turn,omitempty"`
 	Step             int       `json:"step"`
+	Attempt          int       `json:"attempt,omitempty"`
 	Name             string    `json:"name,omitempty"`
 	Status           string    `json:"status"`
 	Detail           string    `json:"detail,omitempty"`

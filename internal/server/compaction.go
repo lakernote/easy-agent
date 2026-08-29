@@ -28,7 +28,7 @@ type compactionPlan struct {
 
 // compactIfNeeded 在普通 Agent 循环之前创建检查点。它直接使用同一个模型，
 // 但不提供任何 Tool，避免摘要过程产生副作用。
-func (server *Server) compactIfNeeded(ctx context.Context, session *store.Session, settings store.ModelSettings, model agent.Model, systemPrompt string, tools []agent.Tool, usage *store.Usage) (bool, error) {
+func (server *Server) compactIfNeeded(ctx context.Context, session *store.Session, settings store.ModelSettings, model agent.Model, systemPrompt string, tools []agent.Tool, turn int, usage *store.Usage) (bool, error) {
 	plan := makeCompactionPlan(*session, settings, systemPrompt, tools)
 	if plan == nil {
 		return false, nil
@@ -36,7 +36,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 
 	startedAt := time.Now()
 	_ = server.store.AppendEvent(session.ID, store.Event{
-		Kind: "compaction_start", Status: "started", Name: settings.Model, CreatedAt: startedAt,
+		Kind: "compaction_start", Turn: turn, Status: "started", Name: settings.Model, CreatedAt: startedAt,
 		Detail: fmt.Sprintf("估算上下文 %d Token，达到自动压缩阈值 %d；准备压缩 %d 条较早消息", plan.EstimatedTokens, plan.ThresholdTokens, plan.SourceMessages),
 	})
 
@@ -52,7 +52,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	duration := time.Since(startedAt)
 	if err != nil {
 		_ = server.store.AppendEvent(session.ID, store.Event{
-			Kind: "compaction_end", Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
+			Kind: "compaction_end", Turn: turn, Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
 		})
 		return false, fmt.Errorf("上下文压缩失败: %w", err)
 	}
@@ -63,7 +63,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	}
 	if err != nil {
 		_ = server.store.AppendEvent(session.ID, store.Event{
-			Kind: "compaction_end", Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
+			Kind: "compaction_end", Turn: turn, Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
 		})
 		return false, err
 	}
@@ -79,7 +79,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	addStoreUsage(usage, currentUsage)
 	historyMode, requestMessages, toolDefinitions := modelRequestShape(response.Exchange)
 	_ = server.store.AppendEvent(session.ID, store.Event{
-		Kind: "compaction_end", Status: "success", Name: response.Exchange.Model,
+		Kind: "compaction_end", Turn: turn, Status: "success", Name: response.Exchange.Model,
 		Detail: fmt.Sprintf("检查点已保存；%d 条原始消息由摘要表示，最近消息继续原样保留", plan.CompactedMessages),
 		Input:  response.Exchange.Request, Output: response.Exchange.Response,
 		InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,

@@ -123,7 +123,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			tools = nil
 			toolChoice = ToolChoice{Mode: ToolChoiceNone}
 		}
-		runner.emit(Event{Kind: EventModelStart, Step: step, StartedAt: time.Now()})
+		attempt := 1
+		runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 		request := Request{
 			Model: runner.ModelName, Messages: messages, NewMessages: pending, Tools: tools,
 			ToolChoice: toolChoice, PromptCacheKey: input.PromptCacheKey,
@@ -135,18 +136,19 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
 			err = ErrEmptyModelResponse
 		}
-		runner.emit(Event{Kind: EventModelEnd, Step: step, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
+		runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理并返回空正文。
 		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
 		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
 			addUsage(&totalUsage, response.Usage)
 			request.OnTextDelta = nil
-			runner.emit(Event{Kind: EventModelStart, Step: step, StartedAt: time.Now()})
+			attempt++
+			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
 			if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
 				err = ErrEmptyModelResponse
 			}
-			runner.emit(Event{Kind: EventModelEnd, Step: step, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
+			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
 		if err != nil {
 			return RunResult{}, err

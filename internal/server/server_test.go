@@ -16,7 +16,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -25,6 +24,19 @@ func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	output := redactTraceAttachmentData(input)
 	if strings.Contains(output, "c2VjcmV0") || !strings.Contains(output, "image/png attachment data omitted") || !strings.Contains(output, `"text":"keep"`) {
 		t.Fatalf("Trace 附件脱敏错误: %s", output)
+	}
+}
+
+func TestUserTurnCountOnlyCountsUserMessages(t *testing.T) {
+	messages := []store.Message{
+		{Role: "user"},
+		{Role: "assistant"},
+		{Role: "assistant"},
+		{Role: "tool"},
+		{Role: "user"},
+	}
+	if turns := userTurnCount(messages); turns != 2 {
+		t.Fatalf("用户轮次只能由 user 消息计算: %d", turns)
 	}
 }
 
@@ -533,19 +545,6 @@ func TestOllamaURLCanBeConfigured(t *testing.T) {
 	t.Setenv("EASYAGENT_OLLAMA_URL", "models.internal:11434/")
 	if value := ollamaServerURL(); value != "http://models.internal:11434" {
 		t.Fatalf("Ollama 地址没有正确归一化: %q", value)
-	}
-}
-
-func TestShortContinuationIsExpandedOnlyForModel(t *testing.T) {
-	expanded := expandContinuation(agent.RoleUser, "继续")
-	if expanded == "继续" || !strings.Contains(expanded, "紧邻上一轮") || !strings.Contains(expanded, "不要询问") {
-		t.Fatalf("短续写指令没有得到明确上下文: %q", expanded)
-	}
-	if value := expandContinuation(agent.RoleUser, "继续修复登录问题"); value != "继续修复登录问题" {
-		t.Fatalf("有明确目标的消息不应被改写: %q", value)
-	}
-	if value := expandContinuation(agent.RoleAssistant, "继续"); value != "继续" {
-		t.Fatalf("只允许扩展用户消息: %q", value)
 	}
 }
 

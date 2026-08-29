@@ -97,6 +97,10 @@ func TestRunnerRetriesEmptyStreamWithoutStreaming(t *testing.T) {
 	if calls != 2 || len(events) != 4 || events[1].Err == nil || events[3].Err != nil {
 		t.Fatalf("两次真实模型调用必须分别进入 Trace: calls=%d events=%+v", calls, events)
 	}
+	if events[0].Step != 1 || events[1].Step != 1 || events[2].Step != 1 || events[3].Step != 1 ||
+		events[0].Attempt != 1 || events[1].Attempt != 1 || events[2].Attempt != 2 || events[3].Attempt != 2 {
+		t.Fatalf("协议重试应保留同一 Agent Step，并增加 Attempt: %+v", events)
+	}
 }
 
 func TestRunnerMarksEmptyNonStreamingResponseAsError(t *testing.T) {

@@ -154,8 +154,11 @@ const (
 
 // Event 只包含可审计的操作信息，不包含模型的私有思维过程。
 type Event struct {
-	Kind      EventKind
-	Step      int
+	Kind EventKind
+	Step int
+	// Attempt 是同一个 Agent Step 内实际发出的模型请求次数。正常为 1；
+	// 只有协议降级或瞬时重试才会增加，不能把它误算成新的推理步骤。
+	Attempt   int
 	ToolCall  *ToolCall
 	Output    string
 	Err       error

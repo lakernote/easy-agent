@@ -118,6 +118,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
+	turn := userTurnCount(session.Messages)
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
 		return err
@@ -157,7 +158,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	systemPrompt := prompt.Render(prompt.Context{
 		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta,
 	})
-	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, usage)
+	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, turn, usage)
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	}
 	loader.SetRegister(runner.AddTools)
 	runner.MaxOutputTokens = settings.MaxOutputTokens
-	runner.Observe = server.observer(id, usage)
+	runner.Observe = server.observer(id, turn, usage)
 
 	coreMessages := []agent.Message{{Role: agent.RoleSystem, Content: systemPrompt}}
 	var compactedThrough int64
@@ -181,10 +182,6 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 			continue
 		}
 		coreMessages = append(coreMessages, toCoreMessage(message))
-	}
-	if len(coreMessages) > 0 {
-		last := &coreMessages[len(coreMessages)-1]
-		last.Content = expandContinuation(last.Role, last.Content)
 	}
 	initialCount := len(coreMessages)
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
@@ -220,9 +217,9 @@ func promptCacheKey(settings store.ModelSettings) string {
 	return ""
 }
 
-func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
+func (server *Server) observer(id string, turn int, usage *store.Usage) agent.Observer {
 	return func(event agent.Event) {
-		value := store.Event{Kind: string(event.Kind), Step: event.Step, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
+		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
 		if event.ToolCall != nil {
 			value.Name = event.ToolCall.Name
 			value.Input = string(event.ToolCall.Arguments)
@@ -267,6 +264,18 @@ func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
 		value.Output = redactTraceAttachmentData(value.Output)
 		_ = server.store.AppendEvent(id, value)
 	}
+}
+
+// userTurnCount 只按已持久化的 user 消息计算轮次。一次 Turn 可以包含多条
+// assistant/tool 消息，因此不能用消息总数除以二推导。
+func userTurnCount(messages []store.Message) int {
+	turns := 0
+	for _, message := range messages {
+		if message.Role == string(agent.RoleUser) {
+			turns++
+		}
+	}
+	return turns
 }
 
 // redactTraceAttachmentData 保留多模态请求结构和 MIME 类型，但不把图片/PDF
@@ -411,19 +420,4 @@ func makeTitle(message string) string {
 	}
 	runes := []rune(message)
 	return string(runes[:36]) + "…"
-}
-
-// expandContinuation 只改变本轮发给模型的短指令，不修改 SQLite 中的用户原话。
-// 小模型容易把“继续”当成缺少目标；显式指出它引用紧邻历史，可稳定多轮体验。
-func expandContinuation(role agent.Role, content string) string {
-	if role != agent.RoleUser {
-		return content
-	}
-	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(content)), "。.!！ ")
-	switch normalized {
-	case "继续", "继续吧", "接着", "接着做", "go on", "continue":
-		return content + "\n\n<continuation_instruction>这是对紧邻上一轮任务的延续。不要询问用户要继续什么，也不要重复已有内容；直接在上一条回答基础上补充下一层最有价值的具体内容。</continuation_instruction>"
-	default:
-		return content
-	}
 }

@@ -43,7 +43,9 @@ export type Usage = {
 export type TraceEvent = {
   id: number
   kind: string
+  turn?: number
   step: number
+  attempt?: number
   name?: string
   status: string
   detail?: string

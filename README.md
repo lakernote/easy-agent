@@ -1,63 +1,36 @@
 # EasyAgent
 
-> 一个核心循环，一个 Go 二进制，把模型、Tool、Skill 和 MCP 组合成部署在自己服务器上的轻量通用 Agent。
-
-EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以直接对话，也能按需调用工具、读取 Skill、连接 MCP；不要求先搭建复杂工作流，不依赖外部数据库。
-
-它只有一个核心循环：
+一个可部署在个人电脑或 Linux 服务器上的轻量通用 Agent：一个 Go 二进制、一个 SQLite 数据库、一个 Web 页面。
 
 ```text
 用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答
 ```
 
-不需要先创建项目，也不引入 Graph、多 Agent 编排或工作流 DSL。
+它不要求创建项目，也不引入 Graph、多 Agent 编排或工作流 DSL。模型通过原生 Function Calling 自己决定是否调用工具，Go 代码不根据用户关键词做业务路由。
 
-## 为什么做 EasyAgent
+## 能做什么
 
-- **安装简单**：发布包只有一个 Go 二进制，页面已经嵌入其中；运行数据保存到一个 SQLite 文件。
-- **模型自由**：支持 OpenAI Chat Completions、OpenAI Responses 以及兼容接口，可连接 OpenAI、DeepSeek、Ollama 等模型服务。
-- **模型自主决策**：使用原生 Function Calling 和 `tool_choice=auto`，不通过关键词替模型选择工具。
-- **能力可扩展**：高频能力做成内置 Tool，任务方法写成 Skill，外部系统通过 MCP 接入。
-- **过程可解释**：每次模型和工具调用都能查看输入输出、Token、缓存、耗时与错误。
-- **保持轻量**：只有一个 Agent 循环，不引入 Graph、多 Agent 编排和复杂中间件。
+- 多轮对话，支持流式显示、图片、文本、代码和 PDF。
+- 连接 OpenAI、DeepSeek、Ollama 以及 OpenAI 兼容模型服务。
+- 内置文件读写搜索、Shell、时间、天气、计算和 Skill 加载工具。
+- 在页面管理 Skill 与 MCP，任务需要时才加载。
+- 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
+- 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
 
-## 界面预览
-
-### 多轮对话与工具调用
-
-![EasyAgent 多轮对话与工具调用](docs/images/conversation.png)
-
-### 按需加载和编辑 Skill
-
-![EasyAgent Skill 管理](docs/images/skills.png)
-
-### 配置模型、内置工具与 MCP
-
-![EasyAgent 模型与工具配置](docs/images/model-and-tools.png)
-
-## 功能
-
-- 多轮对话；Chat Completions 支持流式显示，也支持 Responses 及兼容接口。
-- 消息支持拖拽、粘贴或选择图片、UTF-8 文本/代码和 PDF；附件会随完整会话保存并可回看。
-- 可使用 OpenAI、DeepSeek、Ollama 或其他兼容模型服务。
-- 内置 `read / grep / find / ls / edit / write` 文件工具，以及时间、天气、计算、Shell 和 Skill 加载工具。
-- 页面创建、编辑、启停 Skill；按需加载正文，减少无效 Token。
-- 接入 STDIO / HTTP MCP，支持 Bearer Token、用户名密码、Header 和环境变量。
-- 完整 Agent Trace：模型和工具输入输出、Token、缓存命中、耗时与错误。
-- 固定核心 Prompt 与 Tool 顺序；OpenAI 使用稳定缓存键，缓存命中率以模型服务真实上报为准。
-- 长会话自动生成上下文检查点；SQLite 始终保留全部原始消息。
-- 单机任务排队、主动停止和 SQLite 持久化。
+![EasyAgent 对话界面](docs/images/conversation.png)
 
 ## 快速开始
 
-最简单的方式是从 GitHub Releases 下载对应平台的单文件，Linux 服务器不需要安装 Go、Node.js、Python、Git 或 SQLite：
+从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载对应平台的单文件：
 
 ```bash
 chmod +x easyagent
 ./easyagent
 ```
 
-从源码构建才需要 Go 1.26.7+ 和 Node.js 22+：
+打开 <http://127.0.0.1:8080>，进入「模型与工具」配置模型后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
+
+从源码构建：
 
 ```bash
 git clone https://github.com/lakernote/easy-agent.git
@@ -66,94 +39,30 @@ make build
 ./bin/easyagent
 ```
 
-打开 <http://127.0.0.1:8080>。
-
-默认数据库为 `./data/easyagent.db`。修改监听地址或数据库位置：
+修改监听地址或数据库位置：
 
 ```bash
-./bin/easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
+./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
 ```
 
-### Docker
+## 三种扩展
 
-```bash
-docker build -t easyagent .
-docker run --rm -p 8080:8080 -v easyagent-data:/data easyagent
-```
+| 能力 | 适合放什么 | 如何使用 |
+| --- | --- | --- |
+| Tool | 高频、确定性的本机操作 | 编译进 Go 二进制，模型直接调用 |
+| Skill | 某类任务的做法和项目经验 | 页面编辑，模型按需读取 |
+| MCP | GitHub、浏览器、数据库等外部系统 | 页面配置，模型按需连接 |
 
-## 配置模型
+## 文档
 
-打开「模型与工具」：
-
-1. 使用 Ollama 时，先启动 Ollama 并下载模型，然后在页面点击「使用」。
-2. 使用云模型时，可以先点 Gemini、Groq、Cerebras 或 OpenRouter 免费额度模板，再填写 API Key；也可以完全自定义兼容接口。
-3. API Key 可以直接保存到本机 SQLite，也可以填写环境变量名。
-4. 保存前点击「测试当前模型」；EasyAgent 会真实验证原生 Function Calling、工具结果回传和最终回答，而不只是检查端口是否连通。
-
-Ollama 示例：
-
-```bash
-ollama serve
-ollama pull qwen3:8b
-```
-
-Ollama 不需要 API Key，也是唯一无需注册即可完整测试 Tool Calling 的方案。若 Ollama 不在本机，可在启动 EasyAgent 前设置：
-
-```bash
-export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
-```
-
-页面内置的云端免费模板会随版本集中维护：
-
-- Gemini 2.5 Flash-Lite：免费云模型首选；需 `GEMINI_API_KEY`。
-- Groq GPT-OSS 20B：Groq 免费开发额度；需 `GROQ_API_KEY`。
-- Cerebras GPT-OSS 120B：Cerebras 高速免费额度；需 `CEREBRAS_API_KEY`。
-- OpenRouter Free Router：随机选择满足能力的免费模型，标记为实验性；需 `OPENROUTER_API_KEY`。
-
-免费额度、速率限制和地区可用性由厂商决定，可能变化。EasyAgent 不内置或共享第三方密钥。
-
-### 使用附件
-
-对话输入框可以直接拖入、粘贴或选择附件。每条消息最多 5 个文件，单文件最大 5 MiB、合计最大 10 MiB：
-
-- 文本、日志和代码会作为可读上下文发送，普通文本模型即可处理；
-- 图片和 PDF 会按 OpenAI Chat Completions / Responses 的多模态内容块发送，需要当前模型和兼容服务支持对应输入；
-- 原始附件保存在本机 SQLite，Agent Trace 只记录文件元数据，不保存或展示 Base64 正文。
-
-## 扩展能力
-
-- **Tool**：编译进 Go 二进制的高频、确定性能力。
-- **Skill**：可在页面编辑的任务方法，Agent 需要时通过 `load_skill` 读取。
-- **MCP**：外部系统能力，启用前会验证认证、连接和工具列表，再按需加载。
-
-工作区文件读、搜、改不依赖外部命令；`read / grep / find / ls / edit / write` 直接编译进 Go 二进制。Filesystem MCP 只用于额外挂载目录，不是日常代码操作的前置依赖。
-
-服务器不需要安装 SQLite、Python 或 Git。但 `shell` 调用 Git、Python、Maven 等命令时，服务器仍需安装对应程序；Playwright、Filesystem 等 STDIO MCP 也需要各自的 Node.js 运行时。
-
-## 数据与安全
-
-- 默认只监听 `127.0.0.1`，当前没有登录、RBAC 或多租户隔离，请不要直接暴露到公网。
-- API Key、MCP 密钥、会话、附件和 Trace 保存在本机 SQLite；数据库尚未静态加密。
-- 文件工具限制在 EasyAgent 工作区内，文件工具自身返回相对路径；Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，Trace 会保留它们真实返回的绝对路径，它们不是安全沙箱。
-- 生产部署建议使用低权限账号、限制数据库文件权限，并优先通过环境变量提供密钥。
-
-更多说明见 [Security Policy](SECURITY.md)。
-
-## 开发
-
-```bash
-make test          # 前端构建、依赖校验、vet、race test
-make build         # 当前平台单二进制
-make build-linux   # Linux amd64；LINUX_ARCH=arm64 可切换架构
-```
-
-代码结构与 Agent 循环见 [Agent 运行原理](docs/agent-runtime.md)。
+- [设计说明：场景、术语、边界和伪代码](docs/design.md)
+- [运行时细节：消息、上下文、Tool、Skill、MCP 和 Trace](docs/agent-runtime.md)
+- [安全说明](SECURITY.md)
+- [参与贡献](CONTRIBUTING.md)
 
 ## 当前边界
 
-- 单机、单进程、SQLite，默认同时运行一个模型任务。
-- Responses 暂未流式显示；暂无登录系统、Webhook、Cron、项目工作区和自动创建 PR。
-- 模型能力取决于所选模型、上下文、Skill 和工具质量。
+EasyAgent 目前是单机、单进程、SQLite 应用，没有登录、RBAC 或多租户隔离，请勿直接暴露到公网。Agent 的效果取决于所选模型、上下文和可用能力。
 
 ## 许可证
 
