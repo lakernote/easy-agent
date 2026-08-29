@@ -44,6 +44,73 @@ func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	}
 }
 
+func TestShellKeepsRawPathForAgentAndRedactsTrace(t *testing.T) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	callCount := 0
+	modelServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		callCount++
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if callCount == 1 {
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"id": "shell-call", "model": "fixture",
+				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+					map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
+				}}}},
+			})
+			return
+		}
+		messages := body["messages"].([]any)
+		toolMessage := messages[len(messages)-1].(map[string]any)
+		toolOutput, _ := toolMessage["content"].(string)
+		if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, workingDirectory) || strings.Contains(toolOutput, "<workspace>") {
+			t.Fatalf("模型没有收到 Shell 原始路径: %+v", toolMessage)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"id": "shell-answer", "model": "fixture",
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "目录是 " + workingDirectory}}},
+		})
+	}))
+	defer modelServer.Close()
+
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+		t.Fatal(err)
+	}
+	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/v1/sessions", "application/json", strings.NewReader(`{"message":"执行 pwd 并原样回答"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var queued store.Session
+	if err := json.NewDecoder(response.Body).Decode(&queued); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitSession(t, database, queued.ID)
+	if finished.Status != "idle" || !strings.Contains(finished.Messages[len(finished.Messages)-1].Content, workingDirectory) {
+		t.Fatalf("Shell 原始路径任务没有完成: %+v", finished)
+	}
+	for _, event := range finished.Events {
+		if event.Kind == "tool_end" && (strings.Contains(event.Output, workingDirectory) || !strings.Contains(event.Output, "<workspace>")) {
+			t.Fatalf("Shell Trace 没有正确脱敏: %s", event.Output)
+		}
+	}
+}
+
 func TestAttachmentRejectsSpoofedImageMIME(t *testing.T) {
 	_, _, err := classifyAttachment("fake.png", "image/png", []byte("not an image"))
 	if err == nil || !strings.Contains(err.Error(), "不是有效的图片") {

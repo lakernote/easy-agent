@@ -128,15 +128,6 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		}
 	}
 
-	root, _ := os.Getwd()
-	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
-		root = resolved
-	}
-	displayDirectory := redactPath(directory, root)
-	redactOutput := func(value string) string {
-		value = strings.ReplaceAll(value, directory, displayDirectory)
-		return redactText(value, root)
-	}
 	result := struct {
 		OK               bool   `json:"ok"`
 		Command          string `json:"command"`
@@ -148,8 +139,8 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		Stderr           string `json:"stderr"`
 		Error            string `json:"error,omitempty"`
 	}{
-		OK: exitCode == 0 && !timedOut, Command: redactText(arguments.Command, root), WorkingDirectory: displayDirectory, ExitCode: exitCode,
-		TimedOut: timedOut, DurationMS: duration.Milliseconds(), Stdout: redactOutput(stdout.String()), Stderr: redactOutput(stderr.String()),
+		OK: exitCode == 0 && !timedOut, Command: arguments.Command, WorkingDirectory: directory, ExitCode: exitCode,
+		TimedOut: timedOut, DurationMS: duration.Milliseconds(), Stdout: stdout.String(), Stderr: stderr.String(),
 	}
 	if timedOut {
 		result.Error = fmt.Sprintf("Shell 运行超过 %d 秒，已终止", int(timeout/time.Second))
@@ -170,27 +161,6 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 		return string(encoded), errors.New(result.Error)
 	}
 	return string(encoded), nil
-}
-
-func redactPath(value, root string) string {
-	value, root = filepath.Clean(value), filepath.Clean(root)
-	if relative, err := filepath.Rel(root, value); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		if relative == "." {
-			return "<workspace>"
-		}
-		return "<workspace>/" + filepath.ToSlash(relative)
-	}
-	return "<external>/" + filepath.Base(value)
-}
-
-func redactText(value, root string) string {
-	if strings.TrimSpace(root) != "" {
-		value = strings.ReplaceAll(value, filepath.Clean(root), "<workspace>")
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		value = strings.ReplaceAll(value, filepath.Clean(home), "<home>")
-	}
-	return value
 }
 
 // outputCapture 保留输出的开头和结尾，避免某个失控命令耗尽服务器内存；

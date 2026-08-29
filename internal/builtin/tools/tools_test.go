@@ -58,13 +58,13 @@ func TestShellCapturesExitCodeAndDirectory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "退出码 7") {
 		t.Fatalf("非零退出码应该明确返回失败: %v", err)
 	}
-	for _, expected := range []string{`"ok": false`, `"exit_code": 7`, `"working_directory": "\u003cexternal\u003e/`, `"stderr": "problem"`, `"error": "Shell 命令执行失败，退出码 7"`} {
+	for _, expected := range []string{`"ok": false`, `"exit_code": 7`, `"stderr": "problem"`, `"error": "Shell 命令执行失败，退出码 7"`} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("Shell 结果缺少 %q: %s", expected, output)
 		}
 	}
-	if strings.Contains(output, filepath.Clean(directory)) {
-		t.Fatalf("Shell Trace 不应暴露绝对工作目录: %s", output)
+	if !strings.Contains(output, filepath.Clean(directory)) {
+		t.Fatalf("Shell 返回给 Agent 的结果应保留真实工作目录: %s", output)
 	}
 }
 
