@@ -1,9 +1,25 @@
 export type ToolCall = { id: string; name: string; arguments: string }
 
+export type Attachment = {
+  id: string
+  name: string
+  mimeType: string
+  kind: 'text' | 'image' | 'pdf'
+  size: number
+}
+
+export type AttachmentInput = {
+  name: string
+  mimeType: string
+  size: number
+  data: string
+}
+
 export type Message = {
   id: number
   role: 'user' | 'assistant' | 'tool' | 'system'
   content?: string
+  attachments: Attachment[]
   toolCalls: ToolCall[]
   toolCallId?: string
   name?: string

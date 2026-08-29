@@ -119,14 +119,26 @@ type ToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
+// Attachment 是一条用户消息携带的文件或图片。Data 只在 Agent 运行和附件
+// 下载接口内部使用，不进入会话 JSON，避免页面轮询时反复传输 Base64 数据。
+type Attachment struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MIMEType string `json:"mimeType"`
+	Kind     string `json:"kind"`
+	Size     int64  `json:"size"`
+	Data     []byte `json:"-"`
+}
+
 type Message struct {
-	ID         int64      `json:"id"`
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"toolCalls"`
-	ToolCallID string     `json:"toolCallId,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	ID          int64        `json:"id"`
+	Role        string       `json:"role"`
+	Content     string       `json:"content,omitempty"`
+	Attachments []Attachment `json:"attachments"`
+	ToolCalls   []ToolCall   `json:"toolCalls"`
+	ToolCallID  string       `json:"toolCallId,omitempty"`
+	Name        string       `json:"name,omitempty"`
+	CreatedAt   time.Time    `json:"createdAt"`
 }
 
 type Usage struct {

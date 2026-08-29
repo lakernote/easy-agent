@@ -63,6 +63,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/v1/health", server.health)
 	server.mux.HandleFunc("GET /api/v1/bootstrap", server.bootstrap)
 	server.mux.HandleFunc("GET /api/v1/sessions/{id}", server.getSession)
+	server.mux.HandleFunc("GET /api/v1/attachments/{id}", server.getAttachment)
 	server.mux.HandleFunc("POST /api/v1/sessions", server.createSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/messages", server.continueSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/cancel", server.cancelSession)
@@ -115,7 +116,8 @@ func (server *Server) health(response http.ResponseWriter, request *http.Request
 }
 
 func decodeJSON(response http.ResponseWriter, request *http.Request, value any) bool {
-	request.Body = http.MaxBytesReader(response, request.Body, 4*1024*1024)
+	// 附件使用 JSON Base64 传输；10 MiB 原始数据编码后约为 13.4 MiB。
+	request.Body = http.MaxBytesReader(response, request.Body, 16*1024*1024)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {

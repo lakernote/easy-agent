@@ -112,7 +112,8 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 }
 
 type messageRequest struct {
-	Message string `json:"message"`
+	Message     string              `json:"message"`
+	Attachments []attachmentRequest `json:"attachments"`
 }
 
 var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -123,8 +124,13 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		return
 	}
 	input.Message = strings.TrimSpace(input.Message)
-	if input.Message == "" {
-		writeError(response, http.StatusBadRequest, "请输入消息")
+	attachments, err := validateAttachments(input.Attachments)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Message == "" && len(attachments) == 0 {
+		writeError(response, http.StatusBadRequest, "请输入消息或添加附件")
 		return
 	}
 	model, err := server.store.Model()
@@ -133,11 +139,11 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		return
 	}
 	id := newID()
-	if _, err := server.store.CreateSession(id, makeTitle(input.Message), model.Model, time.Now()); err != nil {
+	if _, err := server.store.CreateSession(id, attachmentTitle(input.Message, attachments), model.Model, time.Now()); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := server.queue(id, input.Message, model); err != nil {
+	if err := server.queue(id, input.Message, attachments, model); err != nil {
 		_ = server.store.DeleteSession(id)
 		writeError(response, http.StatusConflict, err.Error())
 		return
@@ -154,8 +160,13 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		return
 	}
 	input.Message = strings.TrimSpace(input.Message)
-	if input.Message == "" {
-		writeError(response, http.StatusBadRequest, "请输入消息")
+	attachments, err := validateAttachments(input.Attachments)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Message == "" && len(attachments) == 0 {
+		writeError(response, http.StatusBadRequest, "请输入消息或添加附件")
 		return
 	}
 	model, err := server.store.Model()
@@ -172,7 +183,7 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		}
 		return
 	}
-	if err := server.queue(id, input.Message, model); err != nil {
+	if err := server.queue(id, input.Message, attachments, model); err != nil {
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}

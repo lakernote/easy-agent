@@ -21,14 +21,14 @@ import (
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
-func (server *Server) queue(id, userMessage string, model store.ModelSettings) error {
+func (server *Server) queue(id, userMessage string, attachments []store.Attachment, model store.ModelSettings) error {
 	if server.hasTask(id) {
 		return errors.New("上一条任务正在结束，请稍后再发送")
 	}
 	if err := server.store.QueueSession(id, model.Model, time.Now()); err != nil {
 		return err
 	}
-	if err := server.store.AppendMessage(id, store.Message{Role: "user", Content: userMessage, ToolCalls: []store.ToolCall{}, CreatedAt: time.Now()}); err != nil {
+	if err := server.store.AppendMessage(id, store.Message{Role: "user", Content: userMessage, Attachments: attachments, ToolCalls: []store.ToolCall{}, CreatedAt: time.Now()}); err != nil {
 		_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
 		return err
 	}
@@ -266,8 +266,51 @@ func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
 		value.Input = redactTracePaths(value.Input)
 		value.Output = redactTracePaths(value.Output)
 		value.Detail = redactTracePaths(value.Detail)
+		value.Input = redactTraceAttachmentData(value.Input)
+		value.Output = redactTraceAttachmentData(value.Output)
 		_ = server.store.AppendEvent(id, value)
 	}
+}
+
+// redactTraceAttachmentData 保留多模态请求结构和 MIME 类型，但不把图片/PDF
+// 的 Base64 原文塞进 Trace。这样页面仍可审计输入，同时不会生成数 MB 的事件。
+func redactTraceAttachmentData(value string) string {
+	if !strings.Contains(value, ";base64,") {
+		return value
+	}
+	var payload any
+	if json.Unmarshal([]byte(value), &payload) != nil {
+		return value
+	}
+	var sanitize func(any) any
+	sanitize = func(item any) any {
+		switch typed := item.(type) {
+		case string:
+			if strings.HasPrefix(typed, "data:") {
+				if marker := strings.Index(typed, ";base64,"); marker > len("data:") {
+					return fmt.Sprintf("<%s attachment data omitted>", typed[len("data:"):marker])
+				}
+			}
+			return typed
+		case []any:
+			for index := range typed {
+				typed[index] = sanitize(typed[index])
+			}
+			return typed
+		case map[string]any:
+			for key := range typed {
+				typed[key] = sanitize(typed[key])
+			}
+			return typed
+		default:
+			return item
+		}
+	}
+	encoded, err := json.Marshal(sanitize(payload))
+	if err != nil {
+		return value
+	}
+	return string(encoded)
 }
 
 func redactTracePaths(value string) string {
@@ -364,6 +407,9 @@ func decorateContext(session *store.Session, settings store.ModelSettings) {
 
 func toCoreMessage(value store.Message) agent.Message {
 	message := agent.Message{Role: agent.Role(value.Role), Content: value.Content, ToolCallID: value.ToolCallID, Name: value.Name}
+	for _, attachment := range value.Attachments {
+		message.Attachments = append(message.Attachments, agent.Attachment{Name: attachment.Name, MIMEType: attachment.MIMEType, Kind: attachment.Kind, Data: attachment.Data})
+	}
 	for _, call := range value.ToolCalls {
 		message.ToolCalls = append(message.ToolCalls, agent.ToolCall{ID: call.ID, Name: call.Name, Arguments: json.RawMessage(call.Arguments)})
 	}
@@ -371,7 +417,7 @@ func toCoreMessage(value store.Message) agent.Message {
 }
 
 func fromCoreMessage(value agent.Message) store.Message {
-	message := store.Message{Role: string(value.Role), Content: value.Content, ToolCallID: value.ToolCallID, Name: value.Name, ToolCalls: []store.ToolCall{}, CreatedAt: time.Now()}
+	message := store.Message{Role: string(value.Role), Content: value.Content, Attachments: []store.Attachment{}, ToolCallID: value.ToolCallID, Name: value.Name, ToolCalls: []store.ToolCall{}, CreatedAt: time.Now()}
 	for _, call := range value.ToolCalls {
 		message.ToolCalls = append(message.ToolCalls, store.ToolCall{ID: call.ID, Name: call.Name, Arguments: string(call.Arguments)})
 	}

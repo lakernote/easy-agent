@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,6 +33,90 @@ func TestTraceRedactsWorkspaceAndHomePaths(t *testing.T) {
 	output := redactTracePaths(input)
 	if strings.Contains(output, workingDirectory) || strings.Contains(output, home) || !strings.Contains(output, "<workspace>") || !strings.Contains(output, "<home>") {
 		t.Fatalf("Trace 路径脱敏错误: %s", output)
+	}
+}
+
+func TestTraceOmitsAttachmentBase64(t *testing.T) {
+	input := `{"image_url":{"url":"data:image/png;base64,c2VjcmV0"},"text":"keep"}`
+	output := redactTraceAttachmentData(input)
+	if strings.Contains(output, "c2VjcmV0") || !strings.Contains(output, "image/png attachment data omitted") || !strings.Contains(output, `"text":"keep"`) {
+		t.Fatalf("Trace 附件脱敏错误: %s", output)
+	}
+}
+
+func TestAttachmentRejectsSpoofedImageMIME(t *testing.T) {
+	_, _, err := classifyAttachment("fake.png", "image/png", []byte("not an image"))
+	if err == nil || !strings.Contains(err.Error(), "不是有效的图片") {
+		t.Fatalf("伪装图片应该被拒绝，实际错误: %v", err)
+	}
+}
+
+func TestMessageAttachmentsReachModelAndDownloadEndpoint(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		messages := body["messages"].([]any)
+		user := messages[len(messages)-1].(map[string]any)
+		encoded, _ := json.Marshal(user["content"])
+		if !strings.Contains(string(encoded), `"type":"image_url"`) || !strings.Contains(string(encoded), "error.log") || !strings.Contains(string(encoded), "stack trace") {
+			t.Fatalf("附件没有进入模型多模态消息: %s", encoded)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"id": "attachment-test", "model": "fixture",
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "已分析"}}},
+			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+		})
+	}))
+	defer modelServer.Close()
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+		t.Fatal(err)
+	}
+	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+
+	png := []byte("\x89PNG\r\n\x1a\n")
+	payload, _ := json.Marshal(map[string]any{"message": "找问题", "attachments": []any{
+		map[string]any{"name": "screen.png", "mimeType": "image/png", "size": len(png), "data": base64.StdEncoding.EncodeToString(png)},
+		map[string]any{"name": "error.log", "mimeType": "text/plain", "size": 11, "data": base64.StdEncoding.EncodeToString([]byte("stack trace"))},
+	}})
+	response, err := http.Post(httpServer.URL+"/api/v1/sessions", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("附件消息状态错误: %d", response.StatusCode)
+	}
+	var queued store.Session
+	if err := json.NewDecoder(response.Body).Decode(&queued); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitSession(t, database, queued.ID)
+	if finished.Status != "idle" || len(finished.Messages[0].Attachments) != 2 {
+		t.Fatalf("附件会话没有完成: %+v", finished)
+	}
+	for _, event := range finished.Events {
+		if event.Kind == "model_end" && strings.Contains(event.Input, base64.StdEncoding.EncodeToString(png)) {
+			t.Fatalf("Trace 不应保存附件 Base64: %s", event.Input)
+		}
+	}
+	attachment := finished.Messages[0].Attachments[0]
+	download, err := http.Get(httpServer.URL + "/api/v1/attachments/" + attachment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer download.Body.Close()
+	if download.StatusCode != http.StatusOK || download.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("附件下载接口异常: %d %s", download.StatusCode, download.Header.Get("Content-Type"))
 	}
 }
 

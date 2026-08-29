@@ -98,8 +98,8 @@ func encodeResponsesInput(messages []core.Message, includeSystem bool) (string, 
 			input = append(input, map[string]any{"type": "function_call_output", "call_id": message.ToolCallID, "output": message.Content})
 			continue
 		}
-		if strings.TrimSpace(message.Content) != "" {
-			input = append(input, map[string]any{"role": string(message.Role), "content": message.Content})
+		if strings.TrimSpace(message.Content) != "" || len(message.Attachments) > 0 {
+			input = append(input, map[string]any{"role": string(message.Role), "content": encodeResponsesContent(message)})
 		}
 		for _, call := range message.ToolCalls {
 			arguments := string(call.Arguments)
@@ -110,6 +110,27 @@ func encodeResponsesInput(messages []core.Message, includeSystem bool) (string, 
 		}
 	}
 	return strings.Join(instructions, "\n\n"), input
+}
+
+func encodeResponsesContent(message core.Message) any {
+	if len(message.Attachments) == 0 {
+		return message.Content
+	}
+	parts := make([]any, 0, len(message.Attachments)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		parts = append(parts, map[string]any{"type": "input_text", "text": message.Content})
+	}
+	for _, attachment := range message.Attachments {
+		switch attachment.Kind {
+		case "image":
+			parts = append(parts, map[string]any{"type": "input_image", "image_url": attachmentDataURL(attachment), "detail": "auto"})
+		case "pdf":
+			parts = append(parts, map[string]any{"type": "input_file", "filename": attachment.Name, "file_data": attachmentDataURL(attachment)})
+		default:
+			parts = append(parts, map[string]any{"type": "input_text", "text": textAttachment(attachment)})
+		}
+	}
+	return parts
 }
 
 func decodeResponsesResponse(body []byte) (core.Response, error) {

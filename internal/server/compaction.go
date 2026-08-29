@@ -207,6 +207,16 @@ func estimateStoredMessages(messages []store.Message) int {
 	total := 0
 	for _, message := range messages {
 		total += estimateTextTokens(message.Content) + estimateTextTokens(message.Name) + estimateTextTokens(message.ToolCallID)
+		for _, attachment := range message.Attachments {
+			total += estimateTextTokens(attachment.Name) + 64
+			if attachment.Kind == "text" {
+				total += estimateTextTokens(string(attachment.Data))
+			} else {
+				// 图片和 PDF 的模型 Token 与分辨率、页数及 Provider 有关，
+				// 这里只预留保守预算，最终页面仍使用 Provider 真实 Usage。
+				total += 1024
+			}
+		}
 		for _, call := range message.ToolCalls {
 			total += estimateTextTokens(call.Name) + estimateTextTokens(call.Arguments)
 		}
@@ -246,6 +256,13 @@ func compactionInput(previousSummary string, messages []store.Message) string {
 		}
 		result.WriteString(": ")
 		result.WriteString(limitSummaryText(message.Content, 4000))
+		for _, attachment := range message.Attachments {
+			fmt.Fprintf(&result, "\n[attachment %s, %s, %d bytes]", attachment.Name, attachment.MIMEType, attachment.Size)
+			if attachment.Kind == "text" {
+				result.WriteString("\n")
+				result.WriteString(limitSummaryText(string(attachment.Data), 4000))
+			}
+		}
 		for _, call := range message.ToolCalls {
 			fmt.Fprintf(&result, "\n[tool_call %s]: %s", call.Name, limitSummaryText(call.Arguments, 2000))
 		}

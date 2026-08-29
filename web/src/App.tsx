@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
-import type { Bootstrap, MCPConfig, ModelSettings, Session, Skill, TraceEvent } from './types'
+import type { AttachmentInput, Bootstrap, MCPConfig, ModelSettings, Session, Skill, TraceEvent } from './types'
 
 type Page = 'chat' | 'skills' | 'capabilities'
 const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
@@ -178,17 +178,63 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
 function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onOpenCapabilities: () => void }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [attachmentError, setAttachmentError] = useState('')
+  const [dragging, setDragging] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachmentRef = useRef<PendingAttachment[]>([])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.length, session?.status, session?.partialOutput])
+  useEffect(() => {
+    if (!textareaRef.current) return
+    textareaRef.current.style.height = 'auto'
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`
+  }, [draft])
+  useEffect(() => { attachmentRef.current = attachments }, [attachments])
+  useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
+
+  const addFiles = (files: FileList | File[]) => {
+    if (sending || isActive(session?.status)) return
+    const incoming = Array.from(files)
+    if (!incoming.length) return
+    setAttachmentError('')
+    setAttachments((current) => {
+      const next = [...current]
+      let total = current.reduce((sum, item) => sum + item.file.size, 0)
+      for (const file of incoming) {
+        if (next.length >= 5) { setAttachmentError('每条消息最多添加 5 个附件'); break }
+        if (file.size === 0) { setAttachmentError(`${file.name} 是空文件`); continue }
+        if (file.size > 5 * 1024 * 1024) { setAttachmentError(`${file.name} 超过 5 MiB`); continue }
+        if (!supportedAttachment(file)) { setAttachmentError(`${file.name} 暂不支持；请选择图片、UTF-8 文本/代码或 PDF`); continue }
+        if (total + file.size > 10 * 1024 * 1024) { setAttachmentError('本条消息的附件总大小不能超过 10 MiB'); break }
+        if (next.some((item) => item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified)) continue
+        total += file.size
+        next.push({ id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : '' })
+      }
+      return next
+    })
+  }
+
+  const removeAttachment = (id: string) => setAttachments((current) => current.filter((item) => {
+    if (item.id !== id) return true
+    if (item.preview) URL.revokeObjectURL(item.preview)
+    return false
+  }))
 
   const send = async (preset?: string) => {
     const message = (preset ?? draft).trim()
-    if (!message || sending || isActive(session?.status)) return
-    setSending(true); onError('')
+    if ((!message && attachments.length === 0) || sending || isActive(session?.status)) return
+    setSending(true); onError(''); setAttachmentError('')
     try {
-      const next = session ? await api.sendMessage(session.id, message) : await api.createSession(message)
-      onSession(next); setDraft(''); await onRefresh()
-    } catch (reason) { onError((reason as Error).message) } finally { setSending(false) }
+      const payload = await Promise.all(attachments.map(encodeAttachment))
+      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload)
+      onSession(next); setDraft(''); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
+    } catch (reason) {
+      const message = (reason as Error).message
+      if (/附件|Base64|MiB|格式/.test(message)) setAttachmentError(message)
+      else onError(message)
+    } finally { setSending(false) }
   }
 
   const suggestions = ['今天星期几？', '帮我分析这段错误日志', '设计一个简单的 REST API', '解释 Go 的 interface 和 Java interface 的区别']
@@ -203,20 +249,31 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
         : <div className="assistant-row"><Avatar /><div className="thinking"><i /><i /><i /><span>Agent 正在思考和使用工具…</span></div></div>)}
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
         const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
-        if (lastUserMessage?.content) send(lastUserMessage.content)
+        if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)
       }} onOpenCapabilities={onOpenCapabilities} />}
       {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
       <div ref={endRef} />
     </div>
-    <div className="composer-wrap"><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="给 EasyAgent 发消息…" rows={1} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }} /><div className="composer-foot"><span>{data.skills.filter((item) => item.enabled).length} Skills · {data.builtinTools.length} 常驻工具 · {data.mcps.filter((item) => item.enabled).length} MCP</span><button disabled={!draft.trim() || sending || isActive(session?.status)} onClick={() => send()}>↑</button></div></div><small className="composer-hint">Enter 发送 · Shift + Enter 换行 · MCP 仅在任务需要时连接</small></div>
+    <div className="composer-wrap"><div className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
+      {attachments.length > 0 && <div className="attachment-preview-list" aria-label="待发送附件">{attachments.map((item) => <div className="attachment-preview" key={item.id}>{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="attachment-file-icon"><FileIcon /></span>}<span><strong title={item.file.name}>{item.file.name}</strong><small>{attachmentTypeLabel(item.file)} · {formatBytes(item.file.size)}</small></span><button type="button" disabled={sending || isActive(session?.status)} aria-label={`移除附件 ${item.file.name}`} onClick={() => removeAttachment(item.id)}><CloseIcon /></button></div>)}</div>}
+      <textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : '给 EasyAgent 发消息…'} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
+      <div className="composer-toolbar"><div className="composer-tools"><button type="button" className="attach-button" disabled={sending || isActive(session?.status)} aria-label="添加文件或图片" onClick={() => fileInputRef.current?.click()}><AttachIcon /><span>添加附件</span></button><small>图片、文本、代码或 PDF</small><input ref={fileInputRef} className="visually-hidden" type="file" multiple tabIndex={-1} aria-hidden="true" accept={attachmentAccept} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} /></div><button type="button" className="send-button" aria-label={sending ? '正在发送' : '发送消息'} disabled={(!draft.trim() && attachments.length === 0) || sending || isActive(session?.status)} onClick={() => send()}>{sending ? <span className="send-spinner" /> : <SendIcon />}</button></div>
+      {attachmentError && <div id="attachment-error" className="composer-error" role="alert">{attachmentError}</div>}
+    </div><small id="composer-help" className="composer-hint">Enter 发送 · Shift + Enter 换行 · 可拖入或粘贴 · 单文件最大 5 MiB · 图片/PDF 需要当前模型支持多模态</small></div>
   </section>
 }
 
 function MessageView({ message }: { message: Session['messages'][number] }) {
   if (message.role === 'tool') return <details className="tool-result"><summary><span>⌁</span>{message.name || '工具'} 返回结果</summary><Payload value={message.content || ''} /></details>
-  if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.content}</div></div>
+  if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}{message.content && <div>{message.content}</div>}</div></div>
   if (message.role !== 'assistant') return null
   return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => <span key={call.id}>调用 {call.name}</span>)}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
+}
+
+function MessageAttachments({ attachments }: { attachments: Session['messages'][number]['attachments'] }) {
+  return <div className="message-attachments">{attachments.map((attachment) => attachment.kind === 'image'
+    ? <a key={attachment.id} className="message-image" href={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" title={`查看 ${attachment.name}`}><img src={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} alt={attachment.name} loading="lazy" /><span>{attachment.name}</span></a>
+    : <a key={attachment.id} className="message-file" href={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" download={attachment.name}><FileIcon /><span><strong>{attachment.name}</strong><small>{attachment.kind === 'pdf' ? 'PDF' : '文本文件'} · {formatBytes(attachment.size)}</small></span></a>)}</div>
 }
 
 function Avatar() { return <div className="avatar">E</div> }
@@ -458,6 +515,47 @@ function friendlyError(error: string) {
 
 function TrashIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg> }
 function Icon({ name }: { name: string }) { const paths: Record<string, string> = { chat: 'M4 5h16v11H8l-4 4V5Z', skill: 'M6 3h12v18H6zM9 8h6M9 12h6', plug: 'M9 3v6m6-6v6M7 9h10v3a5 5 0 0 1-10 0V9Zm5 8v4' }; return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg> }
+function AttachIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 6.8-6.8a3.5 3.5 0 0 1 5 5l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9m-6.2 11.4 8.5-8.5" /></svg> }
+function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" /></svg> }
+function CloseIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg> }
+function FileIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h5M9 13h6m-6 4h5" /></svg> }
+
+type PendingAttachment = { id: string; file: File; preview: string }
+const attachmentAccept = 'image/png,image/jpeg,image/webp,image/gif,text/*,application/json,application/xml,application/pdf,.md,.log,.csv,.yaml,.yml,.go,.java,.py,.js,.ts,.tsx,.jsx,.css,.html,.sh,.sql,.properties,.toml,.ini,.conf'
+const textAttachmentExtensions = new Set(['txt', 'md', 'log', 'csv', 'json', 'xml', 'yaml', 'yml', 'go', 'java', 'py', 'js', 'ts', 'tsx', 'jsx', 'css', 'html', 'sh', 'sql', 'properties', 'toml', 'ini', 'conf'])
+
+function supportedAttachment(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() || ''
+  return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', 'application/json', 'application/xml', 'application/javascript', 'application/yaml', 'application/x-yaml'].includes(file.type)
+    || file.type.startsWith('text/') || textAttachmentExtensions.has(extension)
+}
+
+function encodeAttachment(item: PendingAttachment): Promise<AttachmentInput> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error(`无法读取附件 ${item.file.name}`))
+    reader.onload = () => {
+      const value = String(reader.result || '')
+      const marker = value.indexOf(',')
+      if (marker < 0) { reject(new Error(`无法编码附件 ${item.file.name}`)); return }
+      resolve({ name: item.file.name, mimeType: item.file.type || 'application/octet-stream', size: item.file.size, data: value.slice(marker + 1) })
+    }
+    reader.readAsDataURL(item.file)
+  })
+}
+
+function attachmentTypeLabel(file: File) {
+  if (file.type.startsWith('image/')) return '图片'
+  if (file.type === 'application/pdf') return 'PDF'
+  return '文本文件'
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KiB`
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`
+}
+
 function formatTime(value: string) { const date = new Date(value); return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
 function statusLabel(value: Session['status']) { return value === 'idle' ? '完成' : value === 'queued' ? '排队中' : value === 'running' ? '运行中' : value === 'failed' ? '失败' : '已停止' }
 function formatDuration(ms: number) { return ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms` }

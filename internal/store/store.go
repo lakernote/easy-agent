@@ -94,6 +94,16 @@ CREATE TABLE IF NOT EXISTS ea_messages (
   created_at TEXT NOT NULL,
   UNIQUE(session_id, seq)
 );
+CREATE TABLE IF NOT EXISTS ea_attachments (
+  id TEXT PRIMARY KEY,
+  message_id INTEGER NOT NULL REFERENCES ea_messages(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ea_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL REFERENCES ea_sessions(id) ON DELETE CASCADE,
@@ -116,6 +126,7 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
 );
 CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_ea_events_session ON ea_events(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_id, seq);
 `
@@ -311,10 +322,55 @@ func (store *Store) messages(id string) ([]Message, error) {
 		if value.ToolCalls == nil {
 			value.ToolCalls = []ToolCall{}
 		}
+		value.Attachments = []Attachment{}
 		value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 		result = append(result, value)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	attachments, err := store.messageAttachments(id)
+	if err != nil {
+		return nil, err
+	}
+	for index := range result {
+		result[index].Attachments = attachments[result[index].ID]
+		if result[index].Attachments == nil {
+			result[index].Attachments = []Attachment{}
+		}
+	}
+	return result, nil
+}
+
+func (store *Store) messageAttachments(sessionID string) (map[int64][]Attachment, error) {
+	rows, err := store.db.Query(`SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size,a.data
+FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
+WHERE m.session_id=? ORDER BY a.rowid`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[int64][]Attachment{}
+	for rows.Next() {
+		var messageID int64
+		var value Attachment
+		if err := rows.Scan(&value.ID, &messageID, &value.Name, &value.MIMEType, &value.Kind, &value.Size, &value.Data); err != nil {
+			return nil, err
+		}
+		result[messageID] = append(result[messageID], value)
+	}
 	return result, rows.Err()
+}
+
+// Attachment 按 ID 读取一份附件数据，供本地页面预览或下载。
+func (store *Store) Attachment(id string) (Attachment, error) {
+	var value Attachment
+	err := store.db.QueryRow(`SELECT id,name,mime_type,kind,size,data FROM ea_attachments WHERE id=?`, id).
+		Scan(&value.ID, &value.Name, &value.MIMEType, &value.Kind, &value.Size, &value.Data)
+	return value, err
 }
 
 func (store *Store) events(id string) ([]Event, error) {
@@ -351,9 +407,27 @@ func (store *Store) AppendMessage(id string, value Message) error {
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = time.Now()
 	}
-	_, err = store.db.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_call_id,name,created_at)
+	tx, err := store.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	inserted, err := tx.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_call_id,name,created_at)
 VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?,?,?,?,?)`, id, id, value.Role, value.Content, data, value.ToolCallID, value.Name, formatTime(value.CreatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	messageID, err := inserted.LastInsertId()
+	if err != nil {
+		return err
+	}
+	for _, attachment := range value.Attachments {
+		if _, err := tx.Exec(`INSERT INTO ea_attachments(id,message_id,name,mime_type,kind,size,data,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+			attachment.ID, messageID, attachment.Name, attachment.MIMEType, attachment.Kind, attachment.Size, attachment.Data, formatTime(value.CreatedAt)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (store *Store) AppendEvent(id string, value Event) error {

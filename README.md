@@ -38,6 +38,7 @@ EasyAgent 面向希望快速拥有私有 Agent 的个人和小团队。它可以
 ## 功能
 
 - 多轮对话；Chat Completions 支持流式显示，也支持 Responses 及兼容接口。
+- 消息支持拖拽、粘贴或选择图片、UTF-8 文本/代码和 PDF；附件会随完整会话保存并可回看。
 - 可使用 OpenAI、DeepSeek、Ollama 或其他兼容模型服务。
 - 内置 `read / grep / find / ls / edit / write` 文件工具，以及时间、天气、计算、Shell 和 Skill 加载工具。
 - 页面创建、编辑、启停 Skill；按需加载正文，减少无效 Token。
@@ -111,6 +112,14 @@ export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
 
 免费额度、速率限制和地区可用性由厂商决定，可能变化。EasyAgent 不内置或共享第三方密钥。
 
+### 使用附件
+
+对话输入框可以直接拖入、粘贴或选择附件。每条消息最多 5 个文件，单文件最大 5 MiB、合计最大 10 MiB：
+
+- 文本、日志和代码会作为可读上下文发送，普通文本模型即可处理；
+- 图片和 PDF 会按 OpenAI Chat Completions / Responses 的多模态内容块发送，需要当前模型和兼容服务支持对应输入；
+- 原始附件保存在本机 SQLite，Agent Trace 只记录文件元数据，不保存或展示 Base64 正文。
+
 ## 扩展能力
 
 - **Tool**：编译进 Go 二进制的高频、确定性能力。
@@ -124,7 +133,7 @@ export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
 ## 数据与安全
 
 - 默认只监听 `127.0.0.1`，当前没有登录、RBAC 或多租户隔离，请不要直接暴露到公网。
-- API Key、MCP 密钥、会话和 Trace 保存在本机 SQLite；数据库尚未静态加密。
+- API Key、MCP 密钥、会话、附件和 Trace 保存在本机 SQLite；数据库尚未静态加密。
 - 文件工具限制在 EasyAgent 工作区内，并以相对路径写入 Trace；Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，不是安全沙箱。
 - 生产部署建议使用低权限账号、限制数据库文件权限，并优先通过环境变量提供密钥。
 

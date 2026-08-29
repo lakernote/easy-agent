@@ -35,6 +35,33 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	}
 }
 
+func TestMessageAttachmentsStayInSQLite(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	if _, err := value.CreateSession("s1", "附件", "fixture", now); err != nil {
+		t.Fatal(err)
+	}
+	attachment := Attachment{ID: "a1", Name: "error.log", MIMEType: "text/plain", Kind: "text", Size: 12, Data: []byte("stack trace")}
+	if err := value.AppendMessage("s1", Message{Role: "user", Content: "分析", Attachments: []Attachment{attachment}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := value.Session("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 1 || len(loaded.Messages[0].Attachments) != 1 || string(loaded.Messages[0].Attachments[0].Data) != "stack trace" {
+		t.Fatalf("附件没有随消息持久化: %+v", loaded.Messages)
+	}
+	downloaded, err := value.Attachment("a1")
+	if err != nil || downloaded.Name != "error.log" || string(downloaded.Data) != "stack trace" {
+		t.Fatalf("按 ID 读取附件失败: value=%+v err=%v", downloaded, err)
+	}
+}
+
 func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
 	if err != nil {

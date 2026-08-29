@@ -48,6 +48,8 @@ SQLite 中每条消息保留标准角色和 Tool Call：
 
 Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有变化且服务支持有状态续接时保存 `response_id`，下一轮使用 `previous_response_id` 和新增消息续接。Ollama Responses 不支持该续接方式，因此仍发送完整 input。
 
+用户消息可以携带附件。文本和代码附件会转成文本内容块；图片会转成 Chat Completions 的 `image_url` 或 Responses 的 `input_image`；PDF 会转成 `file` 或 `input_file`。附件原文保存在 `ea_attachments`，会话接口只返回元数据，页面需要内容时再通过附件接口读取，避免列表接口携带大段 Base64。
+
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
 Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。流的原始 JSON Chunks、Usage 和耗时进入 Trace；若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
@@ -115,7 +117,7 @@ mcp__<server_id>__<remote_tool_name>
 
 Server 另外记录 `compaction_start` 和 `compaction_end`，使独立的摘要模型调用同样可审计。
 
-应用层把真实模型请求、响应、工具参数、结果、错误、耗时和 Token 保存到 `ea_events`。页面默认显示汇总，展开事件后格式化 JSON。Trace 不依赖“根因”“处理人”或“修复”这些业务字段，所以能用于任意任务。
+应用层把真实模型请求、响应、工具参数、结果、错误、耗时和 Token 保存到 `ea_events`。页面默认显示汇总，展开事件后格式化 JSON。附件 Base64 在写入 Trace 前会替换为省略标记，只保留名称、类型和大小，避免把二进制内容重复写入审计记录。Trace 不依赖“根因”“处理人”或“修复”这些业务字段，所以能用于任意任务。
 
 缓存 Token 仅在 Provider 响应真实包含缓存字段时统计。已兼容 OpenAI `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens`、DeepSeek `prompt_cache_hit_tokens` 以及常见的 cache read/write 兼容字段。“未上报”与“已上报 0”是两种不同状态。OpenAI 请求使用稳定 `prompt_cache_key`；其他兼容服务不发送厂商专属字段。
 

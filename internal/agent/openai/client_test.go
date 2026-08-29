@@ -115,6 +115,26 @@ func TestChatCompletionsPreservesReasoningDetailsForToolContinuation(t *testing.
 	}
 }
 
+func TestOpenAIProtocolsEncodeMultimodalAttachments(t *testing.T) {
+	message := core.Message{Role: core.RoleUser, Content: "分析附件", Attachments: []core.Attachment{
+		{Name: "screen.png", MIMEType: "image/png", Kind: "image", Data: []byte("png")},
+		{Name: "error.log", MIMEType: "text/plain", Kind: "text", Data: []byte("boom")},
+		{Name: "report.pdf", MIMEType: "application/pdf", Kind: "pdf", Data: []byte("%PDF")},
+	}}
+	chat := encodeChatMessages([]core.Message{message})
+	encodedChat, _ := json.Marshal(chat[0].Content)
+	chatText := string(encodedChat)
+	if !strings.Contains(chatText, `"type":"image_url"`) || !strings.Contains(chatText, `data:image/png;base64,`) || !strings.Contains(chatText, `"type":"file"`) || !strings.Contains(chatText, "error.log") || !strings.Contains(chatText, "boom") {
+		t.Fatalf("Chat Completions 多模态内容错误: %s", chatText)
+	}
+	responses := encodeResponsesContent(message)
+	encodedResponses, _ := json.Marshal(responses)
+	responsesText := string(encodedResponses)
+	if !strings.Contains(responsesText, `"type":"input_image"`) || !strings.Contains(responsesText, `"type":"input_file"`) || !strings.Contains(responsesText, `"type":"input_text"`) {
+		t.Fatalf("Responses 多模态内容错误: %s", responsesText)
+	}
+}
+
 func TestChatCompletionsUsesNativeToolMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/chat/completions" {

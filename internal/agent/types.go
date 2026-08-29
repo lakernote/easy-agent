@@ -28,15 +28,25 @@ const (
 // Message 是 Chat Completions、Responses 和其他模型协议之间的公共消息格式。
 // ToolCallID 把工具结果与模型发起的调用一一对应，不能把工具输出伪装成用户消息。
 type Message struct {
-	Role       Role
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
-	Name       string
+	Role        Role
+	Content     string
+	Attachments []Attachment
+	ToolCalls   []ToolCall
+	ToolCallID  string
+	Name        string
 	// Reasoning 与 ReasoningDetails 只用于同一轮工具调用之间保留兼容
 	// Provider 返回的推理上下文，不写入 Trace，也不作为可见思维过程展示。
 	Reasoning        string
 	ReasoningDetails json.RawMessage
+}
+
+// Attachment 是模型无关的用户附件。Kind 目前支持 text、image 和 pdf；
+// 各 Provider 适配器负责转换成自己的多模态内容块。
+type Attachment struct {
+	Name     string
+	MIMEType string
+	Kind     string
+	Data     []byte
 }
 
 // ToolCall 是模型希望运行的一次函数调用。Arguments 保留原始 JSON，直到真正

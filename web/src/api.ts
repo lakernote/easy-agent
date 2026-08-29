@@ -1,4 +1,4 @@
-import type { Bootstrap, MCPConfig, MCPInstallResult, ModelSettings, Session, Skill } from './types'
+import type { AttachmentInput, Bootstrap, MCPConfig, MCPInstallResult, ModelSettings, Session, Skill } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -16,8 +16,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
   session: (id: string) => request<Session>(`/api/v1/sessions/${id}`),
-  createSession: (message: string) => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message }) }),
-  sendMessage: (id: string, message: string) => request<Session>(`/api/v1/sessions/${id}/messages`, { method: 'POST', body: JSON.stringify({ message }) }),
+  createSession: (message: string, attachments: AttachmentInput[] = []) => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message, attachments }) }),
+  sendMessage: (id: string, message: string, attachments: AttachmentInput[] = []) => request<Session>(`/api/v1/sessions/${id}/messages`, { method: 'POST', body: JSON.stringify({ message, attachments }) }),
   cancelSession: (id: string) => request<Session>(`/api/v1/sessions/${id}/cancel`, { method: 'POST' }),
   deleteSession: (id: string) => request<void>(`/api/v1/sessions/${id}`, { method: 'DELETE' }),
   saveModel: (model: ModelSettings) => request<ModelSettings>('/api/v1/model', { method: 'PUT', body: JSON.stringify(model) }),

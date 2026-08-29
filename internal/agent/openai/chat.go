@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role             string          `json:"role"`
-	Content          string          `json:"content"`
+	Content          any             `json:"content"`
 	ToolCalls        []chatToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
@@ -324,7 +325,7 @@ func encodeChatMessages(messages []core.Message) []chatMessage {
 	result := make([]chatMessage, 0, len(messages))
 	for _, message := range messages {
 		item := chatMessage{
-			Role: string(message.Role), Content: message.Content, ToolCallID: message.ToolCallID, Name: message.Name,
+			Role: string(message.Role), Content: encodeChatContent(message), ToolCallID: message.ToolCallID, Name: message.Name,
 			Reasoning: message.Reasoning, ReasoningDetails: message.ReasoningDetails,
 		}
 		for _, call := range message.ToolCalls {
@@ -340,6 +341,60 @@ func encodeChatMessages(messages []core.Message) []chatMessage {
 	return result
 }
 
+func encodeChatContent(message core.Message) any {
+	if len(message.Attachments) == 0 {
+		return message.Content
+	}
+	parts := make([]any, 0, len(message.Attachments)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": message.Content})
+	}
+	for _, attachment := range message.Attachments {
+		switch attachment.Kind {
+		case "image":
+			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": attachmentDataURL(attachment), "detail": "auto"}})
+		case "pdf":
+			parts = append(parts, map[string]any{"type": "file", "file": map[string]any{"filename": attachment.Name, "file_data": attachmentDataURL(attachment)}})
+		default:
+			parts = append(parts, map[string]any{"type": "text", "text": textAttachment(attachment)})
+		}
+	}
+	return parts
+}
+
+func attachmentDataURL(attachment core.Attachment) string {
+	mimeType := strings.TrimSpace(attachment.MIMEType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(attachment.Data)
+}
+
+func textAttachment(attachment core.Attachment) string {
+	return fmt.Sprintf("<attachment name=%q type=%q>\n%s\n</attachment>", attachment.Name, attachment.MIMEType, string(attachment.Data))
+}
+
+func chatContentText(value any) string {
+	switch content := value.(type) {
+	case string:
+		return content
+	case []any:
+		var result strings.Builder
+		for _, part := range content {
+			item, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := item["text"].(string); ok {
+				result.WriteString(text)
+			}
+		}
+		return result.String()
+	default:
+		return ""
+	}
+}
+
 func decodeChatResponse(body []byte) (core.Response, error) {
 	var payload chatResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -353,7 +408,7 @@ func decodeChatResponse(body []byte) (core.Response, error) {
 	if reasoning == "" {
 		reasoning = wire.ReasoningContent
 	}
-	message := core.Message{Role: core.RoleAssistant, Content: wire.Content, Reasoning: reasoning, ReasoningDetails: wire.ReasoningDetails}
+	message := core.Message{Role: core.RoleAssistant, Content: chatContentText(wire.Content), Reasoning: reasoning, ReasoningDetails: wire.ReasoningDetails}
 	for _, call := range wire.ToolCalls {
 		arguments, err := normalizeArguments(call.Function.Arguments)
 		if err != nil {
