@@ -85,7 +85,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 		InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
 		CachedTokens: response.Usage.CachedInputTokens, CacheWriteTokens: response.Usage.CacheWriteTokens,
 		CacheReported: response.Usage.CacheReported, TotalTokens: response.Usage.TotalTokens,
-		Protocol: response.Exchange.Protocol, HistoryMode: historyMode,
+		Protocol: response.Exchange.Protocol, StatusCode: response.Exchange.StatusCode, HistoryMode: historyMode,
 		RequestMessages: requestMessages, ToolDefinitions: toolDefinitions,
 		DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
 	})

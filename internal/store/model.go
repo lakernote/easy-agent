@@ -171,6 +171,7 @@ type Event struct {
 	CacheReported    bool      `json:"cacheReported"`
 	TotalTokens      int       `json:"totalTokens,omitempty"`
 	Protocol         string    `json:"protocol,omitempty"`
+	StatusCode       int       `json:"statusCode,omitempty"`
 	HistoryMode      string    `json:"historyMode,omitempty"`
 	RequestMessages  int       `json:"requestMessages,omitempty"`
 	ToolDefinitions  int       `json:"toolDefinitions,omitempty"`

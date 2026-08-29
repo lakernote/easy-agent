@@ -109,9 +109,48 @@ type chatStreamChunk struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Delta chatStreamDelta `json:"delta"`
+		Delta        chatStreamDelta `json:"delta"`
+		FinishReason string          `json:"finish_reason"`
 	} `json:"choices"`
 	Usage chatUsage `json:"usage"`
+}
+
+// chatStreamTrace 是写入 Trace 的流式响应快照。final_response 是 EasyAgent
+// 将各个 SSE Chunk 聚合后的最终事实；raw_chunks 保留 Provider 原始分片，
+// 方便需要时逐段审计，而不是强迫页面只展示零散 Delta。
+type chatStreamTrace struct {
+	Stream        bool                    `json:"stream"`
+	FinalResponse chatStreamFinalResponse `json:"final_response"`
+	RawChunks     []json.RawMessage       `json:"raw_chunks"`
+}
+
+type chatStreamFinalResponse struct {
+	ID           string                 `json:"id,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	Message      chatStreamFinalMessage `json:"message"`
+	FinishReason string                 `json:"finish_reason,omitempty"`
+	Usage        chatStreamFinalUsage   `json:"usage"`
+}
+
+type chatStreamFinalMessage struct {
+	Role      string                `json:"role"`
+	Content   string                `json:"content,omitempty"`
+	ToolCalls []chatStreamFinalTool `json:"tool_calls,omitempty"`
+}
+
+type chatStreamFinalTool struct {
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type chatStreamFinalUsage struct {
+	InputTokens       int  `json:"input_tokens"`
+	OutputTokens      int  `json:"output_tokens"`
+	CachedInputTokens int  `json:"cached_input_tokens"`
+	CacheWriteTokens  int  `json:"cache_write_tokens"`
+	TotalTokens       int  `json:"total_tokens"`
+	CacheReported     bool `json:"cache_reported"`
 }
 
 func (client *Client) generateChat(ctx context.Context, request core.Request) (core.Response, error) {
@@ -209,6 +248,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	chunks := make([]json.RawMessage, 0, 32)
 	chunkBytes := 0
 	responseID, model := "", payload.Model
+	finishReason := ""
 	usage := chatUsage{}
 	scanner := bufio.NewScanner(httpResponse.Body)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
@@ -246,6 +286,9 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 			usage = chunk.Usage
 		}
 		for _, choice := range chunk.Choices {
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
 			if choice.Delta.Content != "" {
 				content.WriteString(choice.Delta.Content)
 				onTextDelta(choice.Delta.Content)
@@ -276,9 +319,6 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		exchange.Duration = time.Since(startedAt)
 		return core.Response{Exchange: exchange}, err
 	}
-	encodedChunks, _ := json.Marshal(map[string]any{"stream": true, "chunks": chunks})
-	exchange.Response = string(encodedChunks)
-	exchange.Duration = time.Since(startedAt)
 	message := core.Message{Role: core.RoleAssistant, Content: content.String(), Reasoning: reasoning.String()}
 	if len(reasoningDetails) > 0 {
 		message.ReasoningDetails, _ = json.Marshal(reasoningDetails)
@@ -302,6 +342,24 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		message.ToolCalls = append(message.ToolCalls, core.ToolCall{ID: partial.id, Name: partial.name, Arguments: normalized})
 	}
 	normalizedUsage := usageFromChat(usage)
+	finalMessage := chatStreamFinalMessage{Role: string(message.Role), Content: message.Content}
+	for _, call := range message.ToolCalls {
+		finalMessage.ToolCalls = append(finalMessage.ToolCalls, chatStreamFinalTool{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
+	}
+	traceResponse, _ := json.Marshal(chatStreamTrace{
+		Stream: true,
+		FinalResponse: chatStreamFinalResponse{
+			ID: responseID, Model: model, Message: finalMessage, FinishReason: finishReason,
+			Usage: chatStreamFinalUsage{
+				InputTokens: normalizedUsage.InputTokens, OutputTokens: normalizedUsage.OutputTokens,
+				CachedInputTokens: normalizedUsage.CachedInputTokens, CacheWriteTokens: normalizedUsage.CacheWriteTokens,
+				TotalTokens: normalizedUsage.TotalTokens, CacheReported: normalizedUsage.CacheReported,
+			},
+		},
+		RawChunks: chunks,
+	})
+	exchange.Response = string(traceResponse)
+	exchange.Duration = time.Since(startedAt)
 	exchange.Model = model
 	exchange.Usage = normalizedUsage
 	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {

@@ -52,9 +52,11 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
-Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。流的原始 JSON Chunks、Usage 和耗时进入 Trace；若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
+Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。Trace 默认展示 EasyAgent 聚合后的完整响应，并在折叠区保留 Provider 原始 JSON Chunks，Usage 和耗时与本次模型请求一一对应。若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
 
-OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoning_details`。适配器会在同一轮工具循环中原样保留并回传这些不可见字段，避免工具结果回来后丢失推理上下文；它们不会作为思维过程展示到对话或 Trace。
+Trace 保留 Shell 和工具真实返回的绝对工作目录与文件路径，便于直接复现问题；图片和 PDF 的 Base64 原文不进入 Trace，只保留 MIME 类型和请求结构。
+
+OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoning_details`。适配器会在同一轮工具循环中原样保留并回传这些字段，避免工具结果回来后丢失推理上下文。聚合响应和对话不展示这些字段；“原始流式 Delta”是 Provider 原始审计数据，会保留 Provider 实际返回的完整字段。
 
 达到配置阈值（默认窗口的 75%）后，Server 会在普通 Agent 循环前调用同一个模型生成结构化检查点：
 

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -251,6 +250,7 @@ func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
 			value.CacheReported = event.Exchange.Usage.CacheReported
 			value.TotalTokens = event.Exchange.Usage.TotalTokens
 			value.Protocol = event.Exchange.Protocol
+			value.StatusCode = event.Exchange.StatusCode
 			value.HistoryMode, value.RequestMessages, value.ToolDefinitions = modelRequestShape(event.Exchange)
 		}
 		if event.Kind == agent.EventToolEnd {
@@ -261,11 +261,8 @@ func (server *Server) observer(id string, usage *store.Usage) agent.Observer {
 		if event.Err != nil {
 			value.Status, value.Detail = "error", event.Err.Error()
 		}
-		// Trace 会直接显示在页面，也经常出现在 README 截图中。保留完整调用
-		// 结构，但把本机工作区和用户主目录替换为稳定标签。
-		value.Input = redactTracePaths(value.Input)
-		value.Output = redactTracePaths(value.Output)
-		value.Detail = redactTracePaths(value.Detail)
+		// Trace 面向本机运行审计，必须保留工具真实返回的工作目录和文件路径，
+		// 否则用户无法根据 Trace 复现问题。附件二进制仍只保留结构和 MIME。
 		value.Input = redactTraceAttachmentData(value.Input)
 		value.Output = redactTraceAttachmentData(value.Output)
 		_ = server.store.AppendEvent(id, value)
@@ -311,31 +308,6 @@ func redactTraceAttachmentData(value string) string {
 		return value
 	}
 	return string(encoded)
-}
-
-func redactTracePaths(value string) string {
-	if value == "" {
-		return value
-	}
-	paths := []struct{ path, label string }{}
-	if workingDirectory, err := os.Getwd(); err == nil {
-		paths = append(paths, struct{ path, label string }{filepath.Clean(workingDirectory), "<workspace>"})
-		if resolved, resolveErr := filepath.EvalSymlinks(workingDirectory); resolveErr == nil {
-			paths = append(paths, struct{ path, label string }{filepath.Clean(resolved), "<workspace>"})
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, struct{ path, label string }{filepath.Clean(home), "<home>"})
-		if resolved, resolveErr := filepath.EvalSymlinks(home); resolveErr == nil {
-			paths = append(paths, struct{ path, label string }{filepath.Clean(resolved), "<home>"})
-		}
-	}
-	for _, item := range paths {
-		if item.path != "." && item.path != string(filepath.Separator) {
-			value = strings.ReplaceAll(value, item.path, item.label)
-		}
-	}
-	return value
 }
 
 // modelRequestShape 只提取 Trace 所需的结构数据，不在运行时重新估算 Token。

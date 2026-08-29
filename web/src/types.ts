@@ -56,6 +56,7 @@ export type TraceEvent = {
   cacheReported: boolean
   totalTokens?: number
   protocol?: string
+  statusCode?: number
   historyMode?: string
   requestMessages?: number
   toolDefinitions?: number

@@ -134,7 +134,7 @@ export EASYAGENT_OLLAMA_URL=http://ollama-host:11434
 
 - 默认只监听 `127.0.0.1`，当前没有登录、RBAC 或多租户隔离，请不要直接暴露到公网。
 - API Key、MCP 密钥、会话、附件和 Trace 保存在本机 SQLite；数据库尚未静态加密。
-- 文件工具限制在 EasyAgent 工作区内，并以相对路径写入 Trace；Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，不是安全沙箱。
+- 文件工具限制在 EasyAgent 工作区内，文件工具自身返回相对路径；Shell 和 STDIO MCP 使用 EasyAgent 进程权限运行，Trace 会保留它们真实返回的绝对路径，它们不是安全沙箱。
 - 生产部署建议使用低权限账号、限制数据库文件权限，并优先通过环境变量提供密钥。
 
 更多说明见 [Security Policy](SECURITY.md)。

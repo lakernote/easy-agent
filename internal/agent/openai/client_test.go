@@ -72,8 +72,12 @@ func TestChatCompletionsStreamsTextAndUsage(t *testing.T) {
 	if partial != "你好" || result.Message.Content != "你好" || result.Usage.TotalTokens != 14 || result.Usage.CachedInputTokens != 5 {
 		t.Fatalf("流式回答或 Usage 组装错误: partial=%q result=%+v", partial, result)
 	}
-	if !json.Valid([]byte(result.Exchange.Response)) || !strings.Contains(result.Exchange.Response, `"stream":true`) {
-		t.Fatalf("流式原始响应应可格式化审计: %s", result.Exchange.Response)
+	var trace chatStreamTrace
+	if err := json.Unmarshal([]byte(result.Exchange.Response), &trace); err != nil {
+		t.Fatalf("流式响应应可格式化审计: %v\n%s", err, result.Exchange.Response)
+	}
+	if !trace.Stream || trace.FinalResponse.Message.Content != "你好" || trace.FinalResponse.Usage.TotalTokens != 14 || len(trace.RawChunks) != 3 {
+		t.Fatalf("Trace 应同时保存聚合响应和原始 Delta: %+v", trace)
 	}
 }
 

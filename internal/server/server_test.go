@@ -20,22 +20,6 @@ import (
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
-func TestTraceRedactsWorkspaceAndHomePaths(t *testing.T) {
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := filepath.Join(workingDirectory, "internal", "server") + " " + filepath.Join(home, "private.txt")
-	output := redactTracePaths(input)
-	if strings.Contains(output, workingDirectory) || strings.Contains(output, home) || !strings.Contains(output, "<workspace>") || !strings.Contains(output, "<home>") {
-		t.Fatalf("Trace 路径脱敏错误: %s", output)
-	}
-}
-
 func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	input := `{"image_url":{"url":"data:image/png;base64,c2VjcmV0"},"text":"keep"}`
 	output := redactTraceAttachmentData(input)
@@ -44,7 +28,7 @@ func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	}
 }
 
-func TestShellKeepsRawPathForAgentAndRedactsTrace(t *testing.T) {
+func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -104,10 +88,20 @@ func TestShellKeepsRawPathForAgentAndRedactsTrace(t *testing.T) {
 	if finished.Status != "idle" || !strings.Contains(finished.Messages[len(finished.Messages)-1].Content, workingDirectory) {
 		t.Fatalf("Shell 原始路径任务没有完成: %+v", finished)
 	}
+	modelResponses := 0
 	for _, event := range finished.Events {
-		if event.Kind == "tool_end" && (strings.Contains(event.Output, workingDirectory) || !strings.Contains(event.Output, "<workspace>")) {
-			t.Fatalf("Shell Trace 没有正确脱敏: %s", event.Output)
+		if event.Kind == "model_end" {
+			modelResponses++
+			if event.StatusCode != http.StatusOK {
+				t.Fatalf("模型 Trace 缺少真实 HTTP 状态码: %+v", event)
+			}
 		}
+		if event.Kind == "tool_end" && (!strings.Contains(event.Output, workingDirectory) || strings.Contains(event.Output, "<workspace>")) {
+			t.Fatalf("Shell Trace 没有保留真实路径: %s", event.Output)
+		}
+	}
+	if modelResponses != 2 {
+		t.Fatalf("请求、工具结果后应有两次一一对应的模型响应，实际 %d", modelResponses)
 	}
 }
 
