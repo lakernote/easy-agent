@@ -20,6 +20,7 @@ type compactionPlan struct {
 	Messages          []store.Message
 	PreviousSummary   string
 	ThroughMessageID  int64
+	SplitTurn         bool
 	SourceMessages    int
 	CompactedMessages int
 	EstimatedTokens   int
@@ -28,8 +29,8 @@ type compactionPlan struct {
 
 // compactIfNeeded 在普通 Agent 循环之前创建检查点。它直接使用同一个模型，
 // 但不提供任何 Tool，避免摘要过程产生副作用。
-func (server *Server) compactIfNeeded(ctx context.Context, session *store.Session, settings store.ModelSettings, model agent.Model, systemPrompt string, tools []agent.Tool, turn int, usage *store.Usage) (bool, error) {
-	plan := makeCompactionPlan(*session, settings, systemPrompt, tools)
+func (server *Server) compactIfNeeded(ctx context.Context, session *store.Session, settings store.ModelSettings, model agent.Model, systemPrompt string, tools []agent.Tool, turn int, usage *store.Usage, threshold int, force bool) (bool, error) {
+	plan := makeCompactionPlan(*session, settings, systemPrompt, tools, threshold, force)
 	if plan == nil {
 		return false, nil
 	}
@@ -71,6 +72,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	currentUsage := toStoreUsage(response.Usage, duration)
 	if err := server.store.AppendCompaction(session.ID, store.Compaction{
 		Summary: strings.TrimSpace(response.Message.Content), ThroughMessageID: plan.ThroughMessageID,
+		SplitTurn:      plan.SplitTurn,
 		SourceMessages: plan.SourceMessages, CompactedMessages: plan.CompactedMessages,
 		Usage: currentUsage, CreatedAt: time.Now(),
 	}); err != nil {
@@ -98,14 +100,9 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	return true, nil
 }
 
-func makeCompactionPlan(session store.Session, settings store.ModelSettings, systemPrompt string, tools []agent.Tool) *compactionPlan {
-	thresholdPercent := compressionThreshold(settings)
-	if settings.ContextWindowTokens <= 0 || thresholdPercent <= 0 {
-		return nil
-	}
-	threshold := settings.ContextWindowTokens * thresholdPercent / 100
+func makeCompactionPlan(session store.Session, settings store.ModelSettings, systemPrompt string, tools []agent.Tool, threshold int, force bool) *compactionPlan {
 	estimated := estimateActiveContext(session, systemPrompt, tools)
-	if estimated < threshold {
+	if !force && (threshold <= 0 || estimated < threshold) {
 		return nil
 	}
 
@@ -125,9 +122,16 @@ func makeCompactionPlan(session store.Session, settings store.ModelSettings, sys
 			userIndexes = append(userIndexes, index)
 		}
 	}
-	// 至少保留最近一个完整用户轮次；只有一个轮次时没有安全的旧轮次可压缩。
+	// 正常情况下按完整用户轮次切分，避免把 assistant/tool 链拆开。
+	// 但一轮内部可能已经产生了很大的工具结果；这时如果坚持只能按 user
+	// 切分，就永远无法压缩。对单轮历史使用 split-turn，保留一个合法的
+	// assistant/tool 后缀，并把前缀交给摘要模型。
 	if len(userIndexes) < 2 {
-		return nil
+		keepIndex, ok := splitCompactionKeepIndex(active, settings.ContextWindowTokens*recentContextPercent/100)
+		if !ok {
+			return nil
+		}
+		return newCompactionPlan(session, active, previous, keepIndex, estimated, threshold, true)
 	}
 
 	keepIndex := userIndexes[len(userIndexes)-1]
@@ -146,6 +150,13 @@ func makeCompactionPlan(session store.Session, settings store.ModelSettings, sys
 		return nil
 	}
 
+	return newCompactionPlan(session, active, previous, keepIndex, estimated, threshold, false)
+}
+
+func newCompactionPlan(session store.Session, active []store.Message, previous store.Compaction, keepIndex, estimated, threshold int, splitTurn bool) *compactionPlan {
+	if keepIndex <= 0 || keepIndex >= len(active) {
+		return nil
+	}
 	throughID := active[keepIndex-1].ID
 	compactedMessages := 0
 	for _, message := range session.Messages {
@@ -155,9 +166,66 @@ func makeCompactionPlan(session store.Session, settings store.ModelSettings, sys
 	}
 	return &compactionPlan{
 		Messages: active[:keepIndex], PreviousSummary: previous.Summary,
-		ThroughMessageID: throughID, SourceMessages: keepIndex,
+		ThroughMessageID: throughID, SplitTurn: splitTurn, SourceMessages: keepIndex,
 		CompactedMessages: compactedMessages, EstimatedTokens: estimated, ThresholdTokens: threshold,
 	}
+}
+
+// splitCompactionKeepIndex 返回一个不会从 tool result 开始、且不会留下
+// 悬空 Tool Call 的后缀起点。优先让后缀落在 recentContextPercent 预算内；
+// 如果单个合法消息链本身就超过预算，也保留最短的完整链，交给运行时的
+// tool-result 微压缩继续收敛，而不是破坏协议配对。
+func splitCompactionKeepIndex(messages []store.Message, keepBudget int) (int, bool) {
+	if len(messages) < 2 {
+		return 0, false
+	}
+	fallback := 0
+	for start := 1; start < len(messages); start++ {
+		if messages[start].Role != string(agent.RoleUser) && messages[start].Role != string(agent.RoleAssistant) {
+			continue
+		}
+		if !validCompactionSuffix(messages[start:]) {
+			continue
+		}
+		fallback = start
+		if keepBudget > 0 && estimateStoredMessages(messages[start:]) <= keepBudget {
+			return start, true
+		}
+	}
+	return fallback, fallback > 0
+}
+
+func validCompactionSuffix(messages []store.Message) bool {
+	calls := map[string]struct{}{}
+	results := map[string]struct{}{}
+	for _, message := range messages {
+		switch message.Role {
+		case string(agent.RoleAssistant):
+			for _, call := range message.ToolCalls {
+				id := strings.TrimSpace(call.ID)
+				if id != "" {
+					calls[id] = struct{}{}
+				}
+			}
+		case string(agent.RoleTool):
+			id := strings.TrimSpace(message.ToolCallID)
+			if id == "" {
+				return false
+			}
+			results[id] = struct{}{}
+		}
+	}
+	for id := range results {
+		if _, ok := calls[id]; !ok {
+			return false
+		}
+	}
+	for id := range calls {
+		if _, ok := results[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func compressionThreshold(settings store.ModelSettings) int {
@@ -180,7 +248,7 @@ func estimateActiveContext(session store.Session, systemPrompt string, tools []a
 		added := 0
 		for _, message := range session.Messages {
 			if message.CreatedAt.After(latestEventAt) {
-				added += estimateTextTokens(message.Content)
+				added += estimateStoredMessages([]store.Message{message})
 			}
 		}
 		return latestInput + added

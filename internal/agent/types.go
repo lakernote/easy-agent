@@ -183,6 +183,20 @@ type RunRequest struct {
 	MaxSteps       int
 	ToolTimeout    time.Duration
 	OnTextDelta    func(string)
+	// PrepareRequest 在每次真实模型调用前执行。它可以对当前内存中的消息做
+	// 微压缩，或在 force=true 时处理 Provider 返回的上下文超限。changed=true
+	// 表示请求历史已经改变，Responses 适配器不应继续复用旧的 response ID。
+	PrepareRequest func(context.Context, Request, bool) (request Request, changed bool, err error)
+	// OnMessage 在 Agent 产生 assistant 或 tool 消息后调用。它保留逐条回调
+	// 兼容性；需要保证工具链原子性的外层应优先使用 OnTurnMessages。
+	OnMessage func(Message) error
+	// OnTurnMessages 在一个 Agent step 的 assistant 及其全部 tool result 都
+	// 准备好后一次调用。它适合在一个数据库事务中保存完整工具链；与 OnMessage
+	// 同时设置时优先使用 OnTurnMessages。
+	OnTurnMessages func([]Message) error
+	// IsContextError 判断 Provider 是否因为上下文过大拒绝了请求。配合
+	// PrepareRequest 可对当前 Step 自动压缩并重试一次。
+	IsContextError func(error) bool
 }
 
 // RunResult 返回最终回答和可继续多轮会话的完整消息。

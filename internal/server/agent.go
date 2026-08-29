@@ -158,7 +158,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	systemPrompt := prompt.Render(prompt.Context{
 		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta,
 	})
-	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, turn, usage)
+	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, turn, usage, runtimeCompactionThreshold(settings), false)
 	if err != nil {
 		return err
 	}
@@ -170,20 +170,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	runner.MaxOutputTokens = settings.MaxOutputTokens
 	runner.Observe = server.observer(id, turn, usage)
 
-	coreMessages := []agent.Message{{Role: agent.RoleSystem, Content: systemPrompt}}
-	var compactedThrough int64
-	if len(session.Compactions) > 0 {
-		latest := session.Compactions[len(session.Compactions)-1]
-		compactedThrough = latest.ThroughMessageID
-		coreMessages = append(coreMessages, agent.Message{Role: agent.RoleSystem, Content: "此前会话的上下文检查点：\n\n" + latest.Summary})
-	}
-	for _, message := range session.Messages {
-		if message.ID <= compactedThrough {
-			continue
-		}
-		coreMessages = append(coreMessages, toCoreMessage(message))
-	}
-	initialCount := len(coreMessages)
+	coreMessages := coreMessagesForSession(session, systemPrompt)
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
 	previousID := ""
 	// Ollama 的 Responses 兼容端点目前不支持 previous_response_id，
@@ -196,16 +183,94 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 		Messages: coreMessages, NewMessages: newMessages, PreviousResponseID: previousID,
 		PromptCacheKey: promptCacheKey(settings),
 		OnTextDelta:    func(delta string) { server.appendTaskPartial(id, delta) },
+		OnTurnMessages: func(messages []agent.Message) error {
+			values := make([]store.Message, 0, len(messages))
+			for _, message := range messages {
+				values = append(values, fromCoreMessage(message))
+			}
+			return server.store.AppendMessages(id, values)
+		},
+		PrepareRequest: func(ctx context.Context, request agent.Request, force bool) (agent.Request, bool, error) {
+			return server.prepareRuntimeRequest(ctx, id, settings, systemPrompt, turn, usage, client, runner, request, force)
+		},
+		IsContextError: isContextLengthError,
 	})
 	if err != nil {
 		return err
 	}
-	for _, message := range result.Messages[initialCount:] {
-		if err := server.store.AppendMessage(id, fromCoreMessage(message)); err != nil {
-			return err
+	return server.store.FinishSession(id, result.ResponseID, providerKey, *usage, time.Now())
+}
+
+func coreMessagesForSession(session store.Session, systemPrompt string) []agent.Message {
+	coreMessages := []agent.Message{{Role: agent.RoleSystem, Content: systemPrompt}}
+	var compactedThrough int64
+	if len(session.Compactions) > 0 {
+		latest := session.Compactions[len(session.Compactions)-1]
+		compactedThrough = latest.ThroughMessageID
+		checkpointRole := agent.RoleSystem
+		checkpointText := "此前会话的上下文检查点：\n\n" + latest.Summary
+		if latest.SplitTurn {
+			// split-turn 的后缀可能从 assistant/tool 开始。用一个合成的
+			// user checkpoint 承接它，保证 Chat Completions 和 Responses
+			// 都不会收到孤立的 tool result 或不完整的消息轮次。
+			checkpointRole = agent.RoleUser
+			checkpointText = "此前会话上下文检查点（当前轮次的前半段已压缩）：\n\n" + latest.Summary + "\n\n请继续处理下面保留的当前轮次内容。"
+		}
+		coreMessages = append(coreMessages, agent.Message{Role: checkpointRole, Content: checkpointText})
+	}
+	activeMessages := make([]store.Message, 0, len(session.Messages))
+	for _, message := range session.Messages {
+		if message.ID > compactedThrough {
+			activeMessages = append(activeMessages, message)
 		}
 	}
-	return server.store.FinishSession(id, result.ResponseID, providerKey, *usage, time.Now())
+	for _, message := range protocolSafeStoredMessages(activeMessages) {
+		coreMessages = append(coreMessages, toCoreMessage(message))
+	}
+	return coreMessages
+}
+
+// protocolSafeStoredMessages 只过滤历史中的未闭合工具链，不修改 SQLite。
+// 这样旧版本或异常退出留下的 assistant(tool_call) 不会在下一轮再次发送给
+// Provider；完整的 Assistant + Tool Results 则保持原有顺序。
+func protocolSafeStoredMessages(messages []store.Message) []store.Message {
+	result := make([]store.Message, 0, len(messages))
+	for index := 0; index < len(messages); {
+		message := messages[index]
+		if message.Role == string(agent.RoleTool) {
+			// tool result 没有位于它前面的、已确认完整的 assistant 调用。
+			break
+		}
+		if message.Role != string(agent.RoleAssistant) || len(message.ToolCalls) == 0 {
+			result = append(result, message)
+			index++
+			continue
+		}
+
+		callIDs := make(map[string]struct{}, len(message.ToolCalls))
+		for _, call := range message.ToolCalls {
+			id := strings.TrimSpace(call.ID)
+			if id == "" {
+				return result
+			}
+			callIDs[id] = struct{}{}
+		}
+		toolResults := 0
+		for next := index + 1; next < len(messages) && messages[next].Role == string(agent.RoleTool); next++ {
+			id := strings.TrimSpace(messages[next].ToolCallID)
+			if _, ok := callIDs[id]; !ok {
+				return result
+			}
+			toolResults++
+		}
+		if toolResults != len(callIDs) {
+			return result
+		}
+		result = append(result, message)
+		result = append(result, messages[index+1:index+1+toolResults]...)
+		index += 1 + toolResults
+	}
+	return result
 }
 
 // promptCacheKey 仅发送给已知支持该字段的 OpenAI 服务。缓存键跨会话稳定，

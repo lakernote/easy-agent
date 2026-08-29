@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -506,12 +507,105 @@ func TestCompactionPlanKeepsRecentTurns(t *testing.T) {
 		},
 		Events: []store.Event{{Kind: "model_end", InputTokens: 900, CreatedAt: now.Add(-time.Second)}},
 	}
-	plan := makeCompactionPlan(session, store.ModelSettings{ContextWindowTokens: 1000, CompressionThresholdPercent: 75}, "system", nil)
+	settings := store.ModelSettings{ContextWindowTokens: 1000, CompressionThresholdPercent: 75}
+	plan := makeCompactionPlan(session, settings, "system", nil, runtimeCompactionThreshold(settings), false)
 	if plan == nil {
 		t.Fatal("达到阈值后应生成压缩计划")
 	}
 	if plan.ThroughMessageID != 4 || plan.SourceMessages != 4 || plan.CompactedMessages != 4 {
 		t.Fatalf("压缩边界错误: %+v", plan)
+	}
+}
+
+func TestCompactionPlanUsesRuntimeThreshold(t *testing.T) {
+	now := time.Now()
+	settings := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 2000, CompressionThresholdPercent: 75}
+	session := store.Session{
+		Messages: []store.Message{
+			{ID: 1, Role: "user", Content: strings.Repeat("旧问题", 600), CreatedAt: now},
+			{ID: 2, Role: "assistant", Content: strings.Repeat("旧回答", 600), CreatedAt: now},
+			{ID: 3, Role: "user", Content: "当前问题", CreatedAt: now},
+		},
+		Events: []store.Event{{Kind: "model_end", InputTokens: 1500, CreatedAt: now.Add(-time.Second)}},
+	}
+	threshold := runtimeCompactionThreshold(settings)
+	if threshold >= settings.ContextWindowTokens*settings.CompressionThresholdPercent/100 {
+		t.Fatalf("测试没有构造出低于旧阈值的安全阈值: %d", threshold)
+	}
+	if plan := makeCompactionPlan(session, settings, "system", nil, threshold, false); plan == nil {
+		t.Fatalf("达到运行时安全阈值后仍不应拒绝压缩: threshold=%d", threshold)
+	}
+}
+
+func TestForcedCompactionIgnoresStaleLocalEstimate(t *testing.T) {
+	now := time.Now()
+	settings := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 200}
+	session := store.Session{
+		Messages: []store.Message{
+			{ID: 1, Role: "user", Content: strings.Repeat("旧问题", 600), CreatedAt: now},
+			{ID: 2, Role: "assistant", Content: strings.Repeat("旧回答", 600), CreatedAt: now},
+			{ID: 3, Role: "user", Content: "当前问题", CreatedAt: now},
+		},
+		Events: []store.Event{{Kind: "model_end", InputTokens: 10, CreatedAt: now.Add(-time.Second)}},
+	}
+	if plan := makeCompactionPlan(session, settings, "system", nil, runtimeCompactionThreshold(settings), true); plan == nil {
+		t.Fatal("Provider 已明确报超限时，不能被本地低估值阻止压缩")
+	}
+}
+
+func TestCompactionPlanSplitsSingleLargeTurnAtAssistantBoundary(t *testing.T) {
+	now := time.Now()
+	session := store.Session{
+		Messages: []store.Message{
+			{ID: 1, Role: "user", Content: "执行任务", CreatedAt: now},
+			{ID: 2, Role: "assistant", ToolCalls: []store.ToolCall{{ID: "call-1", Name: "shell", Arguments: "{}"}}, CreatedAt: now},
+			{ID: 3, Role: "tool", ToolCallID: "call-1", Content: strings.Repeat("工具输出", 2000), CreatedAt: now},
+		},
+		Events: []store.Event{{Kind: "model_end", InputTokens: 900, CreatedAt: now.Add(-time.Second)}},
+	}
+	settings := store.ModelSettings{ContextWindowTokens: 1000, CompressionThresholdPercent: 75}
+	plan := makeCompactionPlan(session, settings, "system", nil, runtimeCompactionThreshold(settings), false)
+	if plan == nil || !plan.SplitTurn {
+		t.Fatalf("单轮大上下文应生成 split-turn 计划: %+v", plan)
+	}
+	if plan.ThroughMessageID != 1 || plan.SourceMessages != 1 || plan.CompactedMessages != 1 {
+		t.Fatalf("split-turn 压缩边界错误: %+v", plan)
+	}
+	if len(session.Messages[plan.SourceMessages:]) == 0 || session.Messages[plan.SourceMessages].Role != "assistant" {
+		t.Fatalf("split-turn 必须从 assistant 开始保留: %+v", session.Messages)
+	}
+	if !validCompactionSuffix(session.Messages[plan.SourceMessages:]) {
+		t.Fatal("保留的 assistant/tool 后缀不应出现悬空调用")
+	}
+}
+
+func TestSplitTurnCheckpointRebuildsProtocolSafeMessages(t *testing.T) {
+	session := store.Session{
+		Messages: []store.Message{
+			{ID: 1, Role: "user", Content: "前半段"},
+			{ID: 2, Role: "assistant", ToolCalls: []store.ToolCall{{ID: "call-1", Name: "shell", Arguments: "{}"}}},
+			{ID: 3, Role: "tool", ToolCallID: "call-1", Content: "结果"},
+		},
+		Compactions: []store.Compaction{{Summary: "已完成前半段", ThroughMessageID: 1, SplitTurn: true}},
+	}
+	messages := coreMessagesForSession(session, "系统提示")
+	if len(messages) != 4 || messages[0].Role != agent.RoleSystem || messages[1].Role != agent.RoleUser || messages[2].Role != agent.RoleAssistant || messages[3].Role != agent.RoleTool {
+		t.Fatalf("split-turn 恢复后的消息协议顺序错误: %+v", messages)
+	}
+	if !strings.Contains(messages[1].Content, "当前轮次的前半段已压缩") {
+		t.Fatalf("split-turn checkpoint 缺少边界说明: %q", messages[1].Content)
+	}
+}
+
+func TestCoreMessagesDropIncompleteStoredToolChain(t *testing.T) {
+	session := store.Session{Messages: []store.Message{
+		{ID: 1, Role: "user", Content: "查询"},
+		{ID: 2, Role: "assistant", ToolCalls: []store.ToolCall{{ID: "call-1", Name: "lookup", Arguments: "{}"}}},
+		{ID: 3, Role: "user", Content: "后续问题"},
+	}}
+	messages := coreMessagesForSession(session, "系统提示")
+	if len(messages) != 2 || messages[1].Role != agent.RoleUser || messages[1].Content != "查询" {
+		t.Fatalf("未闭合工具链不应继续发送，实际消息: %+v", messages)
 	}
 }
 
@@ -561,9 +655,47 @@ func TestRepeatedCompactionUpdatesPreviousCheckpoint(t *testing.T) {
 		Compactions: []store.Compaction{{Summary: "旧检查点", ThroughMessageID: 2, CompactedMessages: 2}},
 		Events:      []store.Event{{Kind: "model_end", InputTokens: 900, CreatedAt: now.Add(-time.Second)}},
 	}
-	plan := makeCompactionPlan(session, store.ModelSettings{ContextWindowTokens: 1000, CompressionThresholdPercent: 75}, "system", nil)
+	settings := store.ModelSettings{ContextWindowTokens: 1000, CompressionThresholdPercent: 75}
+	plan := makeCompactionPlan(session, settings, "system", nil, runtimeCompactionThreshold(settings), false)
 	if plan == nil || plan.PreviousSummary != "旧检查点" || plan.ThroughMessageID != 4 || plan.CompactedMessages != 4 {
 		t.Fatalf("重复压缩没有更新旧检查点: %+v", plan)
+	}
+}
+
+func TestMicroCompactOldToolResultKeepsHeadAndTail(t *testing.T) {
+	large := strings.Repeat("头", 1500) + strings.Repeat("中", 1500) + strings.Repeat("尾", 1500)
+	messages := []agent.Message{
+		{Role: agent.RoleTool, Content: large},
+		{Role: agent.RoleUser, Content: "当前问题"},
+	}
+	compacted, changed := microCompactAgentMessages(messages)
+	if changed || compacted[0].Content != large {
+		t.Fatalf("最近消息不应被微压缩: changed=%v", changed)
+	}
+	messages = append([]agent.Message{{Role: agent.RoleTool, Content: large}}, make([]agent.Message, runtimeRecentMessages)...)
+	compacted, changed = microCompactAgentMessages(messages)
+	if !changed || len([]rune(compacted[0].Content)) >= len([]rune(large)) {
+		t.Fatalf("旧工具结果未被微压缩: changed=%v old=%d new=%d", changed, len([]rune(large)), len([]rune(compacted[0].Content)))
+	}
+	if !strings.Contains(compacted[0].Content, "头") || !strings.Contains(compacted[0].Content, "尾") || !utf8.ValidString(compacted[0].Content) {
+		t.Fatalf("微压缩结果没有保留头尾或破坏 UTF-8: %q", compacted[0].Content)
+	}
+}
+
+func TestCompactOversizedRecentToolResultKeepsProtocolAndBounds(t *testing.T) {
+	large := strings.Repeat("头", 3000) + strings.Repeat("尾", 3000)
+	messages := []agent.Message{
+		{Role: agent.RoleSystem, Content: "系统"},
+		{Role: agent.RoleUser, Content: "checkpoint"},
+		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: "call-1", Name: "shell", Arguments: []byte("{}")}}},
+		{Role: agent.RoleTool, ToolCallID: "call-1", Content: large},
+	}
+	compacted, changed := compactOversizedToolResults(messages)
+	if !changed || len([]rune(compacted[3].Content)) >= len([]rune(large)) {
+		t.Fatalf("最近的大工具结果没有被请求级截断: changed=%v", changed)
+	}
+	if !strings.Contains(compacted[3].Content, "头") || !strings.Contains(compacted[3].Content, "尾") || !utf8.ValidString(compacted[3].Content) {
+		t.Fatal("工具结果截断没有保留头尾或破坏 UTF-8")
 	}
 }
 

@@ -184,9 +184,13 @@ type Event struct {
 // Compaction 是长会话的上下文检查点。原始消息仍保留在 ea_messages；运行时只用
 // Summary 替代 ThroughMessageID 及以前的消息，再拼接最近原始消息。
 type Compaction struct {
-	ID                int64     `json:"id"`
-	Summary           string    `json:"summary"`
-	ThroughMessageID  int64     `json:"throughMessageId"`
+	ID               int64  `json:"id"`
+	Summary          string `json:"summary"`
+	ThroughMessageID int64  `json:"throughMessageId"`
+	// SplitTurn 表示检查点切在一个用户轮次的 assistant/tool 后缀之前。
+	// 重建上下文时需要用 user checkpoint 承接这个后缀，避免以 assistant 或
+	// tool 消息开头而破坏 Provider 的消息协议。
+	SplitTurn         bool      `json:"splitTurn,omitempty"`
 	SourceMessages    int       `json:"sourceMessages"`
 	CompactedMessages int       `json:"compactedMessages"`
 	Usage             Usage     `json:"usage"`

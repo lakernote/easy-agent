@@ -207,3 +207,124 @@ func TestToolErrorKeepsStructuredOutput(t *testing.T) {
 		t.Fatalf("Agent 没有处理工具失败: %+v err=%v", result, err)
 	}
 }
+
+func TestRunnerPersistsMessagesIncrementallyBeforeLaterModelFailure(t *testing.T) {
+	persisted := []Message{}
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{Name: "lookup", Arguments: json.RawMessage(`{}`)}}}}, nil
+		}
+		return Response{}, errors.New("模型暂时不可用")
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "lookup"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return "结果", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "查询"}},
+		OnMessage: func(message Message) error {
+			persisted = append(persisted, message)
+			return nil
+		},
+	})
+	if err == nil || calls != 2 || len(persisted) != 2 {
+		t.Fatalf("中途失败前的消息没有增量保存: calls=%d persisted=%+v err=%v", calls, persisted, err)
+	}
+	if persisted[0].Role != RoleAssistant || len(persisted[0].ToolCalls) != 1 || persisted[0].ToolCalls[0].ID == "" || persisted[1].Role != RoleTool || persisted[1].ToolCallID != persisted[0].ToolCalls[0].ID {
+		t.Fatalf("assistant/tool 消息顺序错误: %+v", persisted)
+	}
+}
+
+func TestRunnerPersistsCompletedToolStepAsOneBatch(t *testing.T) {
+	var batches [][]Message
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{Name: "lookup", Arguments: json.RawMessage(`{}`)}}}}, nil
+		}
+		return Response{}, errors.New("模型暂时不可用")
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "lookup"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return "结果", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "查询"}},
+		OnTurnMessages: func(messages []Message) error {
+			batches = append(batches, append([]Message(nil), messages...))
+			return nil
+		},
+	})
+	if err == nil || calls != 2 || len(batches) != 1 || len(batches[0]) != 2 {
+		t.Fatalf("完整工具 step 没有作为一个批次保存: calls=%d batches=%+v err=%v", calls, batches, err)
+	}
+	if batches[0][0].Role != RoleAssistant || len(batches[0][0].ToolCalls) != 1 || batches[0][1].Role != RoleTool || batches[0][1].ToolCallID != batches[0][0].ToolCalls[0].ID {
+		t.Fatalf("原子工具批次顺序或配对错误: %+v", batches[0])
+	}
+}
+
+func TestRunnerRetriesContextErrorAfterPreparation(t *testing.T) {
+	modelCalls, prepareCalls := 0, 0
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return Response{}, errors.New("maximum context length exceeded")
+		}
+		if request.PreviousResponseID != "" || len(request.Messages) != 3 {
+			t.Fatalf("压缩重试没有改用新的完整上下文: %+v", request)
+		}
+		return Response{Message: Message{Content: "重试成功"}}, nil
+	}), "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleSystem, Content: "system"}, {Role: RoleUser, Content: "问题"}},
+		PrepareRequest: func(_ context.Context, request Request, force bool) (Request, bool, error) {
+			prepareCalls++
+			if !force {
+				return request, false, nil
+			}
+			request.Messages = append(request.Messages, Message{Role: RoleSystem, Content: "压缩摘要"})
+			request.NewMessages = request.Messages
+			request.PreviousResponseID = ""
+			return request, true, nil
+		},
+		IsContextError: func(err error) bool { return strings.Contains(err.Error(), "context length") },
+	})
+	if err != nil || result.Answer != "重试成功" || modelCalls != 2 || prepareCalls != 2 {
+		t.Fatalf("上下文超限恢复异常: result=%+v modelCalls=%d prepareCalls=%d err=%v", result, modelCalls, prepareCalls, err)
+	}
+}
+
+func TestRunnerDoesNotTraceModelStartBeforePreparation(t *testing.T) {
+	modelCalls := 0
+	events := []Event{}
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		modelCalls++
+		return Response{Message: Message{Content: "不应调用"}}, nil
+	}), "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) {
+		events = append(events, event)
+	}
+	prepareErr := errors.New("压缩准备失败")
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "问题"}},
+		PrepareRequest: func(context.Context, Request, bool) (Request, bool, error) {
+			return Request{}, false, prepareErr
+		},
+	})
+	if !errors.Is(err, prepareErr) || modelCalls != 0 || len(events) != 0 {
+		t.Fatalf("准备失败前不应写入 model_start: err=%v calls=%d events=%+v", err, modelCalls, events)
+	}
+}

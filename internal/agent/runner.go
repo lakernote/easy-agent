@@ -124,7 +124,6 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			toolChoice = ToolChoice{Mode: ToolChoiceNone}
 		}
 		attempt := 1
-		runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 		request := Request{
 			Model: runner.ModelName, Messages: messages, NewMessages: pending, Tools: tools,
 			ToolChoice: toolChoice, PromptCacheKey: input.PromptCacheKey,
@@ -132,6 +131,22 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			ReasoningEffort: runner.ReasoningEffort, PreviousResponseID: previousResponseID,
 			OnTextDelta: input.OnTextDelta,
 		}
+		if input.PrepareRequest != nil {
+			prepared, changed, err := input.PrepareRequest(ctx, request, false)
+			if err != nil {
+				return RunResult{}, err
+			}
+			request = prepared
+			if changed {
+				messages = append([]Message(nil), request.Messages...)
+				pending = append([]Message(nil), request.NewMessages...)
+				previousResponseID = strings.TrimSpace(request.PreviousResponseID)
+			}
+			tools = request.Tools
+		}
+		// PrepareRequest 可能触发压缩、改写历史或直接失败；只有准备成功后
+		// 才记录 model_start，保证 Trace 代表真实即将发出的模型请求。
+		runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 		response, err := runner.Model.Generate(ctx, request)
 		if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
 			err = ErrEmptyModelResponse
@@ -150,6 +165,25 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			}
 			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
+		if err != nil && input.PrepareRequest != nil && input.IsContextError != nil && input.IsContextError(err) {
+			prepared, changed, prepareErr := input.PrepareRequest(ctx, request, true)
+			if prepareErr != nil {
+				return RunResult{}, fmt.Errorf("%w；自动压缩失败: %v", err, prepareErr)
+			}
+			if changed {
+				request = prepared
+				messages = append([]Message(nil), request.Messages...)
+				pending = append([]Message(nil), request.NewMessages...)
+				previousResponseID = strings.TrimSpace(request.PreviousResponseID)
+				attempt++
+				runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
+				response, err = runner.Model.Generate(ctx, request)
+				if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
+					err = ErrEmptyModelResponse
+				}
+				runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
+			}
+		}
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -159,9 +193,25 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 		assistant := response.Message
 		assistant.Role = RoleAssistant
+		for index, call := range assistant.ToolCalls {
+			if strings.TrimSpace(call.ID) == "" {
+				assistant.ToolCalls[index].ID = fmt.Sprintf("call_%d_%d", step, index+1)
+			}
+		}
 		messages = append(messages, assistant)
+		turnMessages := []Message{assistant}
+		if input.OnTurnMessages == nil && input.OnMessage != nil {
+			if err := input.OnMessage(assistant); err != nil {
+				return RunResult{}, err
+			}
+		}
 
 		if len(assistant.ToolCalls) == 0 {
+			if input.OnTurnMessages != nil {
+				if err := input.OnTurnMessages(turnMessages); err != nil {
+					return RunResult{}, err
+				}
+			}
 			answer := strings.TrimSpace(assistant.Content)
 			if answer == "" {
 				return RunResult{}, errors.New("模型既没有返回回答，也没有调用工具")
@@ -173,17 +223,23 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 
 		pending = pending[:0]
-		for index, call := range assistant.ToolCalls {
-			if strings.TrimSpace(call.ID) == "" {
-				call.ID = fmt.Sprintf("call_%d_%d", step, index+1)
-				assistant.ToolCalls[index].ID = call.ID
-				messages[len(messages)-1].ToolCalls[index].ID = call.ID
-			}
+		for _, call := range assistant.ToolCalls {
 			output, toolErr, duration := runner.runTool(ctx, step, call, toolTimeout)
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
 			messages = append(messages, toolMessage)
 			pending = append(pending, toolMessage)
+			turnMessages = append(turnMessages, toolMessage)
+			if input.OnTurnMessages == nil && input.OnMessage != nil {
+				if err := input.OnMessage(toolMessage); err != nil {
+					return RunResult{}, err
+				}
+			}
 			runner.emit(Event{Kind: EventToolEnd, Step: step, ToolCall: &call, Output: output, Err: toolErr, Duration: duration})
+		}
+		if input.OnTurnMessages != nil {
+			if err := input.OnTurnMessages(turnMessages); err != nil {
+				return RunResult{}, err
+			}
 		}
 	}
 	return RunResult{}, errors.New("Agent 达到最大步数")

@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
   seq INTEGER NOT NULL,
   summary TEXT NOT NULL,
   through_message_id INTEGER NOT NULL,
+  split_turn INTEGER NOT NULL DEFAULT 0,
   source_messages INTEGER NOT NULL,
   compacted_messages INTEGER NOT NULL,
   usage_json BLOB NOT NULL,
@@ -133,6 +134,17 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 	_, err := store.db.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("初始化 SQLite: %w", err)
+	}
+	// 旧版本数据库由 CREATE TABLE IF NOT EXISTS 不会自动补列；这里做一次
+	// 幂等迁移，保证已有会话也能保存 split-turn 检查点。
+	var splitTurnColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_compactions') WHERE name='split_turn'`).Scan(&splitTurnColumn); err != nil {
+		return err
+	}
+	if splitTurnColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_compactions ADD COLUMN split_turn INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("迁移 ea_compactions.split_turn: %w", err)
+		}
 	}
 	var count int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM ea_settings WHERE key='model'`).Scan(&count); err != nil {
@@ -400,31 +412,43 @@ func (store *Store) events(id string) ([]Event, error) {
 }
 
 func (store *Store) AppendMessage(id string, value Message) error {
-	data, err := encode(value.ToolCalls)
-	if err != nil {
-		return err
-	}
-	if value.CreatedAt.IsZero() {
-		value.CreatedAt = time.Now()
+	return store.AppendMessages(id, []Message{value})
+}
+
+// AppendMessages 在一个事务中保存一组属于同一 Agent step 的消息。特别是
+// assistant tool call 和对应的 tool result 必须一起提交，避免进程在两次
+// AppendMessage 之间退出后留下 Provider 无法接受的不完整工具链。
+func (store *Store) AppendMessages(id string, values []Message) error {
+	if len(values) == 0 {
+		return nil
 	}
 	tx, err := store.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	inserted, err := tx.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_call_id,name,created_at)
-VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?,?,?,?,?)`, id, id, value.Role, value.Content, data, value.ToolCallID, value.Name, formatTime(value.CreatedAt))
-	if err != nil {
-		return err
-	}
-	messageID, err := inserted.LastInsertId()
-	if err != nil {
-		return err
-	}
-	for _, attachment := range value.Attachments {
-		if _, err := tx.Exec(`INSERT INTO ea_attachments(id,message_id,name,mime_type,kind,size,data,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-			attachment.ID, messageID, attachment.Name, attachment.MIMEType, attachment.Kind, attachment.Size, attachment.Data, formatTime(value.CreatedAt)); err != nil {
+	for _, value := range values {
+		data, err := encode(value.ToolCalls)
+		if err != nil {
 			return err
+		}
+		if value.CreatedAt.IsZero() {
+			value.CreatedAt = time.Now()
+		}
+		inserted, err := tx.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_call_id,name,created_at)
+VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?,?,?,?,?)`, id, id, value.Role, value.Content, data, value.ToolCallID, value.Name, formatTime(value.CreatedAt))
+		if err != nil {
+			return err
+		}
+		messageID, err := inserted.LastInsertId()
+		if err != nil {
+			return err
+		}
+		for _, attachment := range value.Attachments {
+			if _, err := tx.Exec(`INSERT INTO ea_attachments(id,message_id,name,mime_type,kind,size,data,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+				attachment.ID, messageID, attachment.Name, attachment.MIMEType, attachment.Kind, attachment.Size, attachment.Data, formatTime(value.CreatedAt)); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -444,7 +468,7 @@ VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_events WHERE session_id=?),1),?,?)`
 }
 
 func (store *Store) compactions(id string) ([]Compaction, error) {
-	rows, err := store.db.Query(`SELECT id,summary,through_message_id,source_messages,compacted_messages,usage_json,created_at FROM ea_compactions WHERE session_id=? ORDER BY seq`, id)
+	rows, err := store.db.Query(`SELECT id,summary,through_message_id,split_turn,source_messages,compacted_messages,usage_json,created_at FROM ea_compactions WHERE session_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -454,9 +478,11 @@ func (store *Store) compactions(id string) ([]Compaction, error) {
 		var value Compaction
 		var usage []byte
 		var created string
-		if err := rows.Scan(&value.ID, &value.Summary, &value.ThroughMessageID, &value.SourceMessages, &value.CompactedMessages, &usage, &created); err != nil {
+		var splitTurn int
+		if err := rows.Scan(&value.ID, &value.Summary, &value.ThroughMessageID, &splitTurn, &value.SourceMessages, &value.CompactedMessages, &usage, &created); err != nil {
 			return nil, err
 		}
+		value.SplitTurn = splitTurn != 0
 		if err := json.Unmarshal(usage, &value.Usage); err != nil {
 			return nil, err
 		}
@@ -475,9 +501,13 @@ func (store *Store) AppendCompaction(id string, value Compaction) error {
 	if err != nil {
 		return err
 	}
-	_, err = store.db.Exec(`INSERT INTO ea_compactions(session_id,seq,summary,through_message_id,source_messages,compacted_messages,usage_json,created_at)
-VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_compactions WHERE session_id=?),1),?,?,?,?,?,?)`,
-		id, id, value.Summary, value.ThroughMessageID, value.SourceMessages, value.CompactedMessages, usage, formatTime(value.CreatedAt))
+	splitTurn := 0
+	if value.SplitTurn {
+		splitTurn = 1
+	}
+	_, err = store.db.Exec(`INSERT INTO ea_compactions(session_id,seq,summary,through_message_id,split_turn,source_messages,compacted_messages,usage_json,created_at)
+	VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_compactions WHERE session_id=?),1),?,?,?,?,?,?,?)`,
+		id, id, value.Summary, value.ThroughMessageID, splitTurn, value.SourceMessages, value.CompactedMessages, usage, formatTime(value.CreatedAt))
 	return err
 }
 
