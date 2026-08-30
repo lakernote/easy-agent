@@ -96,7 +96,7 @@ mcp__<server_id>__<remote_tool_name>
 
 每轮开始时不会连接全部 MCP。模型先看到一个 `load_mcp(id)` 工具和服务元数据；只有调用它时，`Loader` 才连接指定服务，并通过 `Runner.AddTools` 把真实工具加入下一轮模型请求。这样普通问答不承担远端工具 Schema 的 Token 成本。
 
-认证、进程环境和连接生命周期都停留在 MCP 适配层。启用配置前必须完成认证校验、连接和 `tools/list`；一轮任务结束后关闭本轮实际打开的连接。Agent 最终仍只看到普通 `agent.Tool`。Filesystem MCP 只作为额外挂载目录的兼容能力；普通工作区文件操作不需要启动 Node.js MCP 进程。
+认证、进程环境和连接生命周期都停留在 MCP 适配层。启用配置前必须完成认证校验、连接和 `tools/list`；一轮任务结束后关闭本轮实际打开的连接。Agent 最终仍只看到普通 `agent.Tool`。普通工作区文件操作由内置 Tools 提供，不需要启动 Node.js MCP 进程；只有确实需要外部系统能力时才配置 MCP。
 
 ## 排队与取消
 

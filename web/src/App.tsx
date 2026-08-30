@@ -5,6 +5,34 @@ import { api } from './api'
 import type { AttachmentInput, Bootstrap, MCPConfig, ModelSettings, Session, Skill, TraceEvent } from './types'
 
 type Page = 'chat' | 'skills' | 'capabilities'
+type CapabilityKind = 'skill' | 'tool' | 'mcp'
+type CapabilityOption = {
+  key: string
+  kind: CapabilityKind
+  name: string
+  description: string
+  enabled: boolean
+  token: string
+}
+
+type StarterSuggestion = {
+  category: string
+  title: string
+  prompt: string
+  attachment?: boolean
+}
+
+const starterSuggestions: StarterSuggestion[] = [
+  { category: '实时查询', title: '今天星期几？', prompt: '今天星期几？请使用可用工具核验后回答。' },
+  { category: '精确计算', title: '计算一个表达式', prompt: '请使用计算工具算出 (128*35+640)/8，并给出结果。' },
+  { category: '本机操作', title: '看看当前工作目录', prompt: '请使用 shell 查看当前工作目录，并根据目录内容概括这是个什么项目。' },
+  { category: '联网研究', title: '查找最新公开资料', prompt: '请搜索 EasyAgent 的 GitHub 仓库，概括它当前的定位、主要能力并附上来源。' },
+  { category: '代码实现', title: '写一个最小 HTTP API', prompt: '请用 Go 设计一个带 /health 健康检查的最小 HTTP API，并解释如何运行。' },
+  { category: '故障排查', title: '分析连接失败', prompt: '请分析这个错误的可能根因并给出排查顺序：dial tcp 127.0.0.1:5432: connect: connection refused' },
+  { category: '文件理解', title: '总结 PDF 或代码文件', prompt: '请阅读我上传的文件，先概括核心内容，再提取风险、结论和待办事项。', attachment: true },
+  { category: '图片分析', title: '分析报错截图', prompt: '请读取我上传的截图，提取其中的错误信息，分析最可能的原因并给出解决步骤。', attachment: true },
+]
+
 const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
 const MathMarkdown = lazy(() => import('./MathMarkdown'))
 const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
@@ -65,12 +93,12 @@ function App() {
     <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onError={setError} />
     <main className="main-canvas">
       <header className="topbar">
-        <div className="mobile-brand">EA</div>
+        <div className="mobile-brand"><Logo /></div>
         <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : page === 'skills' ? 'Skills' : '模型与工具'}</div>
         <div className="topbar-actions"><span className={`model-dot ${modelReady ? 'ready' : ''}`} /><span className="model-name">{modelLabel}</span>{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onOpenCapabilities={() => setPage('capabilities')} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('capabilities')} />}
       {page === 'skills' && <Skills data={data} onRefresh={refresh} onError={setError} />}
       {page === 'capabilities' && <Capabilities data={data} onRefresh={refresh} onError={setError} />}
     </main>
@@ -84,6 +112,7 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
   const [managing, setManaging] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Session[]>([])
   const [feedback, setFeedback] = useState('')
 
   const visibleSessions = useMemo(() => {
@@ -106,15 +135,7 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
     window.setTimeout(() => setFeedback(''), 2400)
   }
 
-  const remove = async (item: Session) => {
-    if (!window.confirm(`删除会话“${item.title}”及其全部 Trace？\n\n此操作不能撤销。`)) return
-    try {
-      await api.deleteSession(item.id)
-      if (session?.id === item.id) onNew()
-      await onRefresh()
-      showFeedback('会话已删除')
-    } catch (reason) { onError((reason as Error).message) }
-  }
+  const requestRemove = (item: Session) => setPendingDelete([item])
 
   const toggleSelected = (id: string) => setSelectedIds((current) => {
     const next = new Set(current)
@@ -129,30 +150,34 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
     return next
   })
 
-  const removeSelected = async () => {
+  const requestRemoveSelected = () => {
     const targets = selectableSessions.filter((item) => selectedIds.has(item.id))
-    if (!targets.length || !window.confirm(`确认删除选中的 ${targets.length} 条会话及全部 Trace？\n\n此操作不能撤销。`)) return
+    if (targets.length) setPendingDelete(targets)
+  }
+
+  const confirmRemove = async () => {
+    if (!pendingDelete.length || deleting) return
     setDeleting(true); onError('')
     let removed = 0
     try {
-      for (const item of targets) { await api.deleteSession(item.id); removed += 1 }
-      if (session && selectedIds.has(session.id)) onNew()
+      for (const item of pendingDelete) { await api.deleteSession(item.id); removed += 1 }
+      if (session && pendingDelete.some((item) => item.id === session.id)) onNew()
       setSelectedIds(new Set()); setManaging(false)
       await onRefresh()
-      showFeedback(`已删除 ${removed} 条会话`)
+      showFeedback(removed === 1 ? '会话已删除' : `已删除 ${removed} 条会话`)
     } catch (reason) {
       await onRefresh().catch(() => undefined)
       onError(`${removed ? `已删除 ${removed} 条；` : ''}${(reason as Error).message}`)
-    } finally { setDeleting(false) }
+    } finally { setDeleting(false); setPendingDelete([]) }
   }
 
   const leaveManaging = () => { setManaging(false); setSelectedIds(new Set()) }
   return <aside className="sidebar">
-    <div className="brand"><div className="brand-mark">E</div><div><strong>EasyAgent</strong><small>一个核心智能体</small></div></div>
+    <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>轻量 · 自托管 · 可扩展</small></div></div>
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
     <nav className="primary-nav">
       <button className={page === 'chat' ? 'active' : ''} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
-      <button className={page === 'skills' ? 'active' : ''} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em>{data.skills.filter((item) => item.enabled).length}</em></button>
+      <button className={page === 'skills' ? 'active' : ''} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em title={`已启用 ${data.skills.filter((item) => item.enabled).length} / 共 ${data.skills.length} 个`}>{data.skills.filter((item) => item.enabled).length}/{data.skills.length}</em></button>
       <button className={page === 'capabilities' ? 'active' : ''} onClick={() => onPage('capabilities')}><Icon name="plug" />模型与工具</button>
     </nav>
     <div className="session-label"><span>会话 <small>{data.sessions.length}</small></span><div><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
@@ -160,31 +185,53 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
       <label className="session-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedIds(new Set()) }} placeholder="搜索标题或模型" aria-label="搜索会话" /></label>
       <select value={sort} onChange={(event) => setSort(event.target.value as 'newest' | 'oldest')} aria-label="按时间排序"><option value="newest">最新</option><option value="oldest">最早</option></select>
     </div>
-    {managing && <div className="session-manage"><button onClick={toggleAll} disabled={!selectableSessions.length}>{allSelected ? '取消全选' : '全选'}</button><span>已选 {selectedCount}</span><button className="manage-delete" onClick={removeSelected} disabled={!selectedCount || deleting}>{deleting ? '删除中…' : `删除${selectedCount ? ` (${selectedCount})` : ''}`}</button></div>}
+    {managing && <div className="session-manage"><button onClick={toggleAll} disabled={!selectableSessions.length}>{allSelected ? '取消全选' : '全选'}</button><span>已选 {selectedCount}</span><button className="manage-delete" onClick={requestRemoveSelected} disabled={!selectedCount || deleting}>{deleting ? '删除中…' : `删除${selectedCount ? ` (${selectedCount})` : ''}`}</button></div>}
     <div className="session-list">
       {data.sessions.length === 0 && <div className="empty-list">还没有对话</div>}
       {data.sessions.length > 0 && visibleSessions.length === 0 && <div className="empty-list"><strong>没有匹配的会话</strong><button onClick={() => setQuery('')}>清空搜索</button></div>}
       {visibleSessions.map((item) => <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${managing ? 'managing' : ''}`}>
         {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${item.title}`} /></label>}
         <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={item.title}><span className={`status ${item.status}`} /><span className="session-copy"><strong>{item.title}</strong><small>{formatTime(item.updatedAt)} · {statusLabel(item.status)}{item.model ? ` · ${item.model}` : ''}</small></span></button>
-        {!managing && !isActive(item.status) && <button className="session-delete" aria-label={`删除会话 ${item.title}`} title="删除会话" onClick={() => remove(item)}><TrashIcon /></button>}
+        {!managing && !isActive(item.status) && <button className="session-delete" aria-label={`删除会话 ${item.title}`} title="删除会话" onClick={() => requestRemove(item)}><TrashIcon /></button>}
       </div>)}
     </div>
     <div className="sidebar-feedback" aria-live="polite">{feedback}</div>
     <div className="sidebar-foot"><span className="service-dot" />本地服务正常 <small>v0.1</small></div>
+    {pendingDelete.length > 0 && <ConfirmDialog
+      title={pendingDelete.length === 1 ? '删除这个会话？' : `删除选中的 ${pendingDelete.length} 个会话？`}
+      description="会话消息和对应的 Agent Trace 将一起删除，删除后无法恢复。"
+      subject={pendingDelete.length === 1 ? pendingDelete[0].title : pendingDelete.map((item) => item.title).join('、')}
+      confirmLabel={pendingDelete.length === 1 ? '删除会话' : `删除 ${pendingDelete.length} 个会话`}
+      busy={deleting}
+      onCancel={() => setPendingDelete([])}
+      onConfirm={confirmRemove}
+    />}
   </aside>
 }
 
-function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onOpenCapabilities: () => void }) {
+function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [capabilityOpen, setCapabilityOpen] = useState(false)
+  const [capabilityQuery, setCapabilityQuery] = useState('')
+  const [capabilityIndex, setCapabilityIndex] = useState(0)
+  const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const capabilitySearchRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentRef = useRef<PendingAttachment[]>([])
+  const capabilities = useMemo(() => capabilityOptions(data), [data])
+  const visibleCapabilities = useMemo(() => {
+    const keyword = capabilityQuery.trim().toLocaleLowerCase()
+    return capabilities.filter((item) => !keyword || item.name.toLocaleLowerCase().includes(keyword) || item.description.toLocaleLowerCase().includes(keyword) || item.token.slice(1).toLocaleLowerCase().includes(keyword) || capabilityKindLabel(item.kind).toLocaleLowerCase().includes(keyword))
+  }, [capabilities, capabilityQuery])
+  const selectedCapabilities = useMemo(() => capabilities.filter((item) => hasCapabilityToken(draft, item.token)), [capabilities, draft])
+  const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.length, session?.status, session?.partialOutput])
   useEffect(() => {
     if (!textareaRef.current) return
@@ -193,6 +240,15 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
   }, [draft])
   useEffect(() => { attachmentRef.current = attachments }, [attachments])
   useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
+  useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
+  useEffect(() => {
+    if (!capabilityOpen) return
+    const close = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setCapabilityOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [capabilityOpen])
 
   const addFiles = (files: FileList | File[]) => {
     if (sending || isActive(session?.status)) return
@@ -222,6 +278,84 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
     return false
   }))
 
+  const closeCapabilityPicker = () => {
+    setCapabilityOpen(false)
+    setCapabilityQuery('')
+    setCapabilityRange(null)
+  }
+
+  const openCapabilityPicker = () => {
+    if (sending || isActive(session?.status)) return
+    const textarea = textareaRef.current
+    setCapabilityRange({ start: textarea?.selectionStart ?? draft.length, end: textarea?.selectionEnd ?? draft.length })
+    setCapabilityQuery('')
+    setCapabilityOpen(true)
+    window.setTimeout(() => capabilitySearchRef.current?.focus(), 0)
+  }
+
+  const insertCapability = (item: CapabilityOption) => {
+    if (!item.enabled) return
+    if (hasCapabilityToken(draft, item.token)) {
+      closeCapabilityPicker()
+      textareaRef.current?.focus()
+      return
+    }
+    const range = capabilityRange || { start: draft.length, end: draft.length }
+    const before = draft.slice(0, range.start)
+    const after = draft.slice(range.end)
+    const prefix = before && !/\s$/.test(before) ? ' ' : ''
+    const suffix = after && /^\s/.test(after) ? '' : ' '
+    const inserted = `${prefix}${item.token}${suffix}`
+    const next = before + inserted + after
+    const caret = before.length + inserted.length
+    setDraft(next)
+    closeCapabilityPicker()
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(caret, caret)
+    })
+  }
+
+  const removeCapability = (item: CapabilityOption) => {
+    setDraft((current) => current.replace(item.token, '').replace(/ {2,}/g, ' ').trimStart())
+  }
+
+  const handleCapabilityKey = (event: React.KeyboardEvent) => {
+    if (!capabilityOpen) return false
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeCapabilityPicker()
+      textareaRef.current?.focus()
+      return true
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const direction = event.key === 'ArrowDown' ? 1 : -1
+      setCapabilityIndex((current) => visibleCapabilities.length ? (current + direction + visibleCapabilities.length) % visibleCapabilities.length : 0)
+      return true
+    }
+    if (event.key === 'Enter' && visibleCapabilities[capabilityIndex]?.enabled) {
+      event.preventDefault()
+      insertCapability(visibleCapabilities[capabilityIndex])
+      return true
+    }
+    return false
+  }
+
+  const updateDraft = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value
+    const caret = event.target.selectionStart
+    setDraft(value)
+    const mention = capabilityMention(value, caret)
+    if (mention) {
+      setCapabilityRange({ start: mention.start, end: caret })
+      setCapabilityQuery(mention.query)
+      setCapabilityOpen(true)
+    } else if (capabilityRange && document.activeElement === event.target) {
+      closeCapabilityPicker()
+    }
+  }
+
   const send = async (preset?: string) => {
     const message = (preset ?? draft).trim()
     if ((!message && attachments.length === 0) || sending || isActive(session?.status)) return
@@ -229,7 +363,7 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
       const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload)
-      onSession(next); setDraft(''); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
+      onSession(next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
       if (/附件|Base64|MiB|格式/.test(message)) setAttachmentError(message)
@@ -237,10 +371,18 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
     } finally { setSending(false) }
   }
 
-  const suggestions = ['今天星期几？', '帮我分析这段错误日志', '设计一个简单的 REST API', '解释 Go 的 interface 和 Java interface 的区别']
+  const startSuggestion = (suggestion: StarterSuggestion) => {
+    if (suggestion.attachment) {
+      setDraft(suggestion.prompt)
+      textareaRef.current?.focus()
+      window.setTimeout(() => fileInputRef.current?.click(), 0)
+      return
+    }
+    send(suggestion.prompt)
+  }
   return <section className="chat-page">
     <div className="conversation">
-      {!session && <div className="welcome"><div className="agent-orb"><span>EA</span></div><p className="eyebrow">一个智能体 · 处理各种任务</p><h1>想解决什么问题？</h1><p>无需先建项目。直接提问；需要代码、日志或外部系统时，再添加上下文、Skill 或 MCP。</p><div className="suggestions">{suggestions.map((value) => <button key={value} onClick={() => send(value)}>{value}<span>↗</span></button>)}</div></div>}
+      {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">一个核心 Agent · 能力按需加载</p><h1>想解决什么问题？</h1><p>直接描述目标，也可以添加代码、日志、图片或 PDF；输入 <code>@</code> 可明确指定 Tool、Skill 或 MCP。</p><div className="suggestion-heading"><strong>从一个场景开始</strong><span>点击即可运行；文件场景会先请你选择附件</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued"><i /><i /><i /><span>任务正在排队，等待本地执行槽…</span></div></div>}
@@ -254,14 +396,48 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenCapabilities
       {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
       <div ref={endRef} />
     </div>
-    <div className="composer-wrap"><div className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
+    <div className="composer-wrap"><div ref={composerRef} className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
+      {capabilityOpen && <CapabilityPicker items={visibleCapabilities} activeIndex={capabilityIndex} query={capabilityQuery} searchRef={capabilitySearchRef} onQuery={setCapabilityQuery} onKeyDown={handleCapabilityKey} onPick={insertCapability} onOpenSkills={onOpenSkills} onOpenCapabilities={onOpenCapabilities} />}
       {attachments.length > 0 && <div className="attachment-preview-list" aria-label="待发送附件">{attachments.map((item) => <div className="attachment-preview" key={item.id}>{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="attachment-file-icon"><FileIcon /></span>}<span><strong title={item.file.name}>{item.file.name}</strong><small>{attachmentTypeLabel(item.file)} · {formatBytes(item.file.size)}</small></span><button type="button" disabled={sending || isActive(session?.status)} aria-label={`移除附件 ${item.file.name}`} onClick={() => removeAttachment(item.id)}><CloseIcon /></button></div>)}</div>}
-      <textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : '给 EasyAgent 发消息…'} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
-      <div className="composer-toolbar"><div className="composer-tools"><button type="button" className="attach-button" disabled={sending || isActive(session?.status)} aria-label="添加文件或图片" onClick={() => fileInputRef.current?.click()}><AttachIcon /><span>添加附件</span></button><small>图片、文本、代码或 PDF</small><input ref={fileInputRef} className="visually-hidden" type="file" multiple tabIndex={-1} aria-hidden="true" accept={attachmentAccept} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} /></div><button type="button" className="send-button" aria-label={sending ? '正在发送' : '发送消息'} disabled={(!draft.trim() && attachments.length === 0) || sending || isActive(session?.status)} onClick={() => send()}>{sending ? <span className="send-spinner" /> : <SendIcon />}</button></div>
+      {selectedCapabilities.length > 0 && <div className="selected-capabilities" aria-label="已指定能力">{selectedCapabilities.map((item) => <span key={item.key}><b>{capabilityKindLabel(item.kind)}</b>{item.name}<button type="button" aria-label={`移除 ${item.name}`} onClick={() => removeCapability(item)}>×</button></span>)}</div>}
+      <textarea ref={textareaRef} value={draft} onChange={updateDraft} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : '给 EasyAgent 发消息… 输入 @ 选择能力'} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (handleCapabilityKey(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
+      <div className="composer-toolbar"><div className="composer-tools"><button type="button" className="attach-button" disabled={sending || isActive(session?.status)} aria-label="添加文件或图片" onClick={() => fileInputRef.current?.click()}><AttachIcon /><span>附件</span></button><button type="button" className={`capability-button ${capabilityOpen ? 'active' : ''}`} disabled={sending || isActive(session?.status)} aria-label={`选择 Agent 能力，共 ${capabilities.length} 项，${enabledCapabilityCount} 项已启用`} aria-expanded={capabilityOpen} aria-haspopup="listbox" onClick={() => capabilityOpen ? closeCapabilityPicker() : openCapabilityPicker()}><span aria-hidden="true">@</span><strong>能力</strong><small>{capabilities.length}</small></button><small>{data.skills.length} Skills · {data.builtinTools.length} Tools · {data.mcps.length} MCP</small><input ref={fileInputRef} className="visually-hidden" type="file" multiple tabIndex={-1} aria-hidden="true" accept={attachmentAccept} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} /></div><button type="button" className="send-button" aria-label={sending ? '正在发送' : '发送消息'} disabled={(!draft.trim() && attachments.length === 0) || sending || isActive(session?.status)} onClick={() => send()}>{sending ? <span className="send-spinner" /> : <SendIcon />}</button></div>
       {attachmentError && <div id="attachment-error" className="composer-error" role="alert">{attachmentError}</div>}
     </div><small id="composer-help" className="composer-hint">Enter 发送 · Shift + Enter 换行 · 可拖入或粘贴 · 单文件最大 5 MiB · 图片/PDF 需要当前模型支持多模态</small></div>
   </section>
 }
+
+function CapabilityPicker({ items, activeIndex, query, searchRef, onQuery, onKeyDown, onPick, onOpenSkills, onOpenCapabilities }: { items: CapabilityOption[]; activeIndex: number; query: string; searchRef: React.RefObject<HTMLInputElement>; onQuery: (value: string) => void; onKeyDown: (event: React.KeyboardEvent) => void; onPick: (item: CapabilityOption) => void; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
+  return <div className="capability-picker" role="dialog" aria-label="选择 Agent 能力">
+    <div className="capability-picker-head"><div><strong>选择能力</strong><span>点击或输入 @ 指定本轮使用</span></div><label><span aria-hidden="true">⌕</span><input ref={searchRef} type="search" value={query} onChange={(event) => onQuery(event.target.value)} onKeyDown={onKeyDown} placeholder="搜索 Skill、Tool 或 MCP" aria-label="搜索能力" /></label></div>
+    <div className="capability-options" role="listbox" aria-label="可用能力">
+      {items.length === 0 && <div className="capability-empty">没有匹配的能力</div>}
+      {items.map((item, index) => <button key={item.key} type="button" role="option" aria-selected={index === activeIndex} className={`${index === activeIndex ? 'active' : ''} ${item.enabled ? '' : 'disabled'}`} onMouseDown={(event) => event.preventDefault()} onClick={() => onPick(item)} disabled={!item.enabled}><span className={`capability-kind ${item.kind}`}>{capabilityKindShort(item.kind)}</span><span><strong>{item.name}</strong><small>{item.description}</small></span><em>{item.enabled ? item.token : '未启用'}</em></button>)}
+    </div>
+    <div className="capability-picker-foot"><span>↑↓ 选择 · Enter 插入 · Esc 关闭</span><div><button type="button" onClick={onOpenSkills}>管理 Skills</button><button type="button" onClick={onOpenCapabilities}>管理 Tools / MCP</button></div></div>
+  </div>
+}
+
+function capabilityOptions(data: Bootstrap): CapabilityOption[] {
+  const skills = data.skills.map((item) => ({ key: `skill:${item.name}`, kind: 'skill' as const, name: item.name, description: item.description, enabled: item.enabled, token: `@skill:${item.name}` }))
+  const tools = data.builtinTools.map((item) => ({ key: `tool:${item.name}`, kind: 'tool' as const, name: item.name, description: item.description, enabled: true, token: `@tool:${item.name}` }))
+  const mcps = data.mcps.map((item) => ({ key: `mcp:${item.id}`, kind: 'mcp' as const, name: item.name || item.id, description: item.description || '外部 MCP Server', enabled: item.enabled, token: `@mcp:${item.id}` }))
+  return [...skills, ...tools, ...mcps].sort((left, right) => Number(right.enabled) - Number(left.enabled) || left.kind.localeCompare(right.kind) || left.name.localeCompare(right.name))
+}
+
+function capabilityMention(value: string, caret: number) {
+  const before = value.slice(0, caret)
+  const match = before.match(/(?:^|\s)@([^\s@]*)$/)
+  if (!match) return null
+  return { start: before.lastIndexOf('@'), query: match[1] }
+}
+
+function hasCapabilityToken(value: string, token: string) {
+  return value.split(/\s+/).includes(token)
+}
+
+function capabilityKindLabel(kind: CapabilityKind) { return kind === 'skill' ? 'Skill' : kind === 'tool' ? 'Tool' : 'MCP' }
+function capabilityKindShort(kind: CapabilityKind) { return kind === 'skill' ? 'S' : kind === 'tool' ? 'T' : 'M' }
 
 function MessageView({ message }: { message: Session['messages'][number] }) {
   if (message.role === 'tool') return <details className="tool-result"><summary><span>⌁</span>{message.name || '工具'} 返回结果</summary><Payload value={message.content || ''} /></details>
@@ -276,7 +452,7 @@ function MessageAttachments({ attachments }: { attachments: Session['messages'][
     : <a key={attachment.id} className="message-file" href={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" download={attachment.name}><FileIcon /><span><strong>{attachment.name}</strong><small>{attachment.kind === 'pdf' ? 'PDF' : '文本文件'} · {formatBytes(attachment.size)}</small></span></a>)}</div>
 }
 
-function Avatar() { return <div className="avatar">E</div> }
+function Avatar() { return <div className="avatar"><Logo /></div> }
 function Markdown({ children }: { children: string }) {
   if (hasMath(children)) return <Suspense fallback={<ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>}><MathMarkdown>{children}</MathMarkdown></Suspense>
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
@@ -417,6 +593,8 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
   const [modelNotice, setModelNotice] = useState<{ ready: boolean; title: string; message: string } | null>(null)
   const [installingPreset, setInstallingPreset] = useState('')
   const [savingMCP, setSavingMCP] = useState(false)
+  const [deletingMCP, setDeletingMCP] = useState(false)
+  const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
   useEffect(() => setModel({ ...data.model }), [data.model])
   const saveModel = async () => { try { await api.saveModel(model); await onRefresh() } catch (reason) { onError((reason as Error).message) } }
@@ -466,15 +644,25 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
       setMCP(null)
     } catch (reason) { onError((reason as Error).message) } finally { setSavingMCP(false) }
   }
-  const removeMCP = async () => { if (!mcp || !window.confirm(`删除 MCP「${mcp.name}」？`)) return; try { await api.deleteMCP(mcp.id); await onRefresh(); setMCP(null) } catch (reason) { onError((reason as Error).message) } }
+  const removeMCP = async () => {
+    if (!mcp || deletingMCP) return
+    setDeletingMCP(true); onError('')
+    try {
+      await api.deleteMCP(mcp.id)
+      await onRefresh()
+      setConfirmingMCPDelete(false)
+      setMCP(null)
+    } catch (reason) { onError((reason as Error).message) } finally { setDeletingMCP(false) }
+  }
   const testMCP = async (id: string) => { setMCPNotice(null); try { const result = await api.testMCP(id); setMCPNotice({ ready: true, title: `连接成功 · ${result.tools.length} 个工具`, message: 'MCP 握手和工具清单读取正常。', tools: result.tools.map((item) => item.name) }) } catch (reason) { onError((reason as Error).message) } }
+  const persistedMCP = Boolean(mcp && data.mcps.some((item) => item.id === mcp.id))
   return <section className="settings-page capabilities"><div className="page-intro"><p className="eyebrow">可插拔能力</p><h1>模型与工具</h1><p>模型、内置 Tool、MCP 和基础提示词分开管理；启用后统一注册给同一个核心 Agent。</p></div>
     <div className="section-block"><div className="section-heading"><div><h2>模型</h2><p>支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div><span className="tag">{model.protocol}</span></div>
       <div className="model-presets"><span>免费额度模板 · 仍需注册自己的 API Key，额度和地区以厂商为准</span>{data.modelPresets.map((preset) => { const selected = model.provider === preset.provider && model.baseUrl === preset.baseUrl && model.model === preset.model; return <button key={preset.id} type="button" className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => useModelPreset(preset)}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.ready ? `已检测到 ${preset.apiKeyEnv}` : `需要 ${preset.apiKeyEnv}`}</em></button> })}</div>
       <div className="form-grid"><label>提供方<input value={model.provider} onChange={(e) => setModel({ ...model, provider: e.target.value })} /></label><label>协议<select value={model.protocol} onChange={(e) => setModel({ ...model, protocol: e.target.value as ModelSettings['protocol'] })}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label><label className="wide">Base URL<input value={model.baseUrl} onChange={(e) => setModel({ ...model, baseUrl: e.target.value })} /></label><label>模型名称<input value={model.model} onChange={(e) => setModel({ ...model, model: e.target.value })} /></label><label>推理模式<select value={model.thinking || ''} onChange={(e) => setModel({ ...model, thinking: e.target.value })}><option value="">模型默认</option><option value="disabled">尝试关闭推理</option></select><small>兼容服务建议使用模型默认；部分模型不支持关闭推理</small></label><label>最大输出 Token<input type="number" value={model.maxOutputTokens} onChange={(e) => setModel({ ...model, maxOutputTokens: Number(e.target.value) })} /></label><label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(e) => setModel({ ...model, requestTimeoutSeconds: Number(e.target.value) })} /><small>默认 {data.modelRules.defaultRequestTimeoutSeconds} 秒；单次请求最多 {data.modelRules.maxRequestTimeoutSeconds} 秒</small></label><label>上下文窗口 Token<input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(e) => setModel({ ...model, contextWindowTokens: Number(e.target.value) })} /><small>0 表示未知；Ollama 运行后读取当前实际窗口</small></label><label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(e) => setModel({ ...model, compressionThresholdPercent: Number(e.target.value) })} /><small>默认达到上下文窗口的 {data.modelRules.defaultCompressionThresholdPercent}% 后生成检查点</small></label><label>API Key<input type="password" placeholder={model.secretConfigured ? '已配置，留空不修改' : '可留空'} value={model.apiKey || ''} onChange={(e) => setModel({ ...model, apiKey: e.target.value })} /></label><label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(e) => setModel({ ...model, apiKeyEnv: e.target.value })} /></label></div>{modelNotice && <div role="status" aria-live="polite" className={`model-notice ${modelNotice.ready ? 'ready' : 'failed'}`}><div><strong>{modelNotice.title}</strong><span>{modelNotice.message}</span></div><button aria-label="关闭模型测试结果" onClick={() => setModelNotice(null)}>×</button></div>}<div className="form-actions"><button className="ghost-button" disabled={testingModel} onClick={testModel}>{testingModel ? '正在验证 Function Calling…' : '测试当前模型'}</button><button className="primary-button" onClick={saveModel}>保存模型</button></div><div className="ollama-strip"><div><strong><span className={`service-dot ${data.ollama.running ? '' : 'off'}`} />Ollama · 无需 API Key</strong><small>{data.ollama.message}</small></div><div>{data.ollama.models.map((item) => <button key={item.name} className="ghost-button" onClick={() => useOllama(item.name)}>使用 {item.name}</button>)}</div></div></div>
     <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>随 Go 二进制发布，无需安装；由模型通过 Function Calling 自主选择。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
-    <div className="section-block"><div className="section-heading"><div><h2>MCP Servers</h2><p>用于浏览器、代码托管和其他外部系统；远端工具按需转换成 <code>mcp__服务__工具</code>。</p></div><button className="ghost-button" onClick={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })}>＋ 自定义</button></div><div className="capability-note"><strong>工作区文件无需 MCP</strong><span>read、grep、find、ls、edit、write 已内置；Filesystem 只用于额外挂载目录。</span></div>{mcpNotice && <div role="status" aria-live="polite" className={`mcp-notice ${mcpNotice.ready ? 'ready' : 'failed'}`}><div><strong>{mcpNotice.title}</strong><span>{mcpNotice.message}</span></div>{mcpNotice.tools.length > 0 && <details><summary>查看 {mcpNotice.tools.length} 个工具</summary><code>{mcpNotice.tools.join('\n')}</code></details>}<button aria-label="关闭 MCP 状态" onClick={() => setMCPNotice(null)}>×</button></div>}<div className="mcp-grid">{data.mcps.map((item) => { const preset = data.mcpPresets.find((candidate) => candidate.id === item.id); const canInstall = !item.enabled && preset?.action === 'install'; return <div className="mcp-row" key={item.id}><div><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><strong>{preset?.name || item.name}</strong><small title={preset?.description || item.description}>{preset?.description || item.description || (item.transport === 'stdio' ? `${item.command} ${item.args.join(' ')}` : item.endpoint)}</small></div><span>{item.enabled ? '已启用' : '已停用'}</span><button disabled={installingPreset === item.id} onClick={() => canInstall && preset ? installPreset(preset) : testMCP(item.id)}>{installingPreset === item.id ? '检测中…' : canInstall ? '检测并启用' : '测试'}</button><button onClick={() => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })}>编辑</button></div> })}</div><div className="presets"><span>MCP 预设 · 仅在任务需要时启用，不会预加载全部工具</span>{data.mcpPresets.filter((preset) => !data.mcps.some((item) => item.id === preset.id)).map((preset) => <button key={preset.id} type="button" disabled={!!installingPreset} onClick={() => installPreset(preset)}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.requirement}</em><b>{installingPreset === preset.id ? '正在检测…' : preset.action === 'install' ? '检测并启用' : '配置'}</b></button>)}</div></div>
-    <details className="prompt-block"><summary><div><h2>基础 System Prompt</h2><p>独立 Markdown 包，只定义稳定行为；项目做法写进 Skill。</p></div><span>查看</span></summary><pre>{data.systemPrompt}</pre></details>
+    <div className="section-block"><div className="section-heading"><div><h2>MCP Servers</h2><p>用于浏览器、代码托管和其他外部系统；远端工具按需转换成 <code>mcp__服务__工具</code>。</p></div><button className="ghost-button" onClick={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })}>＋ 自定义</button></div><div className="capability-note"><strong>工作区文件无需 MCP</strong><span>read、grep、find、ls、edit、write 已内置。</span></div>{mcpNotice && <div role="status" aria-live="polite" className={`mcp-notice ${mcpNotice.ready ? 'ready' : 'failed'}`}><div><strong>{mcpNotice.title}</strong><span>{mcpNotice.message}</span></div>{mcpNotice.tools.length > 0 && <details><summary>查看 {mcpNotice.tools.length} 个工具</summary><code>{mcpNotice.tools.join('\n')}</code></details>}<button aria-label="关闭 MCP 状态" onClick={() => setMCPNotice(null)}>×</button></div>}<div className="mcp-grid">{data.mcps.map((item) => { const preset = data.mcpPresets.find((candidate) => candidate.id === item.id); const canInstall = !item.enabled && preset?.action === 'install'; return <div className="mcp-row" key={item.id}><div><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><strong>{preset?.name || item.name}</strong><small title={preset?.description || item.description}>{preset?.description || item.description || (item.transport === 'stdio' ? `${item.command} ${item.args.join(' ')}` : item.endpoint)}</small></div><span>{item.enabled ? '已启用' : '已停用'}</span><button disabled={installingPreset === item.id} onClick={() => canInstall && preset ? installPreset(preset) : testMCP(item.id)}>{installingPreset === item.id ? '检测中…' : canInstall ? '检测并启用' : '测试'}</button><button onClick={() => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })}>编辑</button></div> })}</div><div className="presets"><span>MCP 预设 · 仅在任务需要时启用，不会预加载全部工具</span>{data.mcpPresets.filter((preset) => !data.mcps.some((item) => item.id === preset.id)).map((preset) => <button key={preset.id} type="button" disabled={!!installingPreset} onClick={() => installPreset(preset)}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.requirement}</em><b>{installingPreset === preset.id ? '正在检测…' : preset.action === 'install' ? '检测并启用' : '配置'}</b></button>)}</div></div>
+    <details className="prompt-block"><summary><div><h2>基础 System Prompt</h2><p>独立 Markdown 包，只定义稳定行为；具体任务方法和团队约定写进 Skill。</p></div><span>查看</span></summary><pre>{data.systemPrompt}</pre></details>
     {mcp && <div className="modal-backdrop" onMouseDown={() => setMCP(null)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-head"><div><p className="eyebrow">MCP SERVER</p><h2>{mcp.name}</h2></div><button aria-label="关闭 MCP 配置" onClick={() => setMCP(null)}>×</button></div>
       <div className="form-grid">
@@ -496,9 +684,38 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
         </>}
       </div>
       {mcp.enabled && <p className="modal-copy verify-copy">保存时会先校验认证、连接服务并读取工具清单；失败时不会启用。</p>}
-      <div className="form-actions"><button className="ghost-button danger" disabled={savingMCP} onClick={removeMCP}>删除</button><button className="primary-button" disabled={savingMCP} onClick={saveMCP}>{savingMCP ? '正在验证…' : mcp.enabled ? '验证并启用' : '保存配置'}</button></div>
+      <div className="form-actions"><button className="ghost-button danger" disabled={savingMCP || deletingMCP} onClick={() => persistedMCP ? setConfirmingMCPDelete(true) : setMCP(null)}>{persistedMCP ? '删除' : '放弃新增'}</button><button className="primary-button" disabled={savingMCP || deletingMCP} onClick={saveMCP}>{savingMCP ? '正在验证…' : mcp.enabled ? '验证并启用' : '保存配置'}</button></div>
     </div></div>}
+    {mcp && confirmingMCPDelete && <ConfirmDialog
+      title="删除这个 MCP 配置？"
+      description="认证信息和连接配置将被永久删除，Agent 也将无法再调用它提供的工具。"
+      subject={mcp.name}
+      confirmLabel="删除 MCP"
+      busy={deletingMCP}
+      onCancel={() => setConfirmingMCPDelete(false)}
+      onConfirm={removeMCP}
+    />}
   </section>
+}
+
+function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    cancelRef.current?.focus()
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel()
+    }
+    document.addEventListener('keydown', closeWithEscape)
+    return () => document.removeEventListener('keydown', closeWithEscape)
+  }, [busy, onCancel])
+
+  return <div className="confirm-backdrop" onMouseDown={() => !busy && onCancel()}>
+    <div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="confirm-symbol"><TrashIcon /></div>
+      <div className="confirm-copy"><p className="eyebrow">确认删除</p><h2>{title}</h2><p>{description}</p>{subject && <div className="confirm-subject" title={subject}>{subject}</div>}</div>
+      <div className="confirm-actions"><button ref={cancelRef} className="ghost-button" disabled={busy} onClick={onCancel}>取消</button><button className="danger-button" disabled={busy} onClick={onConfirm}>{busy ? '删除中…' : confirmLabel}</button></div>
+    </div>
+  </div>
 }
 
 function RunError({ error, ollamaRunning, retrying, onRetry, onOpenCapabilities }: { error?: string; ollamaRunning: boolean; retrying: boolean; onRetry: () => void; onOpenCapabilities: () => void }) {
@@ -535,6 +752,7 @@ function friendlyError(error: string) {
 }
 
 function TrashIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg> }
+function Logo() { return <img src="/logo.svg" alt="" aria-hidden="true" /> }
 function Icon({ name }: { name: string }) { const paths: Record<string, string> = { chat: 'M4 5h16v11H8l-4 4V5Z', skill: 'M6 3h12v18H6zM9 8h6M9 12h6', plug: 'M9 3v6m6-6v6M7 9h10v3a5 5 0 0 1-10 0V9Zm5 8v4' }; return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg> }
 function AttachIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 6.8-6.8a3.5 3.5 0 0 1 5 5l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9m-6.2 11.4 8.5-8.5" /></svg> }
 function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" /></svg> }

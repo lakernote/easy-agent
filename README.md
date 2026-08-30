@@ -1,3 +1,5 @@
+<img src="web/public/logo.svg" alt="EasyAgent Logo" width="80" />
+
 # EasyAgent
 
 一个可部署在个人电脑或 Linux 服务器上的轻量通用 Agent：一个 Go 二进制、一个 SQLite 数据库、一个 Web 页面。
@@ -6,7 +8,7 @@
 用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答
 ```
 
-它不要求创建项目，也不引入 Graph、多 Agent 编排或工作流 DSL。模型通过原生 Function Calling 自己决定是否调用工具，Go 代码不根据用户关键词做业务路由。
+打开页面即可直接对话；需要更多能力时，再按需添加上下文、Skill 或 MCP。系统不引入 Graph、多 Agent 编排或工作流 DSL，模型通过原生 Function Calling 自己决定是否调用工具，Go 代码不根据用户关键词做业务路由。
 
 ## 能做什么
 
@@ -50,7 +52,7 @@ make build
 | 能力 | 适合放什么 | 如何使用 |
 | --- | --- | --- |
 | Tool | 高频、确定性的本机操作 | 编译进 Go 二进制，模型直接调用 |
-| Skill | 某类任务的做法和项目经验 | 页面编辑，模型按需读取 |
+| Skill | 任务方法、团队规范和领域经验 | 页面编辑，模型按需读取 |
 | MCP | GitHub、浏览器、数据库等外部系统 | 页面配置，模型按需连接 |
 
 ## 文档

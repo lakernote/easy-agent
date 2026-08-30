@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
+  <title id="title">EasyAgent</title>
+  <desc id="description">由字母 E 和三个工具节点组成的 EasyAgent 标志</desc>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="#173f2e"/>
+  <path d="M19 17.5v29M19 18h26M19 32h18M19 46h26" fill="none" stroke="#e8f4ec" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="45" cy="18" r="4" fill="#6fc291"/>
+  <circle cx="37" cy="32" r="4" fill="#6fc291"/>
+  <circle cx="45" cy="46" r="4" fill="#6fc291"/>
+</svg>

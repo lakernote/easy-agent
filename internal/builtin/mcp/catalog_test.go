@@ -15,6 +15,12 @@ func TestPlaywrightPresetCanBeInstalledAutomatically(t *testing.T) {
 	}
 }
 
+func TestFilesystemPresetIsRemoved(t *testing.T) {
+	if _, found := Find("filesystem"); found {
+		t.Fatal("Filesystem 不应再作为内置 MCP 预设提供")
+	}
+}
+
 func TestGitHubPresetLimitsToolsets(t *testing.T) {
 	preset, found := Find("github")
 	if !found || preset.Endpoint != "https://api.githubcopilot.com/mcp/" || preset.Headers["X-MCP-Toolsets"] == "" {
@@ -23,7 +29,7 @@ func TestGitHubPresetLimitsToolsets(t *testing.T) {
 }
 
 func TestConfigurablePresetsAreNotAutoInstalled(t *testing.T) {
-	for _, id := range []string{"filesystem", "github"} {
+	for _, id := range []string{"github"} {
 		preset, found := Find(id)
 		if !found || preset.Action != "configure" {
 			t.Fatalf("%s 应要求用户先配置: %+v", id, preset)

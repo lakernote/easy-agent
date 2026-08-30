@@ -18,7 +18,7 @@ var systemPrompt string
 var compactionPrompt string
 
 // Template 返回编译进二进制的原始模板，供能力管理页面查看。
-// 页面只能查看；修改基础原则应通过代码评审完成，项目习惯放到 Skill 中。
+// 页面只能查看；修改基础原则应通过代码评审完成，任务方法和团队约定放到 Skill 中。
 func Template() string { return strings.TrimSpace(systemPrompt) }
 
 // CompactionTemplate 返回独立的检查点 Prompt。它不混入常规 Agent 规则，
