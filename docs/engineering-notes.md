@@ -96,13 +96,15 @@ entry {
 
 **现象**：Ollama/Qwen 在某些请求中既不返回文本，也不返回 Tool Call。
 
-**解决**：同一个 Step 中记录真实失败 Attempt，再关闭流式重试；兼容 Provider 仍为空时，最后用 `tool_choice=none` 请求模型基于已有上下文收敛。重试均进入 Trace，不能伪装成一次成功请求。
+**错误方案**：流式和非流式都为空后移除全部工具，再用 `tool_choice=none` 请求自由回答。这样虽然会得到文字，却可能让模型猜出一个错误的计算值、实时事实或执行结果，并把任务错误标记成成功。
+
+**解决**：同一个 Step 中记录真实失败 Attempt，只允许关闭流式重试一次；兼容 Provider 仍为空就明确失败，绝不通过删除工具来伪造完成。`load_tools` 的描述给出两阶段加载示例，让较弱模型知道“尚未加载”不等于“不可用”；选择能力仍由模型完成，代码不增加关键词路由。重试均进入 Trace，不能伪装成一次成功请求。
 
 ### 2.7 工具失败后重复调用
 
 **问题**：模型可能连续使用相同错误参数，浪费 Token 并陷入循环。
 
-**解决**：Runtime 不判断业务原因，只统计连续无进展的结构化失败。达到阈值后关闭工具，让模型基于现有证据给出清楚的失败说明。
+**解决**：工具错误统一包含 `ok/code/error/retryable/hint`。完全相同的不可重试失败只真实执行一次；之后返回 `duplicate_failed_call`，要求模型改参数、换工具或收敛。明确标记可重试的失败最多使用相同参数再试一次。连续两步仍无进展才关闭工具。Runtime 比较的是工具名和规范化参数，不读取用户文本判断业务。
 
 ### 2.8 上下文过早压缩
 
@@ -137,18 +139,43 @@ entry {
 
 **解决**：使用 `CacheReported` 区分“明确上报 0”和“未上报”；只有真实字段存在时才计算缓存率。
 
+### 2.11 服务 CWD 与 PATH 不稳定
+
+**问题**：终端启动时工具工作区正常，由 launchd/systemd 启动后 CWD 可能是 `/`，PATH 也可能只有系统目录，导致文件工具访问错误位置、Shell/MCP 找不到 `node` 或 `npx`。
+
+**解决**：`internal/appenv` 自动管理 Home、默认工作区、私有 Runtime 和确定性 PATH。PATH 合并私有 bin、一次性读取的登录 Shell PATH 和进程 PATH；Playwright 包安装到私有 Runtime，不依赖每次执行 `npx -y`。工作区不再作为启动参数：页面创建会话时选择并写入 SQLite，留空使用 `~/.easyagent/workspaces/default`；每轮为该会话派生独立 Environment，Shell、文件 Tool 和 stdio MCP 共用它。
+
+### 2.12 Provider 与工具重试边界
+
+模型请求只对 429、5xx 和明确的临时网络错误重试一次，遵守 `Retry-After`（最多等待 30 秒）；认证、参数等 4xx 直接失败。每个真实请求仍属于同一 Step 的不同 Attempt，并完整进入 Trace。工具重试由结构化 `retryable` 控制，不能把所有错误都盲目重放。
+
+### 2.13 把 EasyAgent 做成通用 Runtime 管理器
+
+**错误方案**：因为某个 MCP 或项目可能缺少 Java、Node.js、Python，就在 EasyAgent 中为每种语言增加下载地址、版本字段、安装 API 和管理页面。
+
+**问题**：这会把一个轻量 Agent 变成不完整的 SDK 管理器；平台、架构、校验、镜像、补丁版本和项目锁文件都会进入核心代码，而且很快与 asdf、mise、SDKMAN、容器和团队现有工具链冲突。
+
+**修正边界**：
+
+- EasyAgent 管理自己的 Home、默认工作区、确定性 PATH 和 MCP 私有包；
+- MCP 页面可以检测宿主命令和版本，但不执行系统级运行时安装；
+- MCP 固定版本包安装到 `~/.easyagent/runtime/mcp/<id>`，卸载只删除该目录和配置；
+- Java、Node.js、Python 等项目环境交给宿主机、容器、项目脚本或专门版本管理器；
+- 检测失败和安装失败不写入“看起来已经安装”的配置，只有私有包安装成功但握手失败时保留停用配置供排查。
+
 ## 3. 智能优先的 Token 优化顺序
 
 按下面顺序优化，越靠前越不容易损害智能：
 
-1. 保持稳定 System Prompt 和 Tool Schema 前缀，提高 Provider Prompt Cache 命中；
-2. Skill 先发元数据，需要时再加载正文；
-3. MCP 先发服务元数据，需要时再连接并加载 Tool Schema；
-4. 搜索只返回候选，读取工具只返回任务需要的正文；
-5. 工具大结果确定性截断，但完整结果保留在 Trace；
-6. 长会话达到真实阈值后再压缩较早轮次；
-7. 用更强模型减少错误工具调用和重试，而不是靠代码猜意图；
-8. 最后才考虑更激进的工具裁剪、模型路由或摘要策略。
+1. 保持稳定 System Prompt 与精简能力目录前缀，提高 Provider Prompt Cache 命中；
+2. 内置 Tool 首轮只发自解释名称目录，模型选择后再加载完整说明和 Schema；
+3. Skill 先发元数据，需要时再加载正文；
+4. MCP 先发服务元数据，需要时再连接并加载 Tool Schema；
+5. 搜索只返回候选，读取工具只返回任务需要的正文；
+6. 工具大结果确定性截断，但完整结果保留在 Trace；
+7. 长会话达到真实阈值后再压缩较早轮次；
+8. 用更强模型减少错误工具调用和重试，而不是靠代码猜意图；
+9. 最后才考虑更激进的工具裁剪、模型路由或摘要策略。
 
 每次优化至少比较：任务成功率、事实正确性、工具选择正确率、最终答案完整度、Input/Output/Cache Token、模型调用数、工具调用数、耗时和费用。
 
@@ -195,6 +222,7 @@ Ollama 是本地开发和协议兼容测试 Provider，适合验证：
 ```text
 internal/agent          核心类型和唯一 Runner
 internal/agent/openai   模型协议适配
+internal/appenv         应用目录、默认工作区、私有运行时和确定性 PATH
 internal/builtin        内置 Prompt、Tool、Skill、MCP 和模型模板
 internal/mcpclient      外部 MCP 转 agent.Tool
 internal/server         HTTP、会话、运行时组装和队列

@@ -10,13 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,11 +47,11 @@ func (connection *Connection) Close() error {
 }
 
 // Connect 连接一个已启用的 MCP 配置并读取它的工具清单。
-func Connect(ctx context.Context, config store.MCPConfig) (*Connection, error) {
+func Connect(ctx context.Context, environment *appenv.Environment, config store.MCPConfig) (*Connection, error) {
 	if !config.Enabled {
 		return nil, errors.New("MCP 尚未启用")
 	}
-	transport, err := createTransport(config)
+	transport, err := createTransport(environment, config)
 	if err != nil {
 		return nil, err
 	}
@@ -104,14 +104,19 @@ func Connect(ctx context.Context, config store.MCPConfig) (*Connection, error) {
 	return connection, nil
 }
 
-func createTransport(config store.MCPConfig) (mcp.Transport, error) {
+func createTransport(environment *appenv.Environment, config store.MCPConfig) (mcp.Transport, error) {
 	switch strings.ToLower(strings.TrimSpace(config.Transport)) {
 	case "stdio":
 		if strings.TrimSpace(config.Command) == "" {
 			return nil, errors.New("stdio MCP 缺少启动命令")
 		}
-		command := exec.Command(config.Command, config.Args...)
-		command.Env = append(os.Environ(), mapToEnvironment(config.Environment)...)
+		resolved, err := environment.ResolveCommand(config.Command)
+		if err != nil {
+			return nil, fmt.Errorf("找不到 MCP 启动命令 %q（EasyAgent PATH=%s）: %w", config.Command, environment.Path(), err)
+		}
+		command := exec.Command(resolved, config.Args...)
+		command.Dir = environment.Workspace()
+		command.Env = environment.Environ(config.Environment)
 		return &mcp.CommandTransport{Command: command}, nil
 	case "http", "streamable_http":
 		if strings.TrimSpace(config.Endpoint) == "" {
@@ -197,14 +202,4 @@ func safeName(value string) string {
 		return "tool"
 	}
 	return value
-}
-
-func mapToEnvironment(values map[string]string) []string {
-	result := make([]string, 0, len(values))
-	for key, value := range values {
-		if strings.TrimSpace(key) != "" {
-			result = append(result, key+"="+value)
-		}
-	}
-	return result
 }

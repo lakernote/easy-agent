@@ -118,6 +118,12 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
+	// 工作区属于会话，而不是服务进程。旧会话的空值自动落到默认工作区；新会话
+	// 使用页面创建时选择并保存的绝对目录。
+	runEnvironment, err := server.env.WithWorkspace(session.Workspace)
+	if err != nil {
+		return fmt.Errorf("打开会话工作区: %w", err)
+	}
 	turn := userTurnCount(session.Messages)
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
@@ -129,19 +135,27 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 		skillMeta = append(skillMeta, prompt.SkillMeta{Name: skill.Name, Description: skill.Description})
 	}
 
-	allTools := builtintools.Catalog(catalog)
+	toolCatalog := builtintools.Catalog(runEnvironment, catalog)
+	toolLoader, err := builtintools.NewLoader(toolCatalog)
+	if err != nil {
+		return err
+	}
+	// 首轮只发送精简工具目录。只有用户在输入框明确 @tool:name 时，才把对应
+	// 完整 Schema 一并预加载；自然语言任务由模型调用 load_tools 自主选择。
+	activeTools := []agent.Tool{toolLoader.Tool()}
+	activeTools = append(activeTools, toolLoader.Preload(selectedToolNames(session.Messages))...)
 	mcps, err := server.store.MCPs()
 	if err != nil {
 		return err
 	}
-	mcpLoader := mcpclient.NewLoader(mcps)
+	mcpLoader := mcpclient.NewLoader(runEnvironment, mcps)
 	defer mcpLoader.Close()
 	mcpMeta := make([]prompt.MCPMeta, 0)
 	for _, info := range mcpLoader.Servers() {
 		mcpMeta = append(mcpMeta, prompt.MCPMeta{ID: info.ID, Name: info.Name, Description: info.Description})
 	}
 	if !mcpLoader.Empty() {
-		allTools = append(allTools, mcpLoader.Tool())
+		activeTools = append(activeTools, mcpLoader.Tool())
 	}
 	apiKey := settings.APIKey
 	if settings.APIKeyEnv != "" {
@@ -156,17 +170,18 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 		return err
 	}
 	systemPrompt := prompt.Render(prompt.Context{
-		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog),
+		Now: time.Now(), Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog),
 	})
-	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, turn, usage, runtimeCompactionThreshold(settings), false)
+	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, activeTools, turn, usage, runtimeCompactionThreshold(settings), false)
 	if err != nil {
 		return err
 	}
-	runner, err := agent.NewRunner(client, settings.Model, allTools)
+	runner, err := agent.NewRunner(client, settings.Model, activeTools)
 	if err != nil {
 		return err
 	}
 	mcpLoader.SetRegister(runner.AddTools)
+	toolLoader.SetRegister(runner.AddTools)
 	runner.MaxOutputTokens = settings.MaxOutputTokens
 	runner.Observe = server.observer(id, turn, usage)
 

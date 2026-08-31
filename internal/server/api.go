@@ -34,6 +34,13 @@ type bootstrapPayload struct {
 	MCPs         []store.MCPConfig      `json:"mcps"`
 	SystemPrompt string                 `json:"systemPrompt"`
 	Ollama       ollamaStatus           `json:"ollama"`
+	Runtime      runtimeInfoPayload     `json:"runtime"`
+}
+
+type runtimeInfoPayload struct {
+	Home      string `json:"home"`
+	Workspace string `json:"workspace"`
+	Runtime   string `json:"runtime"`
 }
 
 type modelRulesPayload struct {
@@ -67,7 +74,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	toolInfo := builtintools.InfoList(catalog)
+	toolInfo := builtintools.InfoList(server.env, catalog)
 	for _, config := range mcps {
 		if config.Enabled {
 			toolInfo = append(toolInfo, builtintools.Info{Name: "load_mcp", Description: "按需连接一个已启用的 MCP Server，再加载它的真实工具。", Source: "运行时"})
@@ -79,7 +86,8 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	writeJSON(response, http.StatusOK, bootstrapPayload{
 		Sessions: sessions, Model: publicModel(model), Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelPresets: publicModelPresets(), ModelRules: modelRules(),
-		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: detectOllama(request.Context()),
+		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
+		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
 	})
 }
 
@@ -115,6 +123,8 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 type messageRequest struct {
 	Message     string              `json:"message"`
 	Attachments []attachmentRequest `json:"attachments"`
+	// Workspace 只在创建会话时使用；后续多轮对话始终沿用会话保存的工作区。
+	Workspace string `json:"workspace,omitempty"`
 }
 
 var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -134,13 +144,18 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, "请输入消息或添加附件")
 		return
 	}
+	runEnvironment, err := server.env.WithWorkspace(input.Workspace)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
 	model, err := server.store.Model()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	id := newID()
-	if _, err := server.store.CreateSession(id, attachmentTitle(input.Message, attachments), model.Model, time.Now()); err != nil {
+	if _, err := server.store.CreateSession(id, attachmentTitle(input.Message, attachments), model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -168,6 +183,10 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 	}
 	if input.Message == "" && len(attachments) == 0 {
 		writeError(response, http.StatusBadRequest, "请输入消息或添加附件")
+		return
+	}
+	if strings.TrimSpace(input.Workspace) != "" {
+		writeError(response, http.StatusBadRequest, "工作区在创建会话时确定；请新建会话后选择其他工作区")
 		return
 	}
 	model, err := server.store.Model()
@@ -347,7 +366,7 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 	// “已启用”必须代表此刻确实可以连接，避免保存一个看似开启、实际不可用的配置。
 	if input.Enabled {
 		ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
-		connection, err := mcpclient.Connect(ctx, input)
+		connection, err := mcpclient.Connect(ctx, server.env, input)
 		cancel()
 		if err != nil {
 			writeError(response, http.StatusBadGateway, "MCP 连接测试失败，未启用："+err.Error())
@@ -396,7 +415,7 @@ func (server *Server) testMCP(response http.ResponseWriter, request *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
 	defer cancel()
-	connection, err := mcpclient.Connect(ctx, *selected)
+	connection, err := mcpclient.Connect(ctx, server.env, *selected)
 	if err != nil {
 		writeError(response, http.StatusBadGateway, err.Error())
 		return
@@ -413,8 +432,43 @@ type mcpInstallResult struct {
 	Tools   []mcpclient.ToolInfo `json:"tools"`
 }
 
-// installMCPPreset 完成真正的一键流程：检查本机运行时、让 npx 下载到服务器缓存、
-// 连接并读取工具清单，全部成功后才把 MCP 标记为启用。
+type mcpPresetCheckResult struct {
+	OK        bool   `json:"ok"`
+	Installed bool   `json:"installed"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+}
+
+// checkMCPPreset 只读取宿主命令、版本和私有安装目录，不保存 MCP 配置，也不
+// 下载依赖。页面因此可以明确区分“检测环境”和“安装并启用”。
+func (server *Server) checkMCPPreset(response http.ResponseWriter, request *http.Request) {
+	preset, found := builtinmcp.Find(request.PathValue("id"))
+	if !found {
+		writeError(response, http.StatusNotFound, "MCP 预设不存在")
+		return
+	}
+	if preset.Action != "install" {
+		writeJSON(response, http.StatusOK, mcpPresetCheckResult{OK: true, Status: "configuration_required", Message: "这是远程 MCP，只需要配置连接和认证，无需本地安装"})
+		return
+	}
+	if err := server.checkMCPPresetRuntime(request.Context(), preset); err != nil {
+		writeJSON(response, http.StatusOK, mcpPresetCheckResult{OK: false, Status: "missing_dependency", Message: err.Error()})
+		return
+	}
+	installed := false
+	if preset.Command != "" {
+		_, installedErr := server.env.ResolveCommand(preset.Command)
+		installed = installedErr == nil
+	}
+	if installed {
+		writeJSON(response, http.StatusOK, mcpPresetCheckResult{OK: true, Installed: true, Status: "installed", Message: "运行环境和私有 MCP 包均已就绪，可以测试连接或启用"})
+		return
+	}
+	writeJSON(response, http.StatusOK, mcpPresetCheckResult{OK: true, Status: "ready_to_install", Message: "运行环境满足要求；MCP 包尚未安装，安装只会写入 EasyAgent 私有目录"})
+}
+
+// installMCPPreset 完成真正的一键流程：检查 Node.js、把固定版本安装到
+// EasyAgent 私有 runtime 目录、连接并读取工具清单，全部成功后才启用。
 func (server *Server) installMCPPreset(response http.ResponseWriter, request *http.Request) {
 	preset, found := builtinmcp.Find(request.PathValue("id"))
 	if !found {
@@ -427,21 +481,33 @@ func (server *Server) installMCPPreset(response http.ResponseWriter, request *ht
 	}
 
 	config := mcpConfigFromPreset(preset)
-	if err := server.store.SaveMCP(config); err != nil {
-		writeError(response, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := checkMCPPresetRuntime(request.Context(), preset); err != nil {
+	if err := server.checkMCPPresetRuntime(request.Context(), preset); err != nil {
 		writeJSON(response, http.StatusOK, mcpInstallResult{Ready: false, Status: "missing_dependency", Message: err.Error(), MCP: publicMCP(config), Tools: []mcpclient.ToolInfo{}})
 		return
+	}
+	if preset.NPMPackage != "" {
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Minute)
+		command, installErr := server.env.InstallNPMPackage(ctx, preset.ID, preset.NPMPackage, preset.NPMExecutable)
+		cancel()
+		if installErr != nil {
+			writeJSON(response, http.StatusOK, mcpInstallResult{Ready: false, Status: "install_failed", Message: installErr.Error(), MCP: publicMCP(config), Tools: []mcpclient.ToolInfo{}})
+			return
+		}
+		config.Command = command
 	}
 
 	candidate := config
 	candidate.Enabled = true
 	ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
 	defer cancel()
-	connection, err := mcpclient.Connect(ctx, candidate)
+	connection, err := mcpclient.Connect(ctx, server.env, candidate)
 	if err != nil {
+		// 包已经成功安装时保留一份停用配置，方便用户检查路径、调整参数并重试；
+		// 缺少宿主依赖或安装命令失败时不会提前写入误导性的 MCP 记录。
+		if saveErr := server.store.SaveMCP(config); saveErr != nil {
+			writeError(response, http.StatusInternalServerError, saveErr.Error())
+			return
+		}
 		writeJSON(response, http.StatusOK, mcpInstallResult{Ready: false, Status: "connect_failed", Message: "安装命令已执行，但连接测试失败：" + err.Error(), MCP: publicMCP(config), Tools: []mcpclient.ToolInfo{}})
 		return
 	}
@@ -451,6 +517,29 @@ func (server *Server) installMCPPreset(response http.ResponseWriter, request *ht
 		return
 	}
 	writeJSON(response, http.StatusOK, mcpInstallResult{Ready: true, Status: "ready", Message: "依赖检查、安装和连接测试均已通过", MCP: publicMCP(candidate), Tools: connection.Info})
+}
+
+// uninstallMCPPreset 删除预设安装在 EasyAgent 私有 Runtime 中的包和对应配置。
+// 宿主机 Node/npm、全局包以及工作区文件都不在删除范围内。
+func (server *Server) uninstallMCPPreset(response http.ResponseWriter, request *http.Request) {
+	preset, found := builtinmcp.Find(request.PathValue("id"))
+	if !found {
+		writeError(response, http.StatusNotFound, "MCP 预设不存在")
+		return
+	}
+	if preset.Action != "install" || preset.NPMPackage == "" {
+		writeError(response, http.StatusBadRequest, "该 MCP 没有 EasyAgent 私有安装包")
+		return
+	}
+	if err := server.env.UninstallNPMPackage(preset.ID); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := server.store.DeleteMCP(preset.ID); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func mcpConfigFromPreset(preset builtinmcp.Preset) store.MCPConfig {
@@ -469,10 +558,10 @@ func cloneMap(source map[string]string) map[string]string {
 	return result
 }
 
-func checkMCPPresetRuntime(parent context.Context, preset builtinmcp.Preset) error {
+func (server *Server) checkMCPPresetRuntime(parent context.Context, preset builtinmcp.Preset) error {
 	for _, command := range preset.RequiredCommands {
-		if _, err := exec.LookPath(command); err != nil {
-			return errors.New("服务器缺少 " + command + "；请先安装 " + preset.Requirement)
+		if _, err := server.env.ResolveCommand(command); err != nil {
+			return errors.New("服务器 PATH 中找不到 " + command + "；" + preset.Requirement + "。EasyAgent 不执行系统级运行时安装")
 		}
 	}
 	if preset.MinimumNodeMajor == 0 {
@@ -480,7 +569,13 @@ func checkMCPPresetRuntime(parent context.Context, preset builtinmcp.Preset) err
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "node", "--version").Output()
+	node, err := server.env.ResolveCommand("node")
+	if err != nil {
+		return errors.New("无法定位 Node.js")
+	}
+	command := exec.CommandContext(ctx, node, "--version")
+	command.Env = server.env.Environ(nil)
+	output, err := command.Output()
 	if err != nil {
 		return errors.New("无法读取 Node.js 版本")
 	}
@@ -509,11 +604,11 @@ type ollamaStatus struct {
 }
 
 func (server *Server) getOllama(response http.ResponseWriter, request *http.Request) {
-	writeJSON(response, http.StatusOK, detectOllama(request.Context()))
+	writeJSON(response, http.StatusOK, server.detectOllama(request.Context()))
 }
 
-func detectOllama(parent context.Context) ollamaStatus {
-	_, lookupErr := exec.LookPath("ollama")
+func (server *Server) detectOllama(parent context.Context) ollamaStatus {
+	_, lookupErr := server.env.ResolveCommand("ollama")
 	status := ollamaStatus{Installed: lookupErr == nil, BaseURL: ollamaServerURL(), Models: []ollamaModel{}}
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
@@ -610,7 +705,7 @@ func (server *Server) useOllama(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	status := detectOllama(request.Context())
+	status := server.detectOllama(request.Context())
 	if !status.Running {
 		writeError(response, http.StatusBadGateway, status.Message)
 		return

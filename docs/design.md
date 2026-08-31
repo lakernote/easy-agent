@@ -116,7 +116,7 @@ function runSession(sessionId):
     history  = loadSessionHistory(sessionId)
     prompt   = renderStableSystemPrompt(skillMetadata, mcpMetadata)
     history  = compactIfContextIsFull(history, settings)
-    tools    = builtinTools + loadSkill + optional(loadMcp)
+    tools    = loadToolsCatalog + optional(explicitlySelectedTool) + optional(loadMcp)
 
     result = Runner(modelAdapter(settings), tools).run(prompt + history)
 
@@ -170,7 +170,11 @@ MCP   = 外部系统提供什么能力（按需连接的 Tool）
 - 会随项目和团队变化的方法写成 Skill；
 - 需要外部服务、账号或独立生命周期的能力接 MCP。
 
-内置 Tool 是一组小而稳定的原生 Schema，直接交给模型自主选择。Skill 和 MCP 默认只先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `load_mcp` 后才连接服务并注册远端 Tool Schema。用户在输入框明确 `@skill:name` 时，该 Skill 正文直接作为本轮已选上下文注入，不再依赖模型先调用加载工具。这样不增加二次工具路由，同时避免把未选择的大型动态能力集塞进每轮请求。
+EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语言运行时。MCP 所需的 Node.js、Python 或 Java 从服务器 PATH 检测；缺少时给出明确提示，由宿主机、容器或项目工具链提供。这样扩展能力不会演变成另一套 SDK 管理器。
+
+内置 Tool 也使用渐进披露：首轮只有 `load_tools` 的自解释名称目录和一个很小的选择 Schema；模型按任务选择名称后，Runtime 才把真实 Tool 说明与 Schema 加入下一轮。代码不读取用户自然语言做路由。用户在输入框明确 `@tool:name` 时只按准确名称预加载。工具模式的空响应可以从流式切到非流式重试一次，但不能删除工具后降级为自由回答，否则模型可能把本应执行的结果猜成成功。
+
+Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `load_mcp` 后才连接服务并注册远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
 
 ## 7. Trace 的 Review 标准
 

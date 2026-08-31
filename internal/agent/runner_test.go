@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 type modelFunc func(context.Context, Request) (Response, error)
@@ -123,18 +124,53 @@ func TestRunnerMarksEmptyNonStreamingResponseAsError(t *testing.T) {
 	}
 }
 
-func TestRunnerFallsBackWithoutToolsAfterEmptyCompatibilityResponses(t *testing.T) {
+func TestRunnerRetriesTransientProviderErrorInSameStep(t *testing.T) {
 	calls := 0
+	events := make([]Event, 0)
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Exchange: Exchange{StatusCode: 503}}, &ModelError{StatusCode: 503, Message: "temporarily unavailable", RetryAfter: time.Millisecond}
+		}
+		return Response{Message: Message{Content: "恢复成功"}, Exchange: Exchange{StatusCode: 200}}, nil
+	}), "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) { events = append(events, event) }
+	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "回答"}}})
+	if err != nil || result.Answer != "恢复成功" || calls != 2 {
+		t.Fatalf("瞬时故障没有恢复: calls=%d result=%+v err=%v", calls, result, err)
+	}
+	if len(events) != 4 || events[0].Attempt != 1 || events[2].Attempt != 2 || events[1].Err == nil || events[3].Err != nil {
+		t.Fatalf("重试 Trace 不完整: %+v", events)
+	}
+}
+
+func TestRunnerDoesNotRetryDeterministicProviderError(t *testing.T) {
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		calls++
+		return Response{}, &ModelError{StatusCode: 400, Message: "bad request"}
+	}), "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "回答"}}})
+	if err == nil || calls != 1 {
+		t.Fatalf("确定性 4xx 不应重试: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestRunnerKeepsToolsAndFailsClosedAfterEmptyCompatibilityResponses(t *testing.T) {
+	calls := 0
+	var requests []Request
+	events := make([]Event, 0)
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
 		calls++
+		requests = append(requests, request)
 		usage := Usage{InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
-		if calls < 3 {
-			return Response{Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, nil
-		}
-		if len(request.Tools) != 0 || request.ToolChoice.Mode != ToolChoiceNone || request.OnTextDelta != nil {
-			t.Fatalf("最终兼容请求必须禁用工具和流式: %+v", request)
-		}
-		return Response{Message: Message{Content: "直接回答"}, Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, nil
+		return Response{Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, nil
 	})
 	runner, err := NewRunner(model, "fixture", []Tool{{
 		Spec: ToolSpec{Name: "lookup"}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil },
@@ -142,11 +178,23 @@ func TestRunnerFallsBackWithoutToolsAfterEmptyCompatibilityResponses(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := runner.Run(context.Background(), RunRequest{
+	runner.Observe = func(event Event) { events = append(events, event) }
+	_, err = runner.Run(context.Background(), RunRequest{
 		Messages: []Message{{Role: RoleUser, Content: "回答"}}, OnTextDelta: func(string) {},
 	})
-	if err != nil || result.Answer != "直接回答" || calls != 3 || result.Usage.TotalTokens != 36 {
-		t.Fatalf("无工具兼容降级错误: calls=%d result=%+v err=%v", calls, result, err)
+	if !errors.Is(err, ErrEmptyModelResponse) || calls != 2 {
+		t.Fatalf("空响应必须在保留工具后失败: calls=%d err=%v", calls, err)
+	}
+	for index, request := range requests {
+		if len(request.Tools) != 1 || request.Tools[0].Name != "lookup" || request.ToolChoice.Mode != ToolChoiceAuto {
+			t.Fatalf("第 %d 次请求丢失工具能力: %+v", index+1, request)
+		}
+	}
+	if requests[0].OnTextDelta == nil || requests[1].OnTextDelta != nil {
+		t.Fatalf("兼容重试应只关闭流式，不应修改工具: %+v", requests)
+	}
+	if len(events) != 4 || events[1].Err == nil || events[3].Err == nil {
+		t.Fatalf("空响应 Trace 不完整: %+v", events)
 	}
 }
 
@@ -178,6 +226,7 @@ func TestRunnerReturnsToolErrorsToModelForRecovery(t *testing.T) {
 
 func TestRunnerConvergesAfterRepeatedFailedToolSteps(t *testing.T) {
 	calls := 0
+	toolRuns := 0
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
 		calls++
 		if calls <= 2 {
@@ -189,14 +238,26 @@ func TestRunnerConvergesAfterRepeatedFailedToolSteps(t *testing.T) {
 		return Response{Message: Message{Content: "两次查询都失败，请检查 ID。"}}, nil
 	})
 	runner, err := NewRunner(model, "fixture", []Tool{{
-		Spec: ToolSpec{Name: "lookup"}, Run: func(context.Context, json.RawMessage) (string, error) { return "", errors.New("没有找到") },
+		Spec: ToolSpec{Name: "lookup"}, Run: func(context.Context, json.RawMessage) (string, error) {
+			toolRuns++
+			return "", errors.New("没有找到")
+		},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "查记录"}}})
-	if err != nil || calls != 3 || !strings.Contains(result.Answer, "失败") {
-		t.Fatalf("重复失败收敛错误: calls=%d result=%+v err=%v", calls, result, err)
+	if err != nil || calls != 3 || toolRuns != 1 || !strings.Contains(result.Answer, "失败") {
+		t.Fatalf("重复失败收敛错误: modelCalls=%d toolRuns=%d result=%+v err=%v", calls, toolRuns, result, err)
+	}
+}
+
+func TestToolErrorOutputIncludesRecoveryMetadata(t *testing.T) {
+	output := toolErrorOutput(&ToolError{Code: "temporary", Message: "稍后重试", Hint: "等待一秒", Retryable: true})
+	for _, expected := range []string{`"ok":false`, `"code":"temporary"`, `"retryable":true`, `"hint":"等待一秒"`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("结构化错误缺少 %s: %s", expected, output)
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -25,13 +26,15 @@ type ServerInfo struct {
 type Loader struct {
 	configs     map[string]store.MCPConfig
 	connections map[string]*Connection
+	environment *appenv.Environment
 	register    func([]agent.Tool) error
 }
 
-func NewLoader(configs []store.MCPConfig) *Loader {
+func NewLoader(environment *appenv.Environment, configs []store.MCPConfig) *Loader {
 	loader := &Loader{
 		configs:     make(map[string]store.MCPConfig),
 		connections: make(map[string]*Connection),
+		environment: environment,
 	}
 	for _, config := range configs {
 		if config.Enabled {
@@ -107,7 +110,7 @@ func (loader *Loader) load(ctx context.Context, raw json.RawMessage) (string, er
 		return loadedResult(config, connection.Info, true), nil
 	}
 
-	connection, err := Connect(ctx, config)
+	connection, err := Connect(ctx, loader.environment, config)
 	if err != nil {
 		return "", err
 	}

@@ -223,6 +223,7 @@ type Session struct {
 	Status    string      `json:"status"`
 	Error     string      `json:"error,omitempty"`
 	Model     string      `json:"model,omitempty"`
+	Workspace string      `json:"workspace"`
 	CreatedAt time.Time   `json:"createdAt"`
 	UpdatedAt time.Time   `json:"updatedAt"`
 	Messages  []Message   `json:"messages"`

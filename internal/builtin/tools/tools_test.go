@@ -11,7 +11,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/appenv"
 )
+
+func testEnvironment(t *testing.T, workspace string) *appenv.Environment {
+	t.Helper()
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home"), Workspace: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return environment
+}
 
 func TestCurrentTimeIncludesOffset(t *testing.T) {
 	tool := currentTimeTool()
@@ -56,7 +67,7 @@ func TestShellCapturesExitCodeAndDirectory(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"command": "pwd; printf problem >&2; exit 7", "working_directory": directory,
 	})
-	output, err := shellTool().Run(context.Background(), raw)
+	output, err := shellTool(testEnvironment(t, directory)).Run(context.Background(), raw)
 	if err == nil || !strings.Contains(err.Error(), "退出码 7") {
 		t.Fatalf("非零退出码应该明确返回失败: %v", err)
 	}
@@ -136,7 +147,7 @@ func TestFileToolsRejectOutsideWorkspace(t *testing.T) {
 func TestShellTimeout(t *testing.T) {
 	raw := json.RawMessage(`{"command":"sleep 5","timeout_seconds":1}`)
 	startedAt := time.Now()
-	output, err := shellTool().Run(context.Background(), raw)
+	output, err := shellTool(testEnvironment(t, t.TempDir())).Run(context.Background(), raw)
 	if err == nil || !strings.Contains(err.Error(), "已终止") || !strings.Contains(output, `"timed_out": true`) || time.Since(startedAt) > 3*time.Second {
 		t.Fatalf("Shell 没有按时终止: output=%s err=%v", output, err)
 	}
@@ -161,7 +172,7 @@ func TestParseDuckDuckGoResultsResolvesRealURL(t *testing.T) {
 
 func TestToolCategoriesComeFromRegistration(t *testing.T) {
 	categories := make(map[string]string)
-	for _, info := range InfoList(nil) {
+	for _, info := range InfoList(testEnvironment(t, t.TempDir()), nil) {
 		categories[info.Name] = info.Category
 	}
 	for name, expected := range map[string]string{

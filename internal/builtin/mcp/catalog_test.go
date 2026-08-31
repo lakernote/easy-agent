@@ -10,7 +10,7 @@ func TestPlaywrightPresetCanBeInstalledAutomatically(t *testing.T) {
 	if !found {
 		t.Fatal("缺少 Playwright 预设")
 	}
-	if preset.Action != "install" || preset.Command != "npx" || preset.MinimumNodeMajor != 20 || len(preset.Args) < 2 || strings.Contains(preset.Args[1], "@latest") {
+	if preset.Action != "install" || preset.NPMPackage != "@playwright/mcp@0.0.79" || preset.NPMExecutable != "playwright-mcp" || preset.MinimumNodeMajor != 20 || strings.Contains(preset.NPMPackage, "@latest") || !strings.HasPrefix(preset.Command, "@runtime/") {
 		t.Fatalf("Playwright 安装信息不完整: %+v", preset)
 	}
 }

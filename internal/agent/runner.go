@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -111,6 +113,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	totalUsage := Usage{}
 	consecutiveFailedToolSteps := 0
 	forceConverge := false
+	failedCalls := make(map[string]failedToolCall)
 
 	for step := 1; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -158,11 +161,13 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			err = ErrEmptyModelResponse
 		}
 		runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
-		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理并返回空正文。
-		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
-		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
+		// 与成熟 CLI Agent 一致，只重试明确的瞬时故障：429、5xx 或网络临时
+		// 错误。4xx、工具参数和模型内容错误都不会在这里盲目重放。
+		if err != nil && retryableModelError(err) {
 			addUsage(&totalUsage, response.Usage)
-			request.OnTextDelta = nil
+			if waitErr := waitForRetry(ctx, modelRetryDelay(err, attempt)); waitErr != nil {
+				return RunResult{}, waitErr
+			}
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
@@ -171,14 +176,10 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			}
 			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
-		// 部分小模型在看到较多 Tool Schema 时，无论流式还是非流式都会只消耗
-		// Token 却返回空正文。两次真实工具模式都为空后，最后以无工具模式请求
-		// 一次直接回答；System Prompt 仍要求不能伪造外部事实。该降级只处理
-		// Provider 兼容异常，不参与正常任务的工具选择。
-		if err != nil && errors.Is(err, ErrEmptyModelResponse) && len(request.Tools) > 0 {
+		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理并返回空正文。
+		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
+		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
 			addUsage(&totalUsage, response.Usage)
-			request.Tools = nil
-			request.ToolChoice = ToolChoice{Mode: ToolChoiceNone}
 			request.OnTextDelta = nil
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
@@ -248,9 +249,33 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		pending = pending[:0]
 		failedToolCalls := 0
 		for _, call := range assistant.ToolCalls {
-			output, toolErr, duration := runner.runTool(ctx, step, call, toolTimeout)
+			key := toolCallKey(call)
+			previous, repeated := failedCalls[key]
+			var output string
+			var toolErr error
+			var duration time.Duration
+			if repeated && (!previous.retryable || previous.attempts >= 2) {
+				startedAt := time.Now()
+				runner.emit(Event{Kind: EventToolStart, Step: step, ToolCall: &call, StartedAt: startedAt})
+				toolErr = &ToolError{
+					Code: "duplicate_failed_call", Message: fmt.Sprintf("相同的工具调用 %s 已失败，不会重复执行", call.Name),
+					Hint: "检查上一条错误，修改参数、换用其他工具，或基于已有证据回答", Retryable: false,
+				}
+				output = toolErrorOutput(toolErr)
+				duration = time.Since(startedAt)
+			} else {
+				output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+			}
 			if toolErr != nil {
 				failedToolCalls++
+				retryable := false
+				var failure *ToolError
+				if errors.As(toolErr, &failure) {
+					retryable = failure.Retryable
+				}
+				failedCalls[key] = failedToolCall{attempts: previous.attempts + 1, retryable: retryable}
+			} else {
+				delete(failedCalls, key)
 			}
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
 			messages = append(messages, toolMessage)
@@ -311,8 +336,36 @@ func (runner *Runner) runTool(ctx context.Context, step int, call ToolCall, time
 }
 
 func toolErrorOutput(err error) string {
-	body, _ := json.Marshal(map[string]string{"error": err.Error()})
+	value := map[string]any{"ok": false, "code": "tool_error", "error": err.Error(), "retryable": false}
+	var failure *ToolError
+	if errors.As(err, &failure) {
+		if strings.TrimSpace(failure.Code) != "" {
+			value["code"] = failure.Code
+		}
+		value["retryable"] = failure.Retryable
+		if strings.TrimSpace(failure.Hint) != "" {
+			value["hint"] = failure.Hint
+		}
+	}
+	body, _ := json.Marshal(value)
 	return string(body)
+}
+
+type failedToolCall struct {
+	attempts  int
+	retryable bool
+}
+
+func toolCallKey(call ToolCall) string {
+	arguments := call.Arguments
+	if len(arguments) == 0 {
+		arguments = json.RawMessage(`{}`)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, arguments); err != nil {
+		return call.Name + "\x00" + string(arguments)
+	}
+	return call.Name + "\x00" + compact.String()
 }
 
 func (runner *Runner) emit(event Event) {
@@ -330,5 +383,46 @@ func addUsage(total *Usage, current Usage) {
 	total.CacheReported = total.CacheReported || current.CacheReported
 	if current.TotalTokens == 0 {
 		total.TotalTokens += current.InputTokens + current.OutputTokens
+	}
+}
+
+func retryableModelError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var provider *ModelError
+	if errors.As(err, &provider) {
+		return provider.Retryable()
+	}
+	var network net.Error
+	return errors.As(err, &network) && (network.Timeout() || network.Temporary())
+}
+
+func modelRetryDelay(err error, attempt int) time.Duration {
+	var provider *ModelError
+	if errors.As(err, &provider) && provider.RetryAfter > 0 {
+		if provider.RetryAfter > 30*time.Second {
+			return 30 * time.Second
+		}
+		return provider.RetryAfter
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := 250 * time.Millisecond * time.Duration(1<<(attempt-1))
+	if delay > 2*time.Second {
+		return 2 * time.Second
+	}
+	return delay
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }

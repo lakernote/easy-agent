@@ -219,6 +219,7 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
   const [capabilityQuery, setCapabilityQuery] = useState('')
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
+  const [workspace, setWorkspace] = useState(session?.workspace || data.runtime.workspace)
   const endRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -234,6 +235,10 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
   const enabledSkillCount = data.skills.filter((item) => item.enabled).length
   const enabledMCPCount = data.mcps.filter((item) => item.enabled).length
+  const workspaceOptions = useMemo(() => Array.from(new Set([
+    data.runtime.workspace,
+    ...data.sessions.map((item) => item.workspace).filter(Boolean),
+  ])), [data.runtime.workspace, data.sessions])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.length, session?.status, session?.partialOutput])
   useEffect(() => {
     if (!textareaRef.current) return
@@ -243,6 +248,7 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
   useEffect(() => { attachmentRef.current = attachments }, [attachments])
   useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
   useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
+  useEffect(() => { setWorkspace(session?.workspace || data.runtime.workspace) }, [session?.id, session?.workspace, data.runtime.workspace])
   useEffect(() => {
     if (!capabilityOpen) return
     const close = (event: PointerEvent) => {
@@ -364,7 +370,7 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
     setSending(true); onError(''); setAttachmentError('')
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
-      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload)
+      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim())
       onSession(next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
@@ -400,6 +406,12 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
     </div>
     <div className="composer-wrap"><div ref={composerRef} className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
       {capabilityOpen && <CapabilityPicker items={visibleCapabilities} activeIndex={capabilityIndex} query={capabilityQuery} searchRef={capabilitySearchRef} onQuery={setCapabilityQuery} onKeyDown={handleCapabilityKey} onPick={insertCapability} onOpenSkills={onOpenSkills} onOpenCapabilities={onOpenCapabilities} />}
+      <label className={`workspace-control ${session ? 'locked' : ''}`} title={session ? '工作区在创建会话后固定；如需切换请新建会话' : '选择最近使用的工作区，或输入服务器上已经存在的目录'}>
+        <span>工作区</span>
+        <input list="easyagent-workspaces" value={workspace} readOnly={Boolean(session)} disabled={sending || isActive(session?.status)} onChange={(event) => setWorkspace(event.target.value)} placeholder={data.runtime.workspace} aria-label="会话工作区" />
+        <em>{session ? '本会话已固定' : '新会话'}</em>
+      </label>
+      <datalist id="easyagent-workspaces">{workspaceOptions.map((item) => <option key={item} value={item} />)}</datalist>
       {attachments.length > 0 && <div className="attachment-preview-list" aria-label="待发送附件">{attachments.map((item) => <div className="attachment-preview" key={item.id}>{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="attachment-file-icon"><FileIcon /></span>}<span><strong title={item.file.name}>{item.file.name}</strong><small>{attachmentTypeLabel(item.file)} · {formatBytes(item.file.size)}</small></span><button type="button" disabled={sending || isActive(session?.status)} aria-label={`移除附件 ${item.file.name}`} onClick={() => removeAttachment(item.id)}><CloseIcon /></button></div>)}</div>}
       {selectedCapabilities.length > 0 && <div className="selected-capabilities" aria-label="已指定能力">{selectedCapabilities.map((item) => <span key={item.key}><b>{capabilityKindLabel(item.kind)}</b>{item.name}<button type="button" aria-label={`移除 ${item.name}`} onClick={() => removeCapability(item)}>×</button></span>)}</div>}
       <textarea ref={textareaRef} value={draft} onChange={updateDraft} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : '给 EasyAgent 发消息… 输入 @ 选择能力'} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (handleCapabilityKey(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
@@ -473,6 +485,7 @@ function ContextBar({ session }: { session: Session }) {
       <span>{context.userTurns} 个用户轮次 · {context.historyMessages} 条消息</span>
       <span>{historyModeLabel(context.historyMode)}</span>
       <span>{context.cacheReported ? `缓存 ${cacheRate}%` : '缓存未上报'}</span>
+      <span className="context-workspace" title={session.workspace}>工作区 {workspaceName(session.workspace)}</span>
       <em>{context.compressionCount > 0 ? `已压缩 ${context.compressionCount} 次` : context.compressionMode === 'auto' ? `自动 ${context.compressionThresholdPercent}%` : '压缩停用'}</em>
     </summary>
     <div className="context-details">
@@ -480,8 +493,14 @@ function ContextBar({ session }: { session: Session }) {
       <ContextDatum label="会话历史" value={`${context.userTurns} 个用户轮次 · ${context.historyMessages} 条消息`} hint={`最近请求发送 ${context.requestMessages || '—'} 条消息项 · ${context.toolDefinitions || 0} 个工具定义`} />
       <ContextDatum label="Prompt Cache" value={context.cacheReported ? `命中 ${context.lastCachedTokens.toLocaleString()} · ${cacheRate}%` : 'Provider 未上报'} hint={context.cacheReported ? `本次写入 ${context.lastCacheWriteTokens.toLocaleString()} Token` : '不等于确认没有缓存，只表示响应中没有缓存字段'} />
       <ContextDatum label="上下文压缩" value={context.compressionCount > 0 ? `${context.compressionCount} 次 · 摘要代表 ${context.compressedMessages} 条` : context.compressionMode === 'auto' ? `自动 · ${context.compressionThresholdPercent}% 触发` : '已停用'} hint={context.compressionCount > 0 ? `最近 ${context.retainedMessages} 条仍原样发送；SQLite 永久保留全部 ${context.historyMessages} 条消息` : '达到阈值后生成结构化检查点，并保留最近原始轮次；不会静默删除历史'} />
+      <ContextDatum label="会话工作区" value={session.workspace || '默认工作区'} hint={session.workspace ? '文件、Shell 和 stdio MCP 都在这个目录中运行；切换工作区需要新建会话' : '该会话使用 EasyAgent 默认工作区'} />
     </div>
   </details>
+}
+
+function workspaceName(value: string) {
+  const parts = value.replace(/[\\/]+$/, '').split(/[\\/]/)
+  return parts[parts.length - 1] || '默认'
 }
 
 function ContextDatum({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -594,7 +613,9 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
   const [testingModel, setTestingModel] = useState(false)
   const [modelNotice, setModelNotice] = useState<{ ready: boolean; title: string; message: string } | null>(null)
   const [installingPreset, setInstallingPreset] = useState('')
+  const [checkingPreset, setCheckingPreset] = useState('')
   const [savingMCP, setSavingMCP] = useState(false)
+  const [togglingMCP, setTogglingMCP] = useState('')
   const [deletingMCP, setDeletingMCP] = useState(false)
   const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
@@ -636,6 +657,13 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
       await onRefresh()
     } catch (reason) { onError((reason as Error).message) } finally { setInstallingPreset('') }
   }
+  const checkPreset = async (preset: Bootstrap['mcpPresets'][number]) => {
+    setCheckingPreset(preset.id); setMCPNotice(null); onError('')
+    try {
+      const result = await api.checkMCPPreset(preset.id)
+      setMCPNotice({ ready: result.ok, title: `${preset.name} · ${result.installed ? '已安装' : result.ok ? '环境可用' : '缺少依赖'}`, message: result.message, tools: [] })
+    } catch (reason) { onError((reason as Error).message) } finally { setCheckingPreset('') }
+  }
   const saveMCP = async () => {
     if (!mcp || savingMCP) return
     setSavingMCP(true)
@@ -650,20 +678,57 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
     if (!mcp || deletingMCP) return
     setDeletingMCP(true); onError('')
     try {
-      await api.deleteMCP(mcp.id)
+      const preset = data.mcpPresets.find((candidate) => candidate.id === mcp.id)
+      if (preset?.action === 'install') await api.uninstallMCPPreset(mcp.id)
+      else await api.deleteMCP(mcp.id)
       await onRefresh()
       setConfirmingMCPDelete(false)
       setMCP(null)
     } catch (reason) { onError((reason as Error).message) } finally { setDeletingMCP(false) }
   }
+  const toggleMCP = async (item: MCPConfig) => {
+    if (togglingMCP) return
+    setTogglingMCP(item.id); setMCPNotice(null); onError('')
+    try {
+      const saved = await api.saveMCP({ ...item, enabled: !item.enabled })
+      setMCPNotice({
+        ready: true,
+        title: `${saved.name} · ${saved.enabled ? '已启用' : '已停用'}`,
+        message: saved.enabled ? '连接验证成功；Agent 会在任务需要时按需加载工具。' : '配置和私有安装包均保留，可随时重新启用。',
+        tools: [],
+      })
+      await onRefresh()
+    } catch (reason) { onError((reason as Error).message) } finally { setTogglingMCP('') }
+  }
   const testMCP = async (id: string) => { setMCPNotice(null); try { const result = await api.testMCP(id); setMCPNotice({ ready: true, title: `连接成功 · ${result.tools.length} 个工具`, message: 'MCP 握手和工具清单读取正常。', tools: result.tools.map((item) => item.name) }) } catch (reason) { onError((reason as Error).message) } }
   const persistedMCP = Boolean(mcp && data.mcps.some((item) => item.id === mcp.id))
+  const editingPreset = mcp ? data.mcpPresets.find((candidate) => candidate.id === mcp.id) : undefined
   return <section className="settings-page capabilities"><div className="page-intro"><p className="eyebrow">可插拔能力</p><h1>模型与工具</h1><p>模型、内置 Tool、MCP 和基础提示词分开管理；启用后统一注册给同一个核心 Agent。</p></div>
     <div className="section-block"><div className="section-heading"><div><h2>模型</h2><p>支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div><span className="tag">{model.protocol}</span></div>
       <div className="model-presets"><span>免费额度模板 · 仍需注册自己的 API Key，额度和地区以厂商为准</span>{data.modelPresets.map((preset) => { const selected = model.provider === preset.provider && model.baseUrl === preset.baseUrl && model.model === preset.model; return <button key={preset.id} type="button" className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => useModelPreset(preset)}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.ready ? `已检测到 ${preset.apiKeyEnv}` : `需要 ${preset.apiKeyEnv}`}</em></button> })}</div>
       <div className="form-grid"><label>提供方<input value={model.provider} onChange={(e) => setModel({ ...model, provider: e.target.value })} /></label><label>协议<select value={model.protocol} onChange={(e) => setModel({ ...model, protocol: e.target.value as ModelSettings['protocol'] })}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label><label className="wide">Base URL<input value={model.baseUrl} onChange={(e) => setModel({ ...model, baseUrl: e.target.value })} /></label><label>模型名称<input value={model.model} onChange={(e) => setModel({ ...model, model: e.target.value })} /></label><label>推理模式<select value={model.thinking || ''} onChange={(e) => setModel({ ...model, thinking: e.target.value })}><option value="">模型默认</option><option value="disabled">尝试关闭推理</option></select><small>兼容服务建议使用模型默认；部分模型不支持关闭推理</small></label><label>最大输出 Token<input type="number" value={model.maxOutputTokens} onChange={(e) => setModel({ ...model, maxOutputTokens: Number(e.target.value) })} /></label><label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(e) => setModel({ ...model, requestTimeoutSeconds: Number(e.target.value) })} /><small>默认 {data.modelRules.defaultRequestTimeoutSeconds} 秒；单次请求最多 {data.modelRules.maxRequestTimeoutSeconds} 秒</small></label><label>上下文窗口 Token<input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(e) => setModel({ ...model, contextWindowTokens: Number(e.target.value) })} /><small>0 表示未知；Ollama 运行后读取当前实际窗口</small></label><label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(e) => setModel({ ...model, compressionThresholdPercent: Number(e.target.value) })} /><small>默认达到上下文窗口的 {data.modelRules.defaultCompressionThresholdPercent}% 后生成检查点</small></label><label>API Key<input type="password" placeholder={model.secretConfigured ? '已配置，留空不修改' : '可留空'} value={model.apiKey || ''} onChange={(e) => setModel({ ...model, apiKey: e.target.value })} /></label><label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(e) => setModel({ ...model, apiKeyEnv: e.target.value })} /></label></div>{modelNotice && <div role="status" aria-live="polite" className={`model-notice ${modelNotice.ready ? 'ready' : 'failed'}`}><div><strong>{modelNotice.title}</strong><span>{modelNotice.message}</span></div><button aria-label="关闭模型测试结果" onClick={() => setModelNotice(null)}>×</button></div>}<div className="form-actions"><button className="ghost-button" disabled={testingModel} onClick={testModel}>{testingModel ? '正在验证 Function Calling…' : '测试当前模型'}</button><button className="primary-button" onClick={saveModel}>保存模型</button></div><div className="ollama-strip"><div><strong><span className={`service-dot ${data.ollama.running ? '' : 'off'}`} />Ollama · 无需 API Key</strong><small>{data.ollama.message}</small></div><div>{data.ollama.models.map((item) => <button key={item.name} className="ghost-button" onClick={() => useOllama(item.name)}>使用 {item.name}</button>)}</div></div></div>
-    <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>随 Go 二进制发布，无需安装；由模型通过 Function Calling 自主选择。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
-    <div className="section-block"><div className="section-heading"><div><h2>MCP Servers</h2><p>用于浏览器、代码托管和其他外部系统；远端工具按需转换成 <code>mcp__服务__工具</code>。</p></div><button className="ghost-button" onClick={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })}>＋ 自定义</button></div><div className="capability-note"><strong>工作区文件无需 MCP</strong><span>read、grep、find、ls、edit、write 已内置。</span></div>{mcpNotice && <div role="status" aria-live="polite" className={`mcp-notice ${mcpNotice.ready ? 'ready' : 'failed'}`}><div><strong>{mcpNotice.title}</strong><span>{mcpNotice.message}</span></div>{mcpNotice.tools.length > 0 && <details><summary>查看 {mcpNotice.tools.length} 个工具</summary><code>{mcpNotice.tools.join('\n')}</code></details>}<button aria-label="关闭 MCP 状态" onClick={() => setMCPNotice(null)}>×</button></div>}<div className="mcp-grid">{data.mcps.map((item) => { const preset = data.mcpPresets.find((candidate) => candidate.id === item.id); const canInstall = !item.enabled && preset?.action === 'install'; return <div className="mcp-row" key={item.id}><div><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><strong>{preset?.name || item.name}</strong><small title={preset?.description || item.description}>{preset?.description || item.description || (item.transport === 'stdio' ? `${item.command} ${item.args.join(' ')}` : item.endpoint)}</small></div><span>{item.enabled ? '已启用' : '已停用'}</span><button disabled={installingPreset === item.id} onClick={() => canInstall && preset ? installPreset(preset) : testMCP(item.id)}>{installingPreset === item.id ? '检测中…' : canInstall ? '检测并启用' : '测试'}</button><button onClick={() => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })}>编辑</button></div> })}</div><div className="presets"><span>MCP 预设 · 仅在任务需要时启用，不会预加载全部工具</span>{data.mcpPresets.filter((preset) => !data.mcps.some((item) => item.id === preset.id)).map((preset) => <button key={preset.id} type="button" disabled={!!installingPreset} onClick={() => installPreset(preset)}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.requirement}</em><b>{installingPreset === preset.id ? '正在检测…' : preset.action === 'install' ? '检测并启用' : '配置'}</b></button>)}</div></div>
+    <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>首轮只发送精简能力目录；模型需要时再加载完整 Tool Schema 并调用。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="capability-note"><strong>EasyAgent Home</strong><span><code>{data.runtime.home}</code></span><strong>默认工作区</strong><span><code>{data.runtime.workspace}</code></span><strong>私有运行时</strong><span><code>{data.runtime.runtime}</code></span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
+    <div className="section-block">
+      <div className="section-heading"><div><h2>MCP Servers</h2><p>远程服务配置连接；本地预设先检测宿主环境，再把 MCP 包安装到 EasyAgent 私有目录。</p></div><button className="ghost-button" onClick={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })}>＋ 自定义</button></div>
+      <div className="capability-note"><strong>能力边界</strong><span>工作区文件工具已经内置；EasyAgent 只管理 MCP 包，不会全局安装或升级 Node、Python、Java 等项目运行时。</span></div>
+      {mcpNotice && <div role="status" aria-live="polite" className={`mcp-notice ${mcpNotice.ready ? 'ready' : 'failed'}`}><div><strong>{mcpNotice.title}</strong><span>{mcpNotice.message}</span></div>{mcpNotice.tools.length > 0 && <details><summary>查看 {mcpNotice.tools.length} 个工具</summary><code>{mcpNotice.tools.join('\n')}</code></details>}<button aria-label="关闭 MCP 状态" onClick={() => setMCPNotice(null)}>×</button></div>}
+      <div className="mcp-grid">{data.mcps.map((item) => {
+        const preset = data.mcpPresets.find((candidate) => candidate.id === item.id)
+        const canInstall = !item.enabled && preset?.action === 'install'
+        const busy = installingPreset === item.id || checkingPreset === item.id || togglingMCP === item.id
+        return <div className="mcp-row" key={item.id}>
+          <div className="mcp-row-info"><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><strong>{preset?.name || item.name}</strong><small title={preset?.description || item.description}>{preset?.description || item.description || (item.transport === 'stdio' ? `${item.command} ${item.args.join(' ')}` : item.endpoint)}</small></div>
+          <span>{item.enabled ? '已启用' : '已停用'}</span>
+          <div className="mcp-row-actions">
+            {preset?.action === 'install' && <button disabled={busy} onClick={() => checkPreset(preset)}>{checkingPreset === item.id ? '检测中…' : '检测环境'}</button>}
+            <button disabled={busy} onClick={() => testMCP(item.id)}>测试连接</button>
+            <button disabled={busy} onClick={() => canInstall && preset ? installPreset(preset) : toggleMCP(item)}>{installingPreset === item.id ? '安装中…' : togglingMCP === item.id ? '处理中…' : canInstall ? '安装并启用' : item.enabled ? '停用' : '启用'}</button>
+            <button disabled={busy} onClick={() => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })}>编辑</button>
+          </div>
+        </div>
+      })}</div>
+      <div className="presets"><span>MCP 预设 · 检测不会修改系统；安装操作只写入 EasyAgent 私有 Runtime</span>{data.mcpPresets.filter((preset) => !data.mcps.some((item) => item.id === preset.id)).map((preset) => <div className="preset-card" key={preset.id}><strong>{preset.name}</strong><small>{preset.description}</small><em>{preset.requirement}</em><div className="preset-actions">{preset.action === 'install' && <button type="button" disabled={!!installingPreset || !!checkingPreset} onClick={() => checkPreset(preset)}>{checkingPreset === preset.id ? '检测中…' : '检测环境'}</button>}<button type="button" disabled={!!installingPreset || !!checkingPreset} onClick={() => installPreset(preset)}>{installingPreset === preset.id ? '安装中…' : preset.action === 'install' ? '安装并启用' : '配置连接'}</button></div></div>)}</div>
+    </div>
     <details className="prompt-block"><summary><div><h2>基础 System Prompt</h2><p>独立 Markdown 包，只定义稳定行为；具体任务方法和团队约定写进 Skill。</p></div><span>查看</span></summary><pre>{data.systemPrompt}</pre></details>
     {mcp && <div className="modal-backdrop" onMouseDown={() => setMCP(null)}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
       <div className="modal-head"><div><p className="eyebrow">MCP SERVER</p><h2>{mcp.name}</h2></div><button aria-label="关闭 MCP 配置" onClick={() => setMCP(null)}>×</button></div>
@@ -689,10 +754,10 @@ function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh
       <div className="form-actions"><button className="ghost-button danger" disabled={savingMCP || deletingMCP} onClick={() => persistedMCP ? setConfirmingMCPDelete(true) : setMCP(null)}>{persistedMCP ? '删除' : '放弃新增'}</button><button className="primary-button" disabled={savingMCP || deletingMCP} onClick={saveMCP}>{savingMCP ? '正在验证…' : mcp.enabled ? '验证并启用' : '保存配置'}</button></div>
     </div></div>}
     {mcp && confirmingMCPDelete && <ConfirmDialog
-      title="删除这个 MCP 配置？"
-      description="认证信息和连接配置将被永久删除，Agent 也将无法再调用它提供的工具。"
+      title={editingPreset?.action === 'install' ? `卸载 ${mcp.name}？` : '删除这个 MCP 配置？'}
+      description={editingPreset?.action === 'install' ? 'EasyAgent 私有目录中的 MCP 包及其配置会被删除；不会卸载宿主机 Node/npm，也不会修改项目文件。' : '认证信息和连接配置将被永久删除，Agent 也将无法再调用它提供的工具。'}
       subject={mcp.name}
-      confirmLabel="删除 MCP"
+      confirmLabel={editingPreset?.action === 'install' ? '卸载 MCP' : '删除 MCP'}
       busy={deletingMCP}
       onCancel={() => setConfirmingMCPDelete(false)}
       onConfirm={removeMCP}

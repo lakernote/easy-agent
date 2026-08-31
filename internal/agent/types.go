@@ -15,6 +15,25 @@ import (
 // 可见文本或 Tool Call。Runner 会把这次真实调用写入 Trace，再关闭流式重试一次。
 var ErrEmptyModelResponse = errors.New("模型没有返回回答或工具调用")
 
+// ModelError 保存 Provider 返回的 HTTP 失败。Runner 只重试 429 和 5xx；
+// 认证、参数和不存在的模型等 4xx 属于确定性错误，不应浪费 Token 重放。
+type ModelError struct {
+	StatusCode int
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (failure *ModelError) Error() string {
+	if failure == nil {
+		return ""
+	}
+	return failure.Message
+}
+
+func (failure *ModelError) Retryable() bool {
+	return failure != nil && (failure.StatusCode == 429 || failure.StatusCode >= 500)
+}
+
 // Role 对应模型会话中的消息角色。
 type Role string
 
@@ -68,6 +87,36 @@ type ToolSpec struct {
 type Tool struct {
 	Spec ToolSpec
 	Run  func(context.Context, json.RawMessage) (string, error)
+}
+
+// ToolError 是工具向模型返回的结构化失败。Retryable 只表示使用完全相同的
+// 参数重试仍可能成功（例如临时超时）；参数、路径和权限错误必须为 false。
+type ToolError struct {
+	Code      string
+	Message   string
+	Hint      string
+	Retryable bool
+	Cause     error
+}
+
+func (failure *ToolError) Error() string {
+	if failure == nil {
+		return ""
+	}
+	if failure.Message != "" {
+		return failure.Message
+	}
+	if failure.Cause != nil {
+		return failure.Cause.Error()
+	}
+	return "工具执行失败"
+}
+
+func (failure *ToolError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.Cause
 }
 
 // ToolChoice 描述模型如何选择工具。默认运行使用 auto，让模型根据语义决定

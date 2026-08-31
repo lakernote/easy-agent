@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/appenv"
 )
 
 const (
@@ -23,11 +23,11 @@ const (
 
 // shellTool 是 EasyAgent 的通用本地执行底座。模型可以用它运行构建、测试、
 // 项目脚本和系统已有的 CLI。每次调用的命令、结果、耗时都会由 Runner 写入 Trace。
-func shellTool() agent.Tool {
+func shellTool(environment *appenv.Environment) agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "shell",
-			Description: "在 EasyAgent 服务器执行构建、测试、Git、脚本、CLI 或软件安装命令。文件读取、搜索和小范围修改优先使用 read/grep/find/ls/edit/write。",
+			Description: "在 EasyAgent 工作区执行确实需要运行的构建、测试、Git、脚本、CLI 或安装命令，并返回真实退出码与输出。不要用于普通问答或仅生成命令示例；文件读取、搜索和小范围修改优先使用专用文件工具。",
 			Parameters: objectSchema(map[string]any{
 				"command": stringSchema("必填，要执行的完整 Shell 命令"),
 				"working_directory": map[string]any{
@@ -38,11 +38,13 @@ func shellTool() agent.Tool {
 				},
 			}, []string{"command"}),
 		},
-		Run: runShell,
+		Run: func(ctx context.Context, raw json.RawMessage) (string, error) {
+			return runShell(ctx, environment, raw)
+		},
 	}
 }
 
-func runShell(parent context.Context, raw json.RawMessage) (string, error) {
+func runShell(parent context.Context, environment *appenv.Environment, raw json.RawMessage) (string, error) {
 	var arguments struct {
 		Command          string `json:"command"`
 		WorkingDirectory string `json:"working_directory"`
@@ -65,34 +67,23 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 	}
 
 	directory := strings.TrimSpace(arguments.WorkingDirectory)
-	if directory == "" {
-		var err error
-		directory, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("读取服务器工作目录失败: %w", err)
-		}
-	} else {
-		absolute, err := filepath.Abs(directory)
-		if err != nil {
-			return "", fmt.Errorf("解析工作目录失败: %w", err)
-		}
-		if resolved, resolveErr := filepath.EvalSymlinks(absolute); resolveErr == nil {
-			absolute = resolved
-		}
-		info, err := os.Stat(absolute)
-		if err != nil {
-			return "", fmt.Errorf("工作目录不可用: %w", err)
-		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("工作目录不是目录: %s", absolute)
-		}
-		directory = absolute
+	directory, err := environment.ResolveWorkspacePath(directory)
+	if err != nil {
+		return "", fmt.Errorf("解析工作目录失败: %w", err)
+	}
+	info, err := os.Stat(directory)
+	if err != nil {
+		return "", fmt.Errorf("工作目录不可用: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("工作目录不是目录: %s", directory)
 	}
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "/bin/sh", "-lc", arguments.Command)
+	command := exec.CommandContext(ctx, "/bin/sh", "-c", arguments.Command)
 	command.Dir = directory
+	command.Env = environment.Environ(nil)
 	// 单独创建进程组。超时或用户停止任务时，连同命令启动的子进程一起结束，
 	// 避免只杀掉 /bin/sh、却把测试或安装进程遗留在服务器上。
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -112,7 +103,7 @@ func runShell(parent context.Context, raw json.RawMessage) (string, error) {
 	command.Stdout = stdout
 	command.Stderr = stderr
 	startedAt := time.Now()
-	err := command.Run()
+	err = command.Run()
 	duration := time.Since(startedAt)
 
 	exitCode := 0

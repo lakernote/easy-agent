@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/appenv"
 )
 
 type SkillSource interface {
@@ -43,8 +44,8 @@ const (
 	categoryExtension   = "扩展"
 )
 
-func Catalog(skills SkillSource) []agent.Tool {
-	entries := catalogEntries(skills)
+func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
+	entries := catalogEntries(environment, skills)
 	result := make([]agent.Tool, 0, len(entries))
 	for _, item := range entries {
 		result = append(result, item.tool)
@@ -52,10 +53,10 @@ func Catalog(skills SkillSource) []agent.Tool {
 	return result
 }
 
-func catalogEntries(skills SkillSource) []entry {
+func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry {
 	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
-	files := newFileWorkspace()
+	files := newFileWorkspace(environment.Workspace())
 	result := []entry{
 		{tool: currentTimeTool(), category: categoryInformation},
 		{tool: weatherTool(), category: categoryInformation},
@@ -66,15 +67,15 @@ func catalogEntries(skills SkillSource) []entry {
 	for _, tool := range files.tools() {
 		result = append(result, entry{tool: tool, category: categoryFile})
 	}
-	result = append(result, entry{tool: shellTool(), category: categoryExecution})
+	result = append(result, entry{tool: shellTool(environment), category: categoryExecution})
 	if skills != nil {
 		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension})
 	}
 	return result
 }
 
-func InfoList(skills SkillSource) []Info {
-	entries := catalogEntries(skills)
+func InfoList(environment *appenv.Environment, skills SkillSource) []Info {
+	entries := catalogEntries(environment, skills)
 	result := make([]Info, 0, len(entries))
 	for _, item := range entries {
 		result = append(result, Info{
@@ -88,7 +89,7 @@ func InfoList(skills SkillSource) []Info {
 func loadSkillTool(source SkillSource) agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name: "load_skill", Description: "按名称加载一个相关 Skill 的完整说明；不要无目的加载全部 Skill。",
+			Name: "load_skill", Description: "按名称加载一个与当前任务相关的 Skill 完整说明，并在后续步骤遵守它。只在元数据表明 Skill 适用时加载，不要批量加载或把加载本身当成完成。",
 			Parameters: objectSchema(map[string]any{"name": stringSchema("Skill 名称")}, []string{"name"}),
 		},
 		Run: func(_ context.Context, raw json.RawMessage) (string, error) {

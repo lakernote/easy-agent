@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -47,7 +47,7 @@ func TestSaveSkillValidatesSkillMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -108,10 +108,8 @@ func TestSelectedSkillsUsesExplicitMentionOnly(t *testing.T) {
 }
 
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	workingDirectory := t.TempDir()
+	workingDirectory, _ = filepath.EvalSymlinks(workingDirectory)
 	callCount := 0
 	modelServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		callCount++
@@ -121,9 +119,9 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		}
 		if callCount == 1 {
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"id": "shell-call", "model": "fixture",
+				"id": "load-call", "model": "fixture",
 				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-					map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
+					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": "load_tools", "arguments": `{"names":["shell"]}`}},
 				}}}},
 			})
 			return
@@ -131,6 +129,18 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		messages := body["messages"].([]any)
 		toolMessage := messages[len(messages)-1].(map[string]any)
 		toolOutput, _ := toolMessage["content"].(string)
+		if callCount == 2 {
+			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"loaded":["shell"]`) {
+				t.Fatalf("模型没有收到工具加载结果: %+v", toolMessage)
+			}
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"id": "shell-call", "model": "fixture",
+				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+					map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
+				}}}},
+			})
+			return
+		}
 		if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, workingDirectory) || strings.Contains(toolOutput, "<workspace>") {
 			t.Fatalf("模型没有收到 Shell 原始路径: %+v", toolMessage)
 		}
@@ -149,12 +159,17 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
 
-	response, err := http.Post(httpServer.URL+"/api/v1/sessions", "application/json", strings.NewReader(`{"message":"执行 pwd 并原样回答"}`))
+	payload, _ := json.Marshal(map[string]string{"message": "执行 pwd 并原样回答", "workspace": workingDirectory})
+	response, err := http.Post(httpServer.URL+"/api/v1/sessions", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +179,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	finished := waitSession(t, database, queued.ID)
-	if finished.Status != "idle" || !strings.Contains(finished.Messages[len(finished.Messages)-1].Content, workingDirectory) {
+	if finished.Workspace != workingDirectory || finished.Status != "idle" || !strings.Contains(finished.Messages[len(finished.Messages)-1].Content, workingDirectory) {
 		t.Fatalf("Shell 原始路径任务没有完成: %+v", finished)
 	}
 	modelResponses := 0
@@ -175,12 +190,12 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 				t.Fatalf("模型 Trace 缺少真实 HTTP 状态码: %+v", event)
 			}
 		}
-		if event.Kind == "tool_end" && (!strings.Contains(event.Output, workingDirectory) || strings.Contains(event.Output, "<workspace>")) {
+		if event.Kind == "tool_end" && event.Name == "shell" && (!strings.Contains(event.Output, workingDirectory) || strings.Contains(event.Output, "<workspace>")) {
 			t.Fatalf("Shell Trace 没有保留真实路径: %s", event.Output)
 		}
 	}
-	if modelResponses != 2 {
-		t.Fatalf("请求、工具结果后应有两次一一对应的模型响应，实际 %d", modelResponses)
+	if modelResponses != 3 {
+		t.Fatalf("加载工具、执行工具和最终回答应有三次一一对应的模型响应，实际 %d", modelResponses)
 	}
 }
 
@@ -218,7 +233,7 @@ func TestMessageAttachmentsReachModelAndDownloadEndpoint(t *testing.T) {
 	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -268,7 +283,7 @@ func TestUnknownAPIIsNotSPA(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("frontend")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("frontend")}})
 	defer application.Shutdown(context.Background())
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil)
@@ -321,7 +336,11 @@ func TestMultiTurnSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}
-	application := New(database, assets)
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := New(database, assets, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -398,7 +417,7 @@ func TestLongSessionCreatesCompactionCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -450,7 +469,7 @@ func TestRunningSessionCanBeCanceled(t *testing.T) {
 	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -504,16 +523,16 @@ func TestFailedModelCallPersistsAttemptAndTrace(t *testing.T) {
 	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
 
 	failed := waitSession(t, database, postMessage(t, httpServer.URL+"/api/v1/sessions", "触发失败").ID)
-	if failed.Status != "failed" || failed.Usage.ModelCalls != 1 {
+	if failed.Status != "failed" || failed.Usage.ModelCalls != 2 {
 		t.Fatalf("失败调用及统计未闭环: %+v", failed)
 	}
-	if len(failed.Events) < 2 || failed.Events[len(failed.Events)-1].Status != "error" || failed.Events[len(failed.Events)-1].Name != "fixture" {
+	if len(failed.Events) < 4 || failed.Events[len(failed.Events)-1].Status != "error" || failed.Events[len(failed.Events)-1].Name != "fixture" || failed.Events[len(failed.Events)-1].Attempt != 2 {
 		t.Fatalf("失败 Trace 缺少模型或错误信息: %+v", failed.Events)
 	}
 	for _, event := range failed.Events {
@@ -805,4 +824,13 @@ func waitSession(t *testing.T, database *store.Store, id string) store.Session {
 	}
 	t.Fatal("等待 Agent 超时")
 	return store.Session{}
+}
+
+func newTestApplication(t *testing.T, database *store.Store, assets fstest.MapFS) *Server {
+	t.Helper()
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(database, assets, environment)
 }

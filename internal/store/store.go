@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
   status TEXT NOT NULL,
   error TEXT NOT NULL,
   model TEXT NOT NULL,
+  workspace TEXT NOT NULL DEFAULT '',
   response_id TEXT NOT NULL,
   provider_key TEXT NOT NULL,
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -144,6 +145,17 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 	if splitTurnColumn == 0 {
 		if _, err := store.db.Exec(`ALTER TABLE ea_compactions ADD COLUMN split_turn INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("迁移 ea_compactions.split_turn: %w", err)
+		}
+	}
+	// 会话工作区是会话上下文的一部分。SQLite 的 IF NOT EXISTS 不会给已经存在的
+	// 表补列，因此用幂等迁移保证升级后的现有数据库可以直接打开。
+	var workspaceColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name='workspace'`).Scan(&workspaceColumn); err != nil {
+		return err
+	}
+	if workspaceColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN workspace TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 ea_sessions.workspace: %w", err)
 		}
 	}
 	var count int
@@ -243,8 +255,8 @@ func (store *Store) DeleteMCP(id string) error {
 	return err
 }
 
-func (store *Store) CreateSession(id, title, model string, now time.Time) (Session, error) {
-	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,status,error,model,response_id,provider_key,created_at,updated_at) VALUES(?,?,'idle','',?,'','',?,?)`, id, title, model, formatTime(now), formatTime(now))
+func (store *Store) CreateSession(id, title, model, workspace string, now time.Time) (Session, error) {
+	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,status,error,model,workspace,response_id,provider_key,created_at,updated_at) VALUES(?,?,'idle','',?,?,'','',?,?)`, id, title, model, workspace, formatTime(now), formatTime(now))
 	if err != nil {
 		return Session{}, err
 	}
@@ -255,7 +267,7 @@ func (store *Store) ListSessions(limit int) ([]Session, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := store.db.Query(`SELECT id,title,status,error,model,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
+	rows, err := store.db.Query(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +290,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanSession(row rowScanner) (Session, error) {
 	var value Session
 	var created, updated string
-	err := row.Scan(&value.ID, &value.Title, &value.Status, &value.Error, &value.Model, &value.ResponseID, &value.ProviderKey,
+	err := row.Scan(&value.ID, &value.Title, &value.Status, &value.Error, &value.Model, &value.Workspace, &value.ResponseID, &value.ProviderKey,
 		&value.Usage.InputTokens, &value.Usage.OutputTokens, &value.Usage.CachedTokens, &value.Usage.CacheWriteTokens, &value.Usage.TotalTokens,
 		&value.Usage.ModelDurationMS, &value.Usage.ToolDurationMS, &value.Usage.ModelCalls, &value.Usage.ToolCalls, &created, &updated)
 	if err != nil {
@@ -290,7 +302,7 @@ func scanSession(row rowScanner) (Session, error) {
 }
 
 func (store *Store) Session(id string) (Session, error) {
-	row := store.db.QueryRow(`SELECT id,title,status,error,model,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
+	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
 	if err != nil {
 		return Session{}, err

@@ -41,17 +41,28 @@ make build
 ./bin/easyagent
 ```
 
-修改监听地址或数据库位置：
+启动参数只有监听地址和 SQLite 路径，而且都有默认值：
 
 ```bash
 ./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
 ```
 
+不传参数时监听 `127.0.0.1:8080`，数据库位于 `~/.easyagent/easyagent.db`。
+EasyAgent 自动管理 `~/.easyagent` 和默认工作区
+`~/.easyagent/workspaces/default`，不依赖服务进程从哪个目录启动。
+
+工作区不属于启动参数：新建会话时可在输入框上方选择最近使用的目录，或输入
+服务器上已存在的目录；留空就使用默认工作区。工作区保存到会话中，后续多轮的
+文件、Shell 和 stdio MCP 始终使用同一个目录。Playwright 预设安装在私有
+`runtime/mcp` 目录，不修改项目或全局 npm 依赖。EasyAgent 只安装和卸载
+MCP 自己的固定版本包；Node.js、Python、Java 等宿主运行时由服务器管理员或
+项目环境提供，页面只负责检测，不执行系统级安装或升级。
+
 ## 三种扩展
 
 | 能力 | 适合放什么 | 如何使用 |
 | --- | --- | --- |
-| Tool | 高频、确定性的本机操作 | 编译进 Go 二进制，模型直接调用 |
+| Tool | 高频、确定性的本机操作 | 首轮显示精简目录，模型按需加载并调用 |
 | Skill | 任务方法、团队规范和领域经验 | 页面编辑，模型按需读取 |
 | MCP | GitHub、浏览器、数据库等外部系统 | 页面配置，模型按需连接 |
 

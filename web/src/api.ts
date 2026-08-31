@@ -16,7 +16,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
   session: (id: string) => request<Session>(`/api/v1/sessions/${id}`),
-  createSession: (message: string, attachments: AttachmentInput[] = []) => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message, attachments }) }),
+  createSession: (message: string, attachments: AttachmentInput[] = [], workspace = '') => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message, attachments, workspace }) }),
   sendMessage: (id: string, message: string, attachments: AttachmentInput[] = []) => request<Session>(`/api/v1/sessions/${id}/messages`, { method: 'POST', body: JSON.stringify({ message, attachments }) }),
   cancelSession: (id: string) => request<Session>(`/api/v1/sessions/${id}/cancel`, { method: 'POST' }),
   deleteSession: (id: string) => request<void>(`/api/v1/sessions/${id}`, { method: 'DELETE' }),
@@ -28,5 +28,7 @@ export const api = {
   saveMCP: (mcp: MCPConfig) => request<MCPConfig>(`/api/v1/mcp/${encodeURIComponent(mcp.id)}`, { method: 'PUT', body: JSON.stringify(mcp) }),
   deleteMCP: (id: string) => request<void>(`/api/v1/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testMCP: (id: string) => request<{ ok: boolean; tools: { name: string; description: string }[] }>(`/api/v1/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  checkMCPPreset: (id: string) => request<{ ok: boolean; installed: boolean; status: string; message: string }>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/check`, { method: 'POST' }),
   installMCPPreset: (id: string) => request<MCPInstallResult>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/install`, { method: 'POST' }),
+  uninstallMCPPreset: (id: string) => request<void>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/install`, { method: 'DELETE' }),
 }

@@ -15,12 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
 type Server struct {
 	store  *store.Store
 	assets fs.FS
+	env    *appenv.Environment
 	mux    *http.ServeMux
 
 	context context.Context
@@ -38,9 +40,9 @@ type taskHandle struct {
 	partial string
 }
 
-func New(database *store.Store, assets fs.FS) *Server {
+func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	server := &Server{store: database, assets: assets, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: make(map[string]taskHandle)}
+	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: make(map[string]taskHandle)}
 	server.routes()
 	return server
 }
@@ -77,7 +79,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("PUT /api/v1/mcp/{id}", server.saveMCP)
 	server.mux.HandleFunc("DELETE /api/v1/mcp/{id}", server.deleteMCP)
 	server.mux.HandleFunc("POST /api/v1/mcp/{id}/test", server.testMCP)
+	server.mux.HandleFunc("POST /api/v1/mcp/presets/{id}/check", server.checkMCPPreset)
 	server.mux.HandleFunc("POST /api/v1/mcp/presets/{id}/install", server.installMCPPreset)
+	server.mux.HandleFunc("DELETE /api/v1/mcp/presets/{id}/install", server.uninstallMCPPreset)
 	// API 拼错时必须返回 JSON 404，不能落到单页应用入口并伪装成 200 成功。
 	server.mux.HandleFunc("GET /api/", func(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusNotFound, "API 不存在")

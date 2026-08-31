@@ -109,13 +109,34 @@ func (client *Client) post(ctx context.Context, endpoint string, payload any, pr
 		return core.Response{Exchange: exchange}, readErr
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		return core.Response{Exchange: exchange}, fmt.Errorf("模型返回 %d: %s", httpResponse.StatusCode, strings.TrimSpace(string(responseBody)))
+		return core.Response{Exchange: exchange}, modelHTTPError(httpResponse, responseBody)
 	}
 	response, err := decode(responseBody)
 	response.Exchange = exchange
 	response.Exchange.Model = exchange.Model
 	response.Exchange.Usage = response.Usage
 	return response, err
+}
+
+func modelHTTPError(response *http.Response, body []byte) error {
+	message := fmt.Sprintf("模型返回 %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	return &core.ModelError{StatusCode: response.StatusCode, Message: message, RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"))}
+}
+
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := time.ParseDuration(value + "s"); err == nil && seconds > 0 {
+		return seconds
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if wait := time.Until(when); wait > 0 {
+			return wait
+		}
+	}
+	return 0
 }
 
 // requestModel 只用于 Trace，避免 post 再依赖两种协议的私有请求类型。

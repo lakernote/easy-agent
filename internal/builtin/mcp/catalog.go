@@ -18,14 +18,17 @@ type Preset struct {
 	Requirement      string            `json:"requirement"`
 	RequiredCommands []string          `json:"requiredCommands,omitempty"`
 	MinimumNodeMajor int               `json:"minimumNodeMajor,omitempty"`
+	NPMPackage       string            `json:"npmPackage,omitempty"`
+	NPMExecutable    string            `json:"npmExecutable,omitempty"`
 }
 
 func Catalog() []Preset {
 	return []Preset{
 		{
 			ID: "playwright", Name: "Playwright", Description: "复现网页问题，操作页面并检查结构与请求",
-			Transport: "stdio", Command: "npx", Args: []string{"-y", "@playwright/mcp@0.0.79", "--headless", "--isolated"},
-			Action: "install", Requirement: "Node.js 20+ · 固定版本 0.0.79 · 启用时验证握手与工具列表", RequiredCommands: []string{"node", "npx"}, MinimumNodeMajor: 20,
+			Transport: "stdio", Command: "@runtime/mcp/playwright/node_modules/.bin/playwright-mcp", Args: []string{"--headless", "--isolated"},
+			Action: "install", Requirement: "宿主机 Node.js 20+ / npm · MCP 包私有安装 · 固定版本 0.0.79", RequiredCommands: []string{"node", "npm"}, MinimumNodeMajor: 20,
+			NPMPackage: "@playwright/mcp@0.0.79", NPMExecutable: "playwright-mcp",
 		},
 		{
 			ID: "github", Name: "GitHub", Description: "读取仓库、Issue、PR 和 Actions 上下文",

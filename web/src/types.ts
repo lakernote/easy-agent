@@ -90,6 +90,7 @@ export type Session = {
   status: 'idle' | 'queued' | 'running' | 'failed' | 'canceled'
   error?: string
   model?: string
+  workspace: string
   createdAt: string
   updatedAt: string
   messages: Message[]
@@ -182,7 +183,7 @@ export type MCPPreset = {
 
 export type MCPInstallResult = {
   ready: boolean
-  status: 'ready' | 'missing_dependency' | 'connect_failed'
+  status: 'ready' | 'missing_dependency' | 'install_failed' | 'connect_failed'
   message: string
   mcp: MCPConfig
   tools: { name: string; description: string }[]
@@ -207,4 +208,5 @@ export type Bootstrap = {
   mcps: MCPConfig[]
   systemPrompt: string
   ollama: OllamaStatus
+  runtime: { home: string; workspace: string; runtime: string }
 }

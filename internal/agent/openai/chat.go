@@ -216,7 +216,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		responseBody, _ := io.ReadAll(io.LimitReader(httpResponse.Body, 16*1024))
 		exchange.Response = string(responseBody)
 		exchange.Duration = time.Since(startedAt)
-		return core.Response{Exchange: exchange}, fmt.Errorf("模型返回 %d: %s", httpResponse.StatusCode, strings.TrimSpace(string(responseBody)))
+		return core.Response{Exchange: exchange}, modelHTTPError(httpResponse, responseBody)
 	}
 	// 一些 OpenAI 兼容网关会忽略 stream=true 并直接返回普通 JSON。
 	// 这里自动降级，避免为了流式展示破坏原本可用的 Provider。

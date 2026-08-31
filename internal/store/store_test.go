@@ -54,7 +54,7 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "第一轮", "fixture", now); err != nil {
+	if _, err := value.CreateSession("s1", "第一轮", "fixture", "", now); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessage("s1", Message{Role: "user", Content: "你好"}); err != nil {
@@ -81,7 +81,7 @@ func TestAppendMessagesCommitsToolStepTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("s1", "工具", "fixture", time.Now()); err != nil {
+	if _, err := value.CreateSession("s1", "工具", "fixture", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessages("s1", []Message{
@@ -106,7 +106,7 @@ func TestMessageAttachmentsStayInSQLite(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "附件", "fixture", now); err != nil {
+	if _, err := value.CreateSession("s1", "附件", "fixture", "", now); err != nil {
 		t.Fatal(err)
 	}
 	attachment := Attachment{ID: "a1", Name: "error.log", MIMEType: "text/plain", Kind: "text", Size: 12, Data: []byte("stack trace")}
@@ -132,7 +132,7 @@ func TestCompactionSplitTurnRoundTripsInSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("s1", "压缩", "fixture", time.Now()); err != nil {
+	if _, err := value.CreateSession("s1", "压缩", "fixture", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendCompaction("s1", Compaction{Summary: "checkpoint", ThroughMessageID: 7, SplitTurn: true, SourceMessages: 3, CompactedMessages: 7}); err != nil {
@@ -154,7 +154,7 @@ func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "任务", "fixture", now); err != nil {
+	if _, err := value.CreateSession("s1", "任务", "fixture", "", now); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.QueueSession("s1", "fixture", now); err != nil {

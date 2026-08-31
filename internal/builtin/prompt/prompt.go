@@ -43,6 +43,7 @@ type SelectedSkill struct {
 
 type Context struct {
 	Now            time.Time
+	Workspace      string
 	Skills         []SkillMeta
 	MCPs           []MCPMeta
 	SelectedSkills []SelectedSkill
@@ -58,6 +59,9 @@ func Render(context Context) string {
 	zone, offset := now.Zone()
 	runtime := fmt.Sprintf("当前日期：%s；星期：%s；时区：%s（UTC%+03d:%02d）。精确当前时间请调用 current_time。",
 		now.Format("2006-01-02"), weekday(now.Weekday()), zone, offset/3600, abs(offset%3600)/60)
+	if strings.TrimSpace(context.Workspace) != "" {
+		runtime += fmt.Sprintf(" 当前会话工作区：%q。文件和命令默认在该目录中运行。", context.Workspace)
+	}
 	var skills strings.Builder
 	if len(context.Skills) == 0 {
 		skills.WriteString("- 无")

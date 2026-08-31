@@ -78,11 +78,11 @@ OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoni
 
 基础 Prompt 在 `internal/builtin/prompt/system.md`，只保存身份、工作方式、能力使用和回答契约四层稳定原则。运行时事实、Skill 元数据和 MCP 元数据放在尾部，便于保持公共前缀稳定；不会把 MCP 启动参数或密钥写进 Prompt。压缩使用独立的 `internal/builtin/prompt/compaction.md`，不携带常规工具规则，也不给模型任何 Tool，避免摘要过程继续执行用户任务。
 
-Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时调用 `load_skill(name)` 读取全文。用户明确 `@skill:name` 时，运行时直接把已选 Skill 正文注入本轮 Prompt，绕开小模型可能不稳定的首次工具选择。内置 Tool 保持为一组稳定的小 Schema，直接使用原生 Function Calling；MCP 的大型动态工具集仍按需加载。
+Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 
-内置 Tool 以固定顺序注册，每轮使用原生 `tool_choice=auto`，由模型根据 Schema 决定直接回答还是调用工具。宿主只负责参数校验、超时、执行和通用 no-progress 保护，不使用关键词替模型判断意图。固定工具前缀也更利于 Provider 的 Prompt Cache；未明确选择的 Skill 正文和 MCP 真实工具仍按需加载。
+内置 Tool 首轮只注册 `load_tools`：其描述包含稳定、自解释的名称目录，但不重复 13 份说明和参数 Schema。模型自主选出当前需要的最少工具，Runtime 动态注册后下一轮直接调用。`@tool:name` 是用户显式预加载，不是语义路由。MCP 则通过 `load_mcp` 按服务加载。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
 
-工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。路径解析会校验真实符号链接目标，拒绝访问工作区之外的位置；返回结果只使用相对路径。
+工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 
 `calculate` 使用 Go 标准库执行常见数学表达式，不要求服务器安装 Python。`shell` 使用服务器自带的 `/bin/sh`，只负责构建、测试、Git、脚本、CLI 和安装任务，支持工作目录与最长 300 秒超时；标准输出和错误输出分别限制为 64 KiB，并保留开头和结尾。任务取消时会终止整个命令进程组。Agent 和页面 Trace 都保留工具真实返回的命令、工作目录和文件路径，保证结果可复现。
 
@@ -98,7 +98,7 @@ mcp__<server_id>__<remote_tool_name>
 
 每轮开始时不会连接全部 MCP。模型先看到一个 `load_mcp(id)` 工具和服务元数据；只有调用它时，`Loader` 才连接指定服务，并通过 `Runner.AddTools` 把真实工具加入下一轮模型请求。这样普通问答不承担远端工具 Schema 的 Token 成本。
 
-认证、进程环境和连接生命周期都停留在 MCP 适配层。启用配置前必须完成认证校验、连接和 `tools/list`；一轮任务结束后关闭本轮实际打开的连接。Agent 最终仍只看到普通 `agent.Tool`。普通工作区文件操作由内置 Tools 提供，不需要启动 Node.js MCP 进程；只有确实需要外部系统能力时才配置 MCP。
+认证、进程环境和连接生命周期都停留在 MCP 适配层。stdio MCP 与 Shell 共用启动时冻结的 PATH 和会话工作区；服务管理器 PATH 较短时会一次性读取登录 Shell PATH。Playwright 预设固定版本安装到 `~/.easyagent/runtime/mcp`，不写全局 npm 或项目 `node_modules`。EasyAgent 只管理这个 MCP 私有包及其配置，不成为通用语言运行时管理器：Node.js、Python、Java 等由宿主机、容器或项目工具链提供，MCP 页面只检测 PATH 和版本。启用前必须通过握手和 `tools/list`，任务结束后关闭本轮连接。
 
 ## 排队与取消
 

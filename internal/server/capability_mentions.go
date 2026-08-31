@@ -39,6 +39,26 @@ func selectedSkills(messages []store.Message, catalog *skillCatalog) []prompt.Se
 	return selected
 }
 
+// selectedToolNames 返回 UI 通过 @tool:name 明确选择的工具。它不分析自然语言，
+// 只把用户的显式选择转换成首轮预加载，作用类似 Codex 输入框中的能力选择器。
+func selectedToolNames(messages []store.Message) []string {
+	matches := capabilityMentionPattern.FindAllStringSubmatch(latestUserMessage(messages), -1)
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, match := range matches {
+		if strings.ToLower(match[1]) != "tool" {
+			continue
+		}
+		name := match[2]
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
 func latestUserMessage(messages []store.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
 		if messages[index].Role == "user" {

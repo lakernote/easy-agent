@@ -36,11 +36,7 @@ type fileWorkspace struct {
 	reads map[string][sha256.Size]byte
 }
 
-func newFileWorkspace() *fileWorkspace {
-	root, err := os.Getwd()
-	if err != nil {
-		root = "."
-	}
+func newFileWorkspace(root string) *fileWorkspace {
 	root, _ = filepath.Abs(root)
 	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
 		root = resolved
@@ -58,7 +54,7 @@ func (workspace *fileWorkspace) readTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "read",
-			Description: "读取工作区内的 UTF-8 文本文件，可指定起始行和行数。处理代码和文本时优先使用它，不要用 shell cat。",
+			Description: "读取工作区内已经存在的 UTF-8 文本文件，可指定起始行和行数。仅在任务需要检查文件内容时使用；普通问答无需调用。处理代码和文本时优先于 shell cat。",
 			Parameters: objectSchema(map[string]any{
 				"path":   stringSchema("相对工作区的文件路径，也接受工作区内绝对路径"),
 				"offset": map[string]any{"type": "integer", "description": "可选，起始行（从 1 开始），默认 1", "minimum": 1},
@@ -120,7 +116,7 @@ func (workspace *fileWorkspace) editTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "edit",
-			Description: "精确替换工作区文本文件中的内容并返回修改预览。默认要求 old_text 只出现一次，适合小而明确的修改。",
+			Description: "精确替换工作区文本文件中的内容并返回修改预览。仅当用户要求修改工作区文件时使用，不要把‘写文章/写说明’误解成写入服务器文件。默认要求 old_text 只出现一次。",
 			Parameters: objectSchema(map[string]any{
 				"path":        stringSchema("要修改的文件路径"),
 				"old_text":    stringSchema("文件中必须存在的原文，默认必须唯一"),
@@ -136,7 +132,7 @@ func (workspace *fileWorkspace) writeTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "write",
-			Description: "在工作区创建文本文件，或在先调用 read 后覆盖现有文件。小范围修改优先使用 edit。",
+			Description: "创建或完整覆盖工作区文本文件。仅当用户明确要求把内容写入文件时使用；用户只要求生成文章、代码示例或回答时直接在对话中输出。覆盖现有文件前必须 read，小范围修改优先 edit。",
 			Parameters: objectSchema(map[string]any{
 				"path":      stringSchema("要创建或覆盖的文件路径；父目录必须已经存在"),
 				"content":   stringSchema("完整 UTF-8 文件内容"),
