@@ -197,7 +197,7 @@ func TestWebFetchReadsHTMLAndLimitsContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) {
+	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) || !strings.Contains(output, `"content_trust": "untrusted_external"`) {
 		t.Fatalf("网页正文提取错误: %s", output)
 	}
 }

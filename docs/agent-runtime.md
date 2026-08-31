@@ -76,7 +76,11 @@ OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoni
 
 ## Prompt 与 Skill
 
-基础 Prompt 在 `internal/builtin/prompt/system.md`，只保存身份、工作方式、能力使用和回答契约四层稳定原则。运行时事实、Skill 元数据和 MCP 元数据放在尾部，便于保持公共前缀稳定；不会把 MCP 启动参数或密钥写进 Prompt。压缩使用独立的 `internal/builtin/prompt/compaction.md`，不携带常规工具规则，也不给模型任何 Tool，避免摘要过程继续执行用户任务。
+基础 Prompt 在 `internal/builtin/prompt/system.md`，只保存身份、工作方式、信任边界、能力使用和回答契约。运行时事实、Skill 元数据和 MCP 元数据放在尾部，便于保持公共前缀稳定；不会把 MCP 启动参数或密钥写进 Prompt。用户消息可以定义任务目标，但不能覆盖 System Prompt 或授权越权操作；附件、网页、代码、日志以及 Tool/MCP 返回按不可信数据处理，只能提供证据。压缩使用独立的 `internal/builtin/prompt/compaction.md`，不携带常规工具规则，也不给模型任何 Tool，避免摘要过程继续执行用户任务。
+
+Prompt 规则只能降低模型服从直接或间接注入的概率，不能替代 Runtime 约束。工作区边界、Tool Schema、路径校验、超时和 MCP 连接范围仍由 Go 代码确定性执行；不能用关键词黑名单判断“是否注入”，也不能把网页或工具结果当成用户授权。
+
+网页搜索、网页读取和文本附件会携带 `content_trust=untrusted_external` 或 `trust=untrusted_user_content` 元数据，使模型能稳定区分任务指令与待分析资料。该标记不删除原文，也不依赖扫描“忽略规则”等关键词，因此日志、安全样例和代码仍可正常分析。
 
 Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 

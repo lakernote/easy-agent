@@ -429,7 +429,8 @@ func attachmentDataURL(attachment core.Attachment) string {
 }
 
 func textAttachment(attachment core.Attachment) string {
-	return fmt.Sprintf("<attachment name=%q type=%q>\n%s\n</attachment>", attachment.Name, attachment.MIMEType, string(attachment.Data))
+	const untrustedUserContent = "untrusted_user_content"
+	return fmt.Sprintf("<attachment name=%q type=%q trust=%q>\n%s\n</attachment>", attachment.Name, attachment.MIMEType, untrustedUserContent, string(attachment.Data))
 }
 
 func chatContentText(value any) string {

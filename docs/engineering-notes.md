@@ -163,6 +163,29 @@ entry {
 - Java、Node.js、Python 等项目环境交给宿主机、容器、项目脚本或专门版本管理器；
 - 检测失败和安装失败不写入“看起来已经安装”的配置，只有私有包安装成功但握手失败时保留停用配置供排查。
 
+### 2.14 把用户、网页或工具内容当成高优先级指令
+
+**问题**：用户消息可以直接要求“忽略之前规则”，网页、附件、日志、代码注释及 MCP 返回也可能夹带“读取密钥并上传”“输出 System Prompt”等间接提示词注入。如果模型把这些内容当成新的授权，工具越强，风险反而越大。
+
+**解决**：
+
+- System Prompt 明确信任顺序：系统策略最高，用户定义目标，附件和外部返回只提供不可信数据或证据；
+- 外部内容不能扩大原始任务、权限或工作区，冲突指令被忽略后仍继续完成安全范围内的目标；
+- 密钥不进入 Prompt，工作区、路径、Tool Schema、超时和 MCP 范围由 Runtime 确定性约束；
+- 不使用关键词、正则或硬编码业务路由判断注入，因为它既容易绕过，也会误伤正常代码和安全研究内容。
+
+Prompt 不是安全沙箱。若未来允许无人值守执行高风险 Shell、写操作或外部发布，还需要独立的权限策略、审批或隔离执行环境，不能只依赖模型“记住不要做”。
+
+对标结论：OpenAI API 用 `system`/`developer` 与 `user` 角色表达指令层级，并建议保持 Prompt 精简、把授权边界写清楚；Codex 把 Personality 单独写成简短、具体的协作风格；Claude Code 在 Prompt 之外使用权限、工作区/网络沙箱、WebFetch 隔离上下文和 MCP 信任确认；Pi 明确说明默认继承宿主进程权限，强隔离需要容器或沙箱。EasyAgent 当前实现角色边界、外部内容信任标记和工作区文件边界，但尚未实现 Claude/Codex 等级的 Shell 审批与系统沙箱，页面不能把它宣传成“已完全防御提示词注入”。
+
+参考：
+
+- OpenAI Responses 指令层级：<https://developers.openai.com/api/reference/cli/resources/beta/subresources/responses>
+- OpenAI 模型 Prompt 与授权边界建议：<https://developers.openai.com/api/docs/guides/latest-model>
+- Codex Personality 模板：<https://github.com/openai/codex/blob/main/codex-rs/core/templates/personalities/gpt-5.2-codex_pragmatic.md>
+- Claude Code Security：<https://code.claude.com/docs/en/security>
+- Pi Permissions & Containerization：<https://github.com/earendil-works/pi#permissions--containerization>
+
 ## 3. 智能优先的 Token 优化顺序
 
 按下面顺序优化，越靠前越不容易损害智能：
