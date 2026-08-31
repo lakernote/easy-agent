@@ -116,7 +116,7 @@ function runSession(sessionId):
     history  = loadSessionHistory(sessionId)
     prompt   = renderStableSystemPrompt(skillMetadata, mcpMetadata)
     history  = compactIfContextIsFull(history, settings)
-    tools    = builtinTools + loadSkillTool + loadMcpTool
+    tools    = builtinTools + loadSkill + optional(loadMcp)
 
     result = Runner(modelAdapter(settings), tools).run(prompt + history)
 
@@ -170,7 +170,7 @@ MCP   = 外部系统提供什么能力（按需连接的 Tool）
 - 会随项目和团队变化的方法写成 Skill；
 - 需要外部服务、账号或独立生命周期的能力接 MCP。
 
-Skill 和 MCP 都只先把简短元数据给模型。模型调用 `load_skill` 或 `load_mcp` 后，正文或真实 Tool Schema 才进入下一步，避免每轮发送全部内容。
+内置 Tool 是一组小而稳定的原生 Schema，直接交给模型自主选择。Skill 和 MCP 默认只先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `load_mcp` 后才连接服务并注册远端 Tool Schema。用户在输入框明确 `@skill:name` 时，该 Skill 正文直接作为本轮已选上下文注入，不再依赖模型先调用加载工具。这样不增加二次工具路由，同时避免把未选择的大型动态能力集塞进每轮请求。
 
 ## 7. Trace 的 Review 标准
 

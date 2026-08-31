@@ -17,6 +17,7 @@ import (
 	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
 	builtinmodels "github.com/lakernote/easy-agent/internal/builtin/models"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
+	builtinskills "github.com/lakernote/easy-agent/internal/builtin/skills"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
 	"github.com/lakernote/easy-agent/internal/mcpclient"
 	"github.com/lakernote/easy-agent/internal/store"
@@ -267,6 +268,18 @@ func (server *Server) saveSkill(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, "Skill 名称只能包含小写英文、数字和短横线")
 		return
 	}
+	parsed, err := builtinskills.Parse(input.Content)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "SKILL.md 格式错误："+err.Error())
+		return
+	}
+	if parsed.Name != input.Name {
+		writeError(response, http.StatusBadRequest, "SKILL.md 中的 name 必须与 Skill 名称一致")
+		return
+	}
+	// frontmatter 是 Skill 元数据的唯一事实来源，避免列表描述和真正交给
+	// Agent 的 SKILL.md 内容不一致。
+	input.Description = parsed.Description
 	catalog, err := loadSkillCatalog(server.store)
 	if err == nil {
 		for _, value := range catalog.All() {

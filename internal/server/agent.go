@@ -134,14 +134,14 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
-	loader := mcpclient.NewLoader(mcps)
-	defer loader.Close()
+	mcpLoader := mcpclient.NewLoader(mcps)
+	defer mcpLoader.Close()
 	mcpMeta := make([]prompt.MCPMeta, 0)
-	for _, info := range loader.Servers() {
+	for _, info := range mcpLoader.Servers() {
 		mcpMeta = append(mcpMeta, prompt.MCPMeta{ID: info.ID, Name: info.Name, Description: info.Description})
 	}
-	if !loader.Empty() {
-		allTools = append(allTools, loader.Tool())
+	if !mcpLoader.Empty() {
+		allTools = append(allTools, mcpLoader.Tool())
 	}
 	apiKey := settings.APIKey
 	if settings.APIKeyEnv != "" {
@@ -156,7 +156,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 		return err
 	}
 	systemPrompt := prompt.Render(prompt.Context{
-		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta,
+		Now: time.Now(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog),
 	})
 	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, allTools, turn, usage, runtimeCompactionThreshold(settings), false)
 	if err != nil {
@@ -166,7 +166,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
-	loader.SetRegister(runner.AddTools)
+	mcpLoader.SetRegister(runner.AddTools)
 	runner.MaxOutputTokens = settings.MaxOutputTokens
 	runner.Observe = server.observer(id, turn, usage)
 

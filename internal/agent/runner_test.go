@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -122,6 +123,33 @@ func TestRunnerMarksEmptyNonStreamingResponseAsError(t *testing.T) {
 	}
 }
 
+func TestRunnerFallsBackWithoutToolsAfterEmptyCompatibilityResponses(t *testing.T) {
+	calls := 0
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		usage := Usage{InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
+		if calls < 3 {
+			return Response{Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, nil
+		}
+		if len(request.Tools) != 0 || request.ToolChoice.Mode != ToolChoiceNone || request.OnTextDelta != nil {
+			t.Fatalf("最终兼容请求必须禁用工具和流式: %+v", request)
+		}
+		return Response{Message: Message{Content: "直接回答"}, Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, nil
+	})
+	runner, err := NewRunner(model, "fixture", []Tool{{
+		Spec: ToolSpec{Name: "lookup"}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "回答"}}, OnTextDelta: func(string) {},
+	})
+	if err != nil || result.Answer != "直接回答" || calls != 3 || result.Usage.TotalTokens != 36 {
+		t.Fatalf("无工具兼容降级错误: calls=%d result=%+v err=%v", calls, result, err)
+	}
+}
+
 func TestRunnerReturnsToolErrorsToModelForRecovery(t *testing.T) {
 	requests := 0
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
@@ -145,6 +173,30 @@ func TestRunnerReturnsToolErrorsToModelForRecovery(t *testing.T) {
 	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "查记录"}}})
 	if err != nil || result.Answer != "没有找到该记录，请补充 ID。" {
 		t.Fatalf("Agent 没有从工具错误中恢复: %+v, %v", result, err)
+	}
+}
+
+func TestRunnerConvergesAfterRepeatedFailedToolSteps(t *testing.T) {
+	calls := 0
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		if calls <= 2 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: fmt.Sprintf("call-%d", calls), Name: "lookup", Arguments: json.RawMessage(`{"id":"missing"}`)}}}}, nil
+		}
+		if len(request.Tools) != 0 || request.ToolChoice.Mode != ToolChoiceNone {
+			t.Fatalf("连续失败后应关闭工具收敛: %+v", request.ToolChoice)
+		}
+		return Response{Message: Message{Content: "两次查询都失败，请检查 ID。"}}, nil
+	})
+	runner, err := NewRunner(model, "fixture", []Tool{{
+		Spec: ToolSpec{Name: "lookup"}, Run: func(context.Context, json.RawMessage) (string, error) { return "", errors.New("没有找到") },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "查记录"}}})
+	if err != nil || calls != 3 || !strings.Contains(result.Answer, "失败") {
+		t.Fatalf("重复失败收敛错误: calls=%d result=%+v err=%v", calls, result, err)
 	}
 }
 

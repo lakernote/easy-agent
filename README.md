@@ -14,7 +14,7 @@
 
 - 多轮对话，支持流式显示、图片、文本、代码和 PDF。
 - 连接 OpenAI、DeepSeek、Ollama 以及 OpenAI 兼容模型服务。
-- 内置文件读写搜索、Shell、时间、天气、计算和 Skill 加载工具。
+- 内置文件读写搜索、Shell、网页搜索/读取、时间、天气、计算和 Skill 加载工具。
 - 在页面管理 Skill 与 MCP，任务需要时才加载。
 - 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
 - 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
@@ -59,6 +59,7 @@ make build
 
 - [设计说明：场景、术语、边界和伪代码](docs/design.md)
 - [运行时细节：消息、上下文、Tool、Skill、MCP 和 Trace](docs/agent-runtime.md)
+- [工程复盘：遇到的问题、错误方案、修正与 Review 清单](docs/engineering-notes.md)
 - [安全说明](SECURITY.md)
 - [参与贡献](CONTRIBUTING.md)
 

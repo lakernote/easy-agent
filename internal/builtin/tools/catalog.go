@@ -29,41 +29,60 @@ type Info struct {
 	Category    string `json:"category"`
 }
 
+// entry 把工具本身和仅用于页面展示的分类放在同一个注册点。
+// Category 不参与模型决策，也不会发给模型；模型只看到 ToolSpec。
+type entry struct {
+	tool     agent.Tool
+	category string
+}
+
+const (
+	categoryFile        = "文件"
+	categoryExecution   = "执行"
+	categoryInformation = "信息"
+	categoryExtension   = "扩展"
+)
+
 func Catalog(skills SkillSource) []agent.Tool {
+	entries := catalogEntries(skills)
+	result := make([]agent.Tool, 0, len(entries))
+	for _, item := range entries {
+		result = append(result, item.tool)
+	}
+	return result
+}
+
+func catalogEntries(skills SkillSource) []entry {
 	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
 	files := newFileWorkspace()
-	result := []agent.Tool{currentTimeTool(), weatherTool(), calculateTool(), webSearchTool()}
-	result = append(result, files.tools()...)
-	result = append(result, shellTool())
+	result := []entry{
+		{tool: currentTimeTool(), category: categoryInformation},
+		{tool: weatherTool(), category: categoryInformation},
+		{tool: calculateTool(), category: categoryExecution},
+		{tool: webSearchTool(), category: categoryInformation},
+		{tool: webFetchTool(), category: categoryInformation},
+	}
+	for _, tool := range files.tools() {
+		result = append(result, entry{tool: tool, category: categoryFile})
+	}
+	result = append(result, entry{tool: shellTool(), category: categoryExecution})
 	if skills != nil {
-		result = append(result, loadSkillTool(skills))
+		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension})
 	}
 	return result
 }
 
 func InfoList(skills SkillSource) []Info {
-	tools := Catalog(skills)
-	result := make([]Info, 0, len(tools))
-	for _, tool := range tools {
-		result = append(result, Info{Name: tool.Spec.Name, Description: tool.Spec.Description, Source: "内置", Category: toolCategory(tool.Spec.Name)})
+	entries := catalogEntries(skills)
+	result := make([]Info, 0, len(entries))
+	for _, item := range entries {
+		result = append(result, Info{
+			Name: item.tool.Spec.Name, Description: item.tool.Spec.Description,
+			Source: "内置", Category: item.category,
+		})
 	}
 	return result
-}
-
-func toolCategory(name string) string {
-	switch name {
-	case "read", "grep", "find", "ls", "edit", "write":
-		return "文件"
-	case "shell", "calculate":
-		return "执行"
-	case "current_time", "weather", "web_search":
-		return "信息"
-	case "load_skill":
-		return "扩展"
-	default:
-		return "内置"
-	}
 }
 
 func loadSkillTool(source SkillSource) agent.Tool {

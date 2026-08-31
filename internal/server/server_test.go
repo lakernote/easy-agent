@@ -41,6 +41,72 @@ func TestUserTurnCountOnlyCountsUserMessages(t *testing.T) {
 	}
 }
 
+func TestSaveSkillValidatesSkillMarkdown(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "missing-frontmatter", content: "# Instructions"},
+		{name: "wrong-name", content: "---\nname: another-skill\ndescription: test\n---\n\n# Instructions"},
+	}
+	for _, test := range tests {
+		payload, _ := json.Marshal(map[string]any{"description": "测试 Skill", "content": test.content, "enabled": true})
+		request, _ := http.NewRequest(http.MethodPut, httpServer.URL+"/api/v1/skills/test-skill", bytes.NewReader(payload))
+		request.Header.Set("Content-Type", "application/json")
+		response, requestErr := http.DefaultClient.Do(request)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s 应拒绝非法 SKILL.md，实际 HTTP %d", test.name, response.StatusCode)
+		}
+	}
+	validContent := "---\nname: test-skill\ndescription: frontmatter 描述\n---\n\n# Instructions"
+	payload, _ := json.Marshal(map[string]any{"description": "表单旧描述", "content": validContent, "enabled": true})
+	request, _ := http.NewRequest(http.MethodPut, httpServer.URL+"/api/v1/skills/test-skill", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var saved store.SkillOverride
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&saved) != nil || saved.Description != "frontmatter 描述" {
+		t.Fatalf("保存后应使用 frontmatter 元数据: HTTP=%d value=%+v", response.StatusCode, saved)
+	}
+}
+
+func TestSelectedSkillsUsesExplicitMentionOnly(t *testing.T) {
+	catalog := &skillCatalog{items: []store.SkillOverride{{Name: "api-design", Description: "API", Content: "instructions", Enabled: true}}}
+	tests := []struct {
+		message string
+		want    int
+	}{
+		{"请设计接口", 0},
+		{"@tool:calculate 请计算 9*9", 0},
+		{"@skill:api-design 设计接口", 1},
+		{"@skill:missing 不存在", 0},
+		{"@skill:api-design @skill:api-design", 1},
+	}
+	for _, test := range tests {
+		selected := selectedSkills([]store.Message{{Role: "user", Content: test.message}}, catalog)
+		if len(selected) != test.want {
+			t.Fatalf("mention %q 选择错误: got=%d want=%d", test.message, len(selected), test.want)
+		}
+	}
+}
+
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
@@ -517,23 +583,30 @@ func TestCompactionPlanKeepsRecentTurns(t *testing.T) {
 	}
 }
 
-func TestCompactionPlanUsesRuntimeThreshold(t *testing.T) {
-	now := time.Now()
-	settings := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 2000, CompressionThresholdPercent: 75}
-	session := store.Session{
-		Messages: []store.Message{
-			{ID: 1, Role: "user", Content: strings.Repeat("旧问题", 600), CreatedAt: now},
-			{ID: 2, Role: "assistant", Content: strings.Repeat("旧回答", 600), CreatedAt: now},
-			{ID: 3, Role: "user", Content: "当前问题", CreatedAt: now},
-		},
-		Events: []store.Event{{Kind: "model_end", InputTokens: 1500, CreatedAt: now.Add(-time.Second)}},
+func TestCompactionThresholdDoesNotReserveConfiguredOutput(t *testing.T) {
+	shortOutput := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 200, CompressionThresholdPercent: 75}
+	longOutput := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 2000, CompressionThresholdPercent: 75}
+	if runtimeCompactionThreshold(shortOutput) != runtimeCompactionThreshold(longOutput) {
+		t.Fatal("配置的理论输出上限不应改变输入压缩阈值")
 	}
-	threshold := runtimeCompactionThreshold(settings)
-	if threshold >= settings.ContextWindowTokens*settings.CompressionThresholdPercent/100 {
-		t.Fatalf("测试没有构造出低于旧阈值的安全阈值: %d", threshold)
+}
+
+func TestRuntimeThresholdDoesNotWasteSmallContextWindow(t *testing.T) {
+	settings := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 1600, CompressionThresholdPercent: 75}
+	if threshold := runtimeCompactionThreshold(settings); threshold != 3072 {
+		t.Fatalf("4K 窗口不应为理论输出上限提前压缩，得到阈值 %d", threshold)
 	}
-	if plan := makeCompactionPlan(session, settings, "system", nil, threshold, false); plan == nil {
-		t.Fatalf("达到运行时安全阈值后仍不应拒绝压缩: threshold=%d", threshold)
+}
+
+func TestRuntimeOutputBudgetShrinksOnlyCurrentRequest(t *testing.T) {
+	settings := store.ModelSettings{ContextWindowTokens: 1000}
+	request := agent.Request{MaxOutputTokens: 600, Messages: []agent.Message{{Role: agent.RoleUser, Content: strings.Repeat("问题", 300)}}}
+	fitted := fitRuntimeOutputBudget(request, settings)
+	if fitted.MaxOutputTokens <= 0 || fitted.MaxOutputTokens >= request.MaxOutputTokens {
+		t.Fatalf("接近窗口时应收紧当前输出预算: before=%d after=%d", request.MaxOutputTokens, fitted.MaxOutputTokens)
+	}
+	if request.MaxOutputTokens != 600 {
+		t.Fatal("不应修改原始请求或模型配置")
 	}
 }
 

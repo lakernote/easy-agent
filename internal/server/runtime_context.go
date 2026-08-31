@@ -10,9 +10,12 @@ import (
 )
 
 const (
-	runtimeRecentMessages  = 8
-	runtimeToolResultLimit = 2400
-	runtimeSafetyMargin    = 1024
+	runtimeRecentMessages      = 8
+	runtimeToolResultLimit     = 1200
+	runtimeMinOutputTokens     = 128
+	runtimeMinSafetyMargin     = 64
+	runtimeMaxSafetyMargin     = 512
+	runtimeSafetyMarginPercent = 2
 )
 
 // prepareRuntimeRequest 在每次模型请求前运行。它先清理较早的大型工具结果，
@@ -32,7 +35,7 @@ func (server *Server) prepareRuntimeRequest(
 ) (agent.Request, bool, error) {
 	threshold := runtimeCompactionThreshold(settings)
 	if !force && (threshold <= 0 || estimateAgentRequestTokens(request) < threshold) {
-		return request, false, nil
+		return fitRuntimeOutputBudget(request, settings), false, nil
 	}
 
 	compactedMessages, microChanged := microCompactAgentMessages(request.Messages)
@@ -43,9 +46,10 @@ func (server *Server) prepareRuntimeRequest(
 		request.NewMessages = append([]agent.Message(nil), compactedMessages...)
 		request.PreviousResponseID = ""
 	}
-	if force {
-		// 当前轮次的 tool result 可能仍在最近 8 条消息内，普通微压缩会
-		// 有意保留它；但 Provider 已明确报超限时，必须把它也纳入兜底。
+	// 大型 Tool Result 是执行型任务最常见的上下文膨胀来源。先做确定性的
+	// 头尾保留，再考虑调用模型生成摘要；这比每次读取网页或日志后额外花一轮
+	// LLM 更快、更省 Token。SQLite 中仍保存完整结果，Trace 也不受影响。
+	if estimateAgentRequestTokens(request) >= threshold || force {
 		compactedMessages, recentChanged := compactOversizedToolResults(request.Messages)
 		if recentChanged {
 			request.Messages = compactedMessages
@@ -58,7 +62,7 @@ func (server *Server) prepareRuntimeRequest(
 	// 微压缩已经足够时，不额外消耗一次摘要模型调用。force=true 表示
 	// Provider 已经明确报上下文超限，此时继续尝试一次完整检查点。
 	if !force && estimateAgentRequestTokens(request) < threshold {
-		return request, microChanged, nil
+		return fitRuntimeOutputBudget(request, settings), microChanged, nil
 	}
 
 	session, err := server.store.Session(id)
@@ -82,9 +86,9 @@ func (server *Server) prepareRuntimeRequest(
 		request.Messages = messages
 		request.NewMessages = append([]agent.Message(nil), messages...)
 		request.PreviousResponseID = ""
-		return request, true, nil
+		return fitRuntimeOutputBudget(request, settings), true, nil
 	}
-	return request, microChanged, nil
+	return fitRuntimeOutputBudget(request, settings), microChanged, nil
 }
 
 func runtimeCompactionThreshold(settings store.ModelSettings) int {
@@ -93,15 +97,42 @@ func runtimeCompactionThreshold(settings store.ModelSettings) int {
 	}
 	percent := compressionThreshold(settings)
 	threshold := settings.ContextWindowTokens * percent / 100
-	maxOutput := settings.MaxOutputTokens
-	if maxOutput <= 0 {
-		maxOutput = store.DefaultMaxOutputTokens
-	}
-	safeThreshold := settings.ContextWindowTokens - maxOutput - runtimeSafetyMargin
+	// 压缩由“输入是否接近窗口”决定，不为配置的最大输出固定占位。单次请求
+	// 真正剩余多少输出空间由 fitRuntimeOutputBudget 动态限制。否则 4K 模型会
+	// 因 1600 的理论输出上限，连一次普通工具调用都先触发摘要。
+	safeThreshold := settings.ContextWindowTokens - runtimeMinOutputTokens - runtimeSafetyMargin(settings.ContextWindowTokens)
 	if safeThreshold > 0 && safeThreshold < threshold {
 		threshold = safeThreshold
 	}
 	return threshold
+}
+
+// fitRuntimeOutputBudget 只收紧当前模型请求，不修改用户保存的模型配置。
+// 上下文较短时仍保留原上限；工具结果较大时则把剩余窗口优先留给真实输入，
+// 避免 Provider 因 input + max_output 超过窗口而拒绝请求。
+func fitRuntimeOutputBudget(request agent.Request, settings store.ModelSettings) agent.Request {
+	if settings.ContextWindowTokens <= 0 {
+		return request
+	}
+	available := settings.ContextWindowTokens - estimateAgentRequestTokens(request) - runtimeSafetyMargin(settings.ContextWindowTokens)
+	if available <= 0 {
+		return request
+	}
+	if request.MaxOutputTokens <= 0 || request.MaxOutputTokens > available {
+		request.MaxOutputTokens = available
+	}
+	return request
+}
+
+func runtimeSafetyMargin(contextWindow int) int {
+	margin := contextWindow * runtimeSafetyMarginPercent / 100
+	if margin < runtimeMinSafetyMargin {
+		return runtimeMinSafetyMargin
+	}
+	if margin > runtimeMaxSafetyMargin {
+		return runtimeMaxSafetyMargin
+	}
+	return margin
 }
 
 func estimateAgentRequestTokens(request agent.Request) int {

@@ -21,19 +21,20 @@ const maxSearchResponseBytes = 2 * 1024 * 1024
 var (
 	searchResultPattern  = regexp.MustCompile(`(?is)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
 	searchSnippetPattern = regexp.MustCompile(`(?is)<a[^>]*class="result__snippet"[^>]*>(.*?)</a>`)
+	htmlMainPattern      = regexp.MustCompile(`(?is)<main\b[^>]*>(.*?)</main>`)
+	htmlNoisePattern     = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>|<noscript[^>]*>.*?</noscript>`)
 	htmlTagPattern       = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
-// webSearchTool 是无需 API Key 的轻量网页发现能力。它只返回搜索结果摘要；
-// 遇到 GitHub 仓库链接时再读取官方 API，把实时 star 等元数据放进同一结果，
-// 让小模型不必自己猜 owner/repository 或拼接脆弱的 curl 命令。
+// webSearchTool 是无需 API Key 的轻量网页发现能力。它只返回通用搜索结果，
+// 不识别或增强特定网站；外部平台的精确结构化数据应交给对应 MCP。
 func webSearchTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "web_search",
-			Description: "搜索互联网并返回标题、真实 URL 和摘要，用于最新资料、未知实体和不完整名称。GitHub 仓库结果会附带官方 API 的实时 star、fork、语言和更新时间；不要猜测网址或数值。",
+			Description: "搜索互联网并返回标题、真实 URL 和摘要，用于发现最新资料、未知实体和不完整名称；精确事实应继续读取原始来源或使用对应 MCP 核验。",
 			Parameters: objectSchema(map[string]any{
-				"query": stringSchema("搜索关键词，例如 easypostman github"),
+				"query": stringSchema("搜索关键词，例如 EasyAgent release notes"),
 				"max_results": map[string]any{
 					"type": "integer", "description": "返回条数，默认 5，范围 1-10", "minimum": 1, "maximum": 10,
 				},
@@ -44,19 +45,9 @@ func webSearchTool() agent.Tool {
 }
 
 type webSearchResult struct {
-	Title   string          `json:"title"`
-	URL     string          `json:"url"`
-	Snippet string          `json:"snippet,omitempty"`
-	GitHub  *githubMetadata `json:"github,omitempty"`
-}
-
-type githubMetadata struct {
-	FullName   string `json:"full_name"`
-	Stars      int    `json:"stars"`
-	Forks      int    `json:"forks"`
-	OpenIssues int    `json:"open_issues"`
-	Language   string `json:"language,omitempty"`
-	UpdatedAt  string `json:"updated_at"`
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet,omitempty"`
 }
 
 func runWebSearch(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -84,7 +75,7 @@ func runWebSearch(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 (compatible; EasyAgent/0.1; +https://github.com/lakernote/easy-agent)")
+	request.Header.Set("User-Agent", "Mozilla/5.0 (compatible; EasyAgent/0.1)")
 	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.7")
 	response, err := client.Do(request)
 	if err != nil {
@@ -104,10 +95,6 @@ func runWebSearch(ctx context.Context, raw json.RawMessage) (string, error) {
 		output, _ := json.Marshal(map[string]any{"ok": false, "query": arguments.Query, "results": []any{}, "error": "没有搜索到结果，请调整关键词后重试"})
 		return string(output), errors.New("没有搜索到结果，请调整关键词后重试")
 	}
-	for index := range results {
-		results[index].GitHub = readGitHubMetadata(ctx, client, results[index].URL)
-	}
-
 	output, err := json.MarshalIndent(map[string]any{
 		"ok": true, "query": arguments.Query, "source": "DuckDuckGo", "retrieved_at": time.Now().Format(time.RFC3339), "results": results,
 	}, "", "  ")
@@ -161,6 +148,7 @@ func searchTarget(value string) string {
 }
 
 func cleanHTMLText(value string) string {
+	value = htmlNoisePattern.ReplaceAllString(value, " ")
 	value = htmlTagPattern.ReplaceAllString(value, " ")
 	value = html.UnescapeString(value)
 	return strings.Join(strings.Fields(value), " ")
@@ -172,32 +160,4 @@ func compactText(value string) string {
 		return value[:500] + "…"
 	}
 	return value
-}
-
-func readGitHubMetadata(ctx context.Context, client *http.Client, target string) *githubMetadata {
-	parsed, err := url.Parse(target)
-	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
-		return nil
-	}
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return nil
-	}
-	repository := strings.TrimSuffix(parts[1], ".git")
-	var response struct {
-		FullName        string `json:"full_name"`
-		StargazersCount int    `json:"stargazers_count"`
-		ForksCount      int    `json:"forks_count"`
-		OpenIssuesCount int    `json:"open_issues_count"`
-		Language        string `json:"language"`
-		UpdatedAt       string `json:"updated_at"`
-	}
-	endpoint := "https://api.github.com/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(repository)
-	if err := getJSON(ctx, client, endpoint, &response); err != nil || response.FullName == "" {
-		return nil
-	}
-	return &githubMetadata{
-		FullName: response.FullName, Stars: response.StargazersCount, Forks: response.ForksCount,
-		OpenIssues: response.OpenIssuesCount, Language: response.Language, UpdatedAt: response.UpdatedAt,
-	}
 }

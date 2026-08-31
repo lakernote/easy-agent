@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const MaxContentBytes = 256 * 1024
+
 //go:embed definitions/*/SKILL.md
 var files embed.FS
 
@@ -33,7 +35,7 @@ func Catalog() ([]Skill, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
-		skill, parseErr := parse(string(data))
+		skill, parseErr := Parse(string(data))
 		if parseErr != nil {
 			return nil, fmt.Errorf("%s: %w", path, parseErr)
 		}
@@ -45,7 +47,11 @@ func Catalog() ([]Skill, error) {
 	return result, nil
 }
 
-func parse(content string) (Skill, error) {
+// Parse 校验页面自定义和内置 Skill 共用的最小 SKILL.md 格式。
+func Parse(content string) (Skill, error) {
+	if len(content) > MaxContentBytes {
+		return Skill{}, fmt.Errorf("Skill 内容不能超过 %d KiB", MaxContentBytes/1024)
+	}
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return Skill{}, fmt.Errorf("缺少 YAML frontmatter")

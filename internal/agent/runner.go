@@ -109,6 +109,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	}
 	previousResponseID := strings.TrimSpace(input.PreviousResponseID)
 	totalUsage := Usage{}
+	consecutiveFailedToolSteps := 0
+	forceConverge := false
 
 	for step := 1; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -118,6 +120,10 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		toolChoice := ToolChoice{Mode: ToolChoiceNone}
 		if len(tools) > 0 {
 			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
+		}
+		if forceConverge {
+			tools = nil
+			toolChoice = ToolChoice{Mode: ToolChoiceNone}
 		}
 		if step == maxSteps {
 			tools = nil
@@ -156,6 +162,23 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
 		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
 			addUsage(&totalUsage, response.Usage)
+			request.OnTextDelta = nil
+			attempt++
+			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
+			response, err = runner.Model.Generate(ctx, request)
+			if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
+				err = ErrEmptyModelResponse
+			}
+			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
+		}
+		// 部分小模型在看到较多 Tool Schema 时，无论流式还是非流式都会只消耗
+		// Token 却返回空正文。两次真实工具模式都为空后，最后以无工具模式请求
+		// 一次直接回答；System Prompt 仍要求不能伪造外部事实。该降级只处理
+		// Provider 兼容异常，不参与正常任务的工具选择。
+		if err != nil && errors.Is(err, ErrEmptyModelResponse) && len(request.Tools) > 0 {
+			addUsage(&totalUsage, response.Usage)
+			request.Tools = nil
+			request.ToolChoice = ToolChoice{Mode: ToolChoiceNone}
 			request.OnTextDelta = nil
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
@@ -219,12 +242,16 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			return RunResult{Answer: answer, Messages: messages, Usage: totalUsage, ResponseID: previousResponseID, Steps: step}, nil
 		}
 		if len(tools) == 0 {
-			return RunResult{}, errors.New("Agent 已达到最大步数，但模型仍在请求工具")
+			return RunResult{}, errors.New("本步已禁用工具，但模型仍在请求工具")
 		}
 
 		pending = pending[:0]
+		failedToolCalls := 0
 		for _, call := range assistant.ToolCalls {
 			output, toolErr, duration := runner.runTool(ctx, step, call, toolTimeout)
+			if toolErr != nil {
+				failedToolCalls++
+			}
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
 			messages = append(messages, toolMessage)
 			pending = append(pending, toolMessage)
@@ -236,6 +263,14 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			}
 			runner.emit(Event{Kind: EventToolEnd, Step: step, ToolCall: &call, Output: output, Err: toolErr, Duration: duration})
 		}
+		if failedToolCalls == len(assistant.ToolCalls) {
+			consecutiveFailedToolSteps++
+		} else {
+			consecutiveFailedToolSteps = 0
+		}
+		// 连续两步所有工具都失败说明 Agent 没有取得新证据。停止继续暴露工具，
+		// 让模型根据现有错误收敛，而不是用略有不同的参数无限重复同一尝试。
+		forceConverge = consecutiveFailedToolSteps >= 2
 		if input.OnTurnMessages != nil {
 			if err := input.OnTurnMessages(turnMessages); err != nil {
 				return RunResult{}, err

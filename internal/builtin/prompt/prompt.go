@@ -36,10 +36,16 @@ type MCPMeta struct {
 	Description string
 }
 
+type SelectedSkill struct {
+	Name    string
+	Content string
+}
+
 type Context struct {
-	Now    time.Time
-	Skills []SkillMeta
-	MCPs   []MCPMeta
+	Now            time.Time
+	Skills         []SkillMeta
+	MCPs           []MCPMeta
+	SelectedSkills []SelectedSkill
 }
 
 // Render 生成一轮会话使用的 System Prompt。日期、星期和时区是稳定运行时事实；
@@ -72,6 +78,12 @@ func Render(context Context) string {
 		}
 	}
 	result = strings.ReplaceAll(result, "{{MCPS}}", strings.TrimSpace(mcps.String()))
+
+	var selected strings.Builder
+	for _, skill := range context.SelectedSkills {
+		fmt.Fprintf(&selected, "\n<skill name=%q>\n%s\n</skill>\n", skill.Name, strings.TrimSpace(skill.Content))
+	}
+	result = strings.ReplaceAll(result, "{{SELECTED_SKILLS}}", strings.TrimSpace(selected.String()))
 	return strings.TrimSpace(result)
 }
 

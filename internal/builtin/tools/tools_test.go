@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,9 +152,41 @@ func TestOutputCaptureKeepsHeadAndTail(t *testing.T) {
 }
 
 func TestParseDuckDuckGoResultsResolvesRealURL(t *testing.T) {
-	body := `<div class="result"><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Flakernote%2Feasy%2Dpostman&amp;rut=abc"><b>EasyPostman</b> - GitHub</a><a class="result__snippet" href="x">An <b>open-source</b> API tool.</a></div>`
+	body := `<div class="result"><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Farticles%2Fagent&amp;rut=abc"><b>Agent Runtime</b></a><a class="result__snippet" href="x">A <b>technical</b> article.</a></div>`
 	results := parseDuckDuckGoResults(body, 5)
-	if len(results) != 1 || results[0].URL != "https://github.com/lakernote/easy-postman" || results[0].Title != "EasyPostman - GitHub" || results[0].Snippet != "An open-source API tool." {
+	if len(results) != 1 || results[0].URL != "https://example.com/articles/agent" || results[0].Title != "Agent Runtime" || results[0].Snippet != "A technical article." {
 		t.Fatalf("搜索结果解析错误: %+v", results)
+	}
+}
+
+func TestToolCategoriesComeFromRegistration(t *testing.T) {
+	categories := make(map[string]string)
+	for _, info := range InfoList(nil) {
+		categories[info.Name] = info.Category
+	}
+	for name, expected := range map[string]string{
+		"read": categoryFile, "shell": categoryExecution,
+		"web_search": categoryInformation, "current_time": categoryInformation,
+	} {
+		if categories[name] != expected {
+			t.Fatalf("工具 %s 分类错误: got=%q want=%q", name, categories[name], expected)
+		}
+	}
+}
+
+func TestWebFetchReadsHTMLAndLimitsContent(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = response.Write([]byte(`<html><head><style>hidden</style></head><body><nav>导航噪声</nav><main><h1>真实标题</h1><p>` + strings.Repeat("内容", 800) + `</p></main></body></html>`))
+	}))
+	defer remote.Close()
+
+	input, _ := json.Marshal(map[string]any{"url": remote.URL, "max_chars": 1000})
+	output, err := runWebFetch(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) {
+		t.Fatalf("网页正文提取错误: %s", output)
 	}
 }

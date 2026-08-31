@@ -27,7 +27,7 @@ internal/builtin/
 ├── prompt/system.md         # 常规 Agent 的稳定基础 Prompt
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
-├── tools/                   # 文件、时间、天气、计算、Shell 和 Skill 加载
+├── tools/                   # 文件、网页、时间、天气、计算、Shell 和 Skill 加载
 └── mcp/                     # 页面一键安装预设
 
 internal/mcpclient/          # 把远端 MCP Tool 转为 agent.Tool
@@ -72,13 +72,15 @@ OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoni
 
 检查点保存到 `ea_compactions`，包含摘要、消息边界、原始消息数量、Usage 和时间。`ea_messages` 不删除任何原文。再次压缩时会把旧检查点和新增长历史一起更新；压缩调用作为 `compaction_start` / `compaction_end` 进入 Trace，Token 和耗时计入会话总账。触发前可以参考最近一次真实 Input Token 加上新消息估算，但页面仍只把 Provider 上报值显示为真实 Token。
 
+单次工具结果过大时先做确定性的头尾保留，完整内容仍留在 SQLite 和 Trace；只有输入本身达到阈值时才调用模型生成检查点。每次请求还会按剩余上下文动态收紧该次 `max_output_tokens`，不会因为模型配置了较大的理论输出上限就提前压缩一个很短的工具链。
+
 ## Prompt 与 Skill
 
 基础 Prompt 在 `internal/builtin/prompt/system.md`，只保存身份、工作方式、能力使用和回答契约四层稳定原则。运行时事实、Skill 元数据和 MCP 元数据放在尾部，便于保持公共前缀稳定；不会把 MCP 启动参数或密钥写进 Prompt。压缩使用独立的 `internal/builtin/prompt/compaction.md`，不携带常规工具规则，也不给模型任何 Tool，避免摘要过程继续执行用户任务。
 
-Skill 使用渐进式加载：模型先看到元数据；任务相关时调用 `load_skill(name)` 读取全文。因此十个 Skill 不等于每一轮都把十份正文放进 Prompt。
+Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时调用 `load_skill(name)` 读取全文。用户明确 `@skill:name` 时，运行时直接把已选 Skill 正文注入本轮 Prompt，绕开小模型可能不稳定的首次工具选择。内置 Tool 保持为一组稳定的小 Schema，直接使用原生 Function Calling；MCP 的大型动态工具集仍按需加载。
 
-内置 Tool 以固定顺序注册，每轮使用原生 `tool_choice=auto`，由模型根据任务语义决定直接回答还是调用工具。宿主只负责工具是否启用、参数校验、超时和执行，不再使用关键词替模型判断意图。固定工具前缀也更利于 Provider 的 Prompt Cache；Skill 正文和 MCP 真实工具仍按需加载，避免把大型动态能力集塞进每轮请求。
+内置 Tool 以固定顺序注册，每轮使用原生 `tool_choice=auto`，由模型根据 Schema 决定直接回答还是调用工具。宿主只负责参数校验、超时、执行和通用 no-progress 保护，不使用关键词替模型判断意图。固定工具前缀也更利于 Provider 的 Prompt Cache；未明确选择的 Skill 正文和 MCP 真实工具仍按需加载。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。路径解析会校验真实符号链接目标，拒绝访问工作区之外的位置；返回结果只使用相对路径。
 
