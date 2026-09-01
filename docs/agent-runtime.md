@@ -84,7 +84,7 @@ Prompt 规则只能降低模型服从直接或间接注入的概率，不能替�
 
 Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 
-内置 Tool 首轮只注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露 13 个尚未加载的函数名。模型自主选出最少能力组，Runtime 动态注册组内 Schema；Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 同样通过 `load_mcp` 按服务加载并遵循 Loader 后必须执行真实工具的规则。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
+内置 Tool 首轮只注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露 13 个尚未加载的函数名。模型自主选出最少能力组，Runtime 动态注册组内 Schema；Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 同样先提供服务元数据；模型调用 `search_mcp_tools(id, query)` 后，Runtime 在远端工具的名称、描述和参数元数据中通用检索，一次最多注册 5 个最相关 Schema。检索器不判断 GitHub、浏览器等业务类型。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 
@@ -100,7 +100,7 @@ Skill 默认使用渐进式加载：模型先看到简短元数据；任务相�
 mcp__<server_id>__<remote_tool_name>
 ```
 
-每轮开始时不会连接全部 MCP。模型先看到一个 `load_mcp(id)` 工具和服务元数据；只有调用它时，`Loader` 才连接指定服务，并通过 `Runner.AddTools` 把真实工具加入下一轮模型请求。这样普通问答不承担远端工具 Schema 的 Token 成本。
+每轮开始时不会连接全部 MCP。模型先看到一个 `search_mcp_tools(id, query)` 工具和服务元数据；只有调用它时，`Loader` 才连接指定服务，并通过 `Runner.AddTools` 把最多 5 个匹配工具加入下一轮模型请求。相同连接在本轮复用，已注册工具不会重复加入。这样普通问答不承担远端工具 Schema 的 Token 成本，大型 MCP 也不会一次占满上下文。
 
 认证、进程环境和连接生命周期都停留在 MCP 适配层。stdio MCP 与 Shell 共用启动时冻结的 PATH 和会话工作区；服务管理器 PATH 较短时会一次性读取登录 Shell PATH。Playwright 预设固定版本安装到 `~/.easyagent/runtime/mcp`，不写全局 npm 或项目 `node_modules`。EasyAgent 只管理这个 MCP 私有包及其配置，不成为通用语言运行时管理器：Node.js、Python、Java 等由宿主机、容器或项目工具链提供，MCP 页面只检测 PATH 和版本。启用前必须通过握手和 `tools/list`，任务结束后关闭本轮连接。
 

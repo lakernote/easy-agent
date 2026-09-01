@@ -198,6 +198,52 @@ func TestRunnerKeepsToolsAndFailsClosedAfterEmptyCompatibilityResponses(t *testi
 	}
 }
 
+func TestRunnerConvergesEmptyResponseAfterSuccessfulToolResult(t *testing.T) {
+	calls := 0
+	events := make([]Event, 0)
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		switch calls {
+		case 1:
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "call-1", Name: "calculate", Arguments: json.RawMessage(`{"expression":"40+2"}`)}}}}, nil
+		case 2:
+			if request.OnTextDelta == nil || len(request.Tools) != 1 {
+				t.Fatalf("工具结果后的首次收敛仍应保留流式和工具能力: %+v", request)
+			}
+			usage := Usage{InputTokens: 20, OutputTokens: 1, TotalTokens: 21}
+			return Response{Message: Message{Reasoning: "42"}, Usage: usage, Exchange: Exchange{Model: "fixture", Usage: usage}}, ErrEmptyModelResponse
+		case 3:
+			if request.OnTextDelta != nil || len(request.Tools) != 0 || request.ToolChoice.Mode != ToolChoiceNone {
+				t.Fatalf("空正文重试必须进入无工具收敛轮: %+v", request)
+			}
+			if len(request.Messages) == 0 || request.Messages[len(request.Messages)-1].Role != RoleSystem || request.Messages[len(request.Messages)-1].Content != visibleAnswerReminder {
+				t.Fatalf("空正文重试缺少可见回答约束: %+v", request.Messages)
+			}
+			return Response{Message: Message{Content: "42"}, Usage: Usage{InputTokens: 22, OutputTokens: 1, TotalTokens: 23}}, nil
+		default:
+			t.Fatalf("不应继续调用模型: %d", calls)
+			return Response{}, nil
+		}
+	})
+	runner, err := NewRunner(model, "fixture", []Tool{{
+		Spec: ToolSpec{Name: "calculate"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return `{"result":"42"}`, nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) { events = append(events, event) }
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "请计算 40+2"}}, OnTextDelta: func(string) {},
+	})
+	if err != nil || result.Answer != "42" || calls != 3 {
+		t.Fatalf("工具结果后的空正文没有恢复: calls=%d result=%+v err=%v", calls, result, err)
+	}
+	if len(events) != 8 || events[5].Err == nil || events[7].Err != nil || events[6].Attempt != 2 {
+		t.Fatalf("空正文恢复 Trace 不完整: %+v", events)
+	}
+}
+
 func TestRunnerReturnsToolErrorsToModelForRecovery(t *testing.T) {
 	requests := 0
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {

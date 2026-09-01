@@ -51,8 +51,8 @@ func NewRunner(model Model, modelName string, tools []Tool) (*Runner, error) {
 	return runner, nil
 }
 
-// AddTools 在一次运行中动态追加工具。它让 load_mcp 先暴露一个很小的入口，
-// 只有模型确认需要某个 MCP 时，才把该服务的真实工具加入下一轮模型请求。
+// AddTools 在一次运行中动态追加工具。它让工具组或 MCP 搜索先暴露一个很小的入口，
+// 只有模型确认需要某项能力时，才把少量真实工具加入下一轮模型请求。
 // 整批工具会先完成校验再写入，避免校验失败后只追加了一半。
 func (runner *Runner) AddTools(tools []Tool) error {
 	if runner == nil {
@@ -187,9 +187,12 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理并返回空正文。
 		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
+		// 如果本轮已经取得真实工具结果，则同时进入无工具收敛轮，明确要求模型把
+		// 结论写入可见 content。不能直接展示 reasoning 字段，因为它可能包含模型
+		// 的隐藏推理过程，而不只是最终答案。
 		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
 			addUsage(&totalUsage, response.Usage)
-			request.OnTextDelta = nil
+			request = prepareEmptyResponseRetry(request)
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
@@ -323,6 +326,32 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 	}
 	return RunResult{}, errors.New("Agent 达到最大步数")
+}
+
+const visibleAnswerReminder = "上一响应没有可展示的最终正文。不要重复调用已经成功的工具；请根据已有工具结果，在 assistant content 中直接给出最终答案。"
+
+// prepareEmptyResponseRetry 只在已有工具结果时强制收敛。首次工具选择轮如果
+// 返回空消息，仍保留原工具集并失败关闭，避免模型跳过用户要求的真实执行。
+func prepareEmptyResponseRetry(request Request) Request {
+	request.OnTextDelta = nil
+	if !containsToolResult(request.Messages) {
+		return request
+	}
+	request.Tools = nil
+	request.ToolChoice = ToolChoice{Mode: ToolChoiceNone}
+	reminder := Message{Role: RoleSystem, Content: visibleAnswerReminder}
+	request.Messages = append(append([]Message(nil), request.Messages...), reminder)
+	request.NewMessages = append(append([]Message(nil), request.NewMessages...), reminder)
+	return request
+}
+
+func containsToolResult(messages []Message) bool {
+	for _, message := range messages {
+		if message.Role == RoleTool {
+			return true
+		}
+	}
+	return false
 }
 
 func nonLoaderTools(tools []ToolSpec) []ToolSpec {

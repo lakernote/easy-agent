@@ -15,13 +15,16 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestLoaderConnectsAndRegistersToolsOnlyWhenRequested(t *testing.T) {
+func TestLoaderSearchesAndRegistersOnlyMatchingTools(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1.0.0"}, nil)
 	type arguments struct {
 		Name string `json:"name"`
 	}
 	mcp.AddTool(server, &mcp.Tool{Name: "greet", Description: "问候一个人"}, func(_ context.Context, _ *mcp.CallToolRequest, input arguments) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "你好，" + input.Name}}}, nil, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{Name: "read_issue", Description: "Read a repository issue"}, func(_ context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{}, nil, nil
 	})
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	defer httpServer.Close()
@@ -34,10 +37,10 @@ func TestLoaderConnectsAndRegistersToolsOnlyWhenRequested(t *testing.T) {
 		return nil
 	})
 	if len(registered) != 0 {
-		t.Fatal("load_mcp 调用前不应注册远端工具")
+		t.Fatal("search_mcp_tools 调用前不应注册远端工具")
 	}
 
-	output, err := loader.Tool().Run(context.Background(), json.RawMessage(`{"id":"demo"}`))
+	output, err := loader.Tool().Run(context.Background(), json.RawMessage(`{"id":"demo","query":"greet a person"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +50,30 @@ func TestLoaderConnectsAndRegistersToolsOnlyWhenRequested(t *testing.T) {
 	result, err := registered[0].Run(context.Background(), json.RawMessage(`{"name":"小易"}`))
 	if err != nil || !strings.Contains(result, "你好，小易") {
 		t.Fatalf("远端工具执行失败: output=%s err=%v", result, err)
+	}
+	output, err = loader.Tool().Run(context.Background(), json.RawMessage(`{"id":"demo","query":"greet a person"}`))
+	if err != nil || len(registered) != 1 || !strings.Contains(output, `"newlyAvailable":0`) {
+		t.Fatalf("重复搜索不应重复注册同名工具: tools=%d output=%s err=%v", len(registered), output, err)
+	}
+}
+
+func TestSearchToolsRanksMetadataAndLimitsSchemaLoading(t *testing.T) {
+	tools := []agent.Tool{
+		{Spec: agent.ToolSpec{Name: "mcp__demo__browser_click", Description: "Click an element on the page"}},
+		{Spec: agent.ToolSpec{Name: "mcp__demo__browser_navigate", Description: "Navigate to a URL"}},
+		{Spec: agent.ToolSpec{Name: "mcp__demo__browser_snapshot", Description: "Capture page accessibility snapshot"}},
+		{Spec: agent.ToolSpec{Name: "mcp__demo__browser_console", Description: "Read console messages"}},
+	}
+	matches := searchTools(tools, "navigate URL and inspect page snapshot", 2)
+	if len(matches) != 2 || matches[0].Spec.Name != "mcp__demo__browser_navigate" || matches[1].Spec.Name != "mcp__demo__browser_snapshot" {
+		t.Fatalf("应只返回最相关的两个工具: %+v", matches)
+	}
+}
+
+func TestSearchToolsDoesNotGuessWhenMetadataDoesNotMatch(t *testing.T) {
+	tools := []agent.Tool{{Spec: agent.ToolSpec{Name: "mcp__demo__browser_click", Description: "Click an element"}}}
+	if matches := searchTools(tools, "查询数据库慢日志", 5); len(matches) != 0 {
+		t.Fatalf("没有元数据匹配时不应随便注入工具: %+v", matches)
 	}
 }
 

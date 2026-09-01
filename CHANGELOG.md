@@ -19,7 +19,7 @@
 - 新增对话式 Web UI、Token/缓存率/耗时汇总和 JSON 输入输出查看。
 - 新增 Provider 缓存 Token 兼容、上下文账本和可配置的自动会话压缩；原始消息完整保留，压缩调用进入 Trace。
 - 参考 Pi/Codex 将基础 System Prompt 精简分层，并为上下文检查点使用独立 Prompt。
-- Skill 改为页面内创建；MCP 启用前强制完成认证和连接校验，并通过 `load_mcp` 按需加载远端工具。
+- Skill 改为页面内创建；MCP 启用前强制完成认证和连接校验，并通过 `search_mcp_tools` 按任务语义加载少量远端工具。
 - 新增任务排队状态和运行中取消，取消信号会传播到模型与工具调用。
 - 新增无需外部解释器的 `calculate` 和可审计、可取消、带超时与输出截断的 `shell`。
 - MCP 元数据增加用途描述，GitHub 预设限制为常用 Toolsets；Playwright 预设在安装前检查当前运行时实际要求的 Node.js 20+。

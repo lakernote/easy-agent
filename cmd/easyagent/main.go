@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,7 +40,16 @@ func main() {
 	databasePath := flag.String("db", filepath.Join(environment.Home(), "easyagent.db"), "SQLite database file")
 	flag.Parse()
 
-	// 3. 初始化持久化层。
+	// 3. 先独占 HTTP 端口，再打开数据库或恢复任务状态。这样即使用户、launchd
+	// 或其他进程误启动了第二个实例，它也会在触碰 SQLite 前退出，不会把第一个
+	// 实例正在执行的会话误判成“服务重启中断”。
+	listener, err := net.Listen("tcp", *address)
+	if err != nil {
+		log.Fatalf("listen %s: %v", *address, err)
+	}
+	defer listener.Close()
+
+	// 4. 初始化持久化层。
 	// Go 常用“返回值 + error”代替 Java 异常；err != nil 就是显式处理失败分支。
 	database, err := store.Open(*databasePath)
 	if err != nil {
@@ -49,13 +59,13 @@ func main() {
 	// 注意 log.Fatal/os.Exit 会直接结束进程而不执行 defer；启动失败时资源由 OS 回收。
 	defer database.Close()
 
-	// 4. 修复上次进程异常退出留下的会话状态。
+	// 5. 修复上次进程异常退出留下的会话状态。
 	// 单机版没有外部任务队列，因此把中断的 running 状态改成用户可理解的失败。
 	if err := database.RecoverRunning(time.Now()); err != nil {
 		log.Fatalf("recover interrupted sessions: %v", err)
 	}
 
-	// 5. 读取编译进二进制的前端文件，并完成 Server 依赖组装。
+	// 6. 读取编译进二进制的前端文件，并完成 Server 依赖组装。
 	// web.DistFS 使用 go:embed，因此部署时只需要 easyagent 二进制和可写数据目录。
 	assets, err := web.DistFS()
 	if err != nil {
@@ -63,7 +73,7 @@ func main() {
 	}
 	application := server.New(database, assets, environment)
 
-	// 6. 创建整个服务共享的生命周期 Context。
+	// 7. 创建整个服务共享的生命周期 Context。
 	// Context 可类比 Java 的 CancellationToken + deadline；收到 Ctrl+C 或 SIGTERM 后
 	// Done() 会关闭，HTTP Server 和 Agent 都能协作停止。
 	serviceContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -73,7 +83,7 @@ func main() {
 		displayAddress = "localhost" + displayAddress
 	}
 
-	// 7. 配置标准库 HTTP Server。
+	// 8. 配置标准库 HTTP Server。
 	// server.Server 实现业务路由并通过 Handler() 暴露 http.Handler；超时用于避免慢连接
 	// 长期占用单机资源。1 << 20 是位移写法，等于 1 MiB。
 	httpServer := &http.Server{
@@ -92,10 +102,10 @@ func main() {
 	listenErrors := make(chan error, 1)
 	go func() {
 		log.Printf("EasyAgent is running at http://%s", displayAddress)
-		listenErrors <- httpServer.ListenAndServe()
+		listenErrors <- httpServer.Serve(listener)
 	}()
 
-	// 8. select 同时等待“操作系统要求退出”或“HTTP 服务意外停止”，谁先发生就处理谁。
+	// 9. select 同时等待“操作系统要求退出”或“HTTP 服务意外停止”，谁先发生就处理谁。
 	select {
 	case <-serviceContext.Done():
 		log.Printf("EasyAgent is shutting down")
@@ -105,7 +115,7 @@ func main() {
 		}
 	}
 
-	// 9. 优雅停机。先停止接收 HTTP 请求，再等待 Runner/Agent 等后台任务退出。
+	// 10. 优雅停机。先停止接收 HTTP 请求，再等待 Runner/Agent 等后台任务退出。
 	// 15 秒 deadline 防止某个任务永久阻塞进程关闭。
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelShutdown()

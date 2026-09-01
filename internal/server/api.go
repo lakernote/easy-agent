@@ -75,7 +75,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	toolInfo := builtintools.InfoList(server.env, catalog)
 	for _, config := range mcps {
 		if config.Enabled {
-			toolInfo = append(toolInfo, builtintools.Info{Name: "load_mcp", Description: "按需连接一个已启用的 MCP Server，再加载它的真实工具。", Source: "运行时"})
+			toolInfo = append(toolInfo, builtintools.Info{Name: "search_mcp_tools", Description: "按任务语义搜索已启用的 MCP Server，一次只加载少量相关工具。", Source: "运行时"})
 			break
 		}
 	}

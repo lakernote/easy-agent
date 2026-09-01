@@ -99,7 +99,7 @@ Runner（唯一循环）
     ├── Model Adapter：Chat Completions / Responses
     ├── Built-in Tool
     ├── load_skill → Skill 正文
-    └── load_mcp   → 远端 MCP Tool
+    └── search_mcp_tools → 少量相关 MCP Tool
     ↓
 保存 assistant/tool 消息与 Trace
 ```
@@ -174,7 +174,7 @@ EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语�
 
 内置 Tool 也使用渐进披露：首轮只有 `load_tools` 的五个自解释能力组和一个很小的选择 Schema；模型按任务选择组后，Runtime 才把组内真实 Tool 说明与 Schema 加入下一轮。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader 并要求模型至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时仍只按准确名称预加载。工具模式的空响应可以从流式切到非流式重试一次，但不能删除工具后降级为自由回答，否则模型可能把本应执行的结果猜成成功。
 
-Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `load_mcp` 后才连接服务并注册远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
+Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `search_mcp_tools` 后才连接服务并按任务语义注册最多 5 个远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
 
 ## 7. Trace 的 Review 标准
 
