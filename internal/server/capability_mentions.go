@@ -59,6 +59,26 @@ func selectedToolNames(messages []store.Message) []string {
 	return result
 }
 
+// selectedMCPIDs 返回用户通过 @mcp:id 明确选择的小型 MCP。它只做精确选择，
+// 不根据自然语言猜测应该连接哪个外部服务。
+func selectedMCPIDs(messages []store.Message) []string {
+	matches := capabilityMentionPattern.FindAllStringSubmatch(latestUserMessage(messages), -1)
+	seen := make(map[string]struct{})
+	var result []string
+	for _, match := range matches {
+		if strings.ToLower(match[1]) != "mcp" {
+			continue
+		}
+		name := match[2]
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
 func latestUserMessage(messages []store.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
 		if messages[index].Role == "user" {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -107,6 +108,35 @@ func TestSelectedSkillsUsesExplicitMentionOnly(t *testing.T) {
 	}
 }
 
+func TestSelectedMCPIDsUsesExplicitMentionOnly(t *testing.T) {
+	tests := []struct {
+		message string
+		want    []string
+	}{
+		{"请打开浏览器", nil},
+		{"@mcp:playwright 打开页面", []string{"playwright"}},
+		{"@mcp:playwright @mcp:playwright 截图", []string{"playwright"}},
+	}
+	for _, test := range tests {
+		got := selectedMCPIDs([]store.Message{{Role: "user", Content: test.message}})
+		if !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("mention %q 选择错误: got=%v want=%v", test.message, got, test.want)
+		}
+	}
+}
+
+func TestDecodeJSONRejectsTrailingData(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api", strings.NewReader(`{"message":"ok"}{"extra":true}`))
+	response := httptest.NewRecorder()
+	var value map[string]string
+	if decodeJSON(response, request, &value) {
+		t.Fatal("尾随 JSON 不应被接受")
+	}
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("尾随 JSON 应返回 400，实际 %d", response.Code)
+	}
+}
+
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	workingDirectory := t.TempDir()
 	workingDirectory, _ = filepath.EvalSymlinks(workingDirectory)
@@ -118,10 +148,25 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 			t.Fatal(err)
 		}
 		if callCount == 1 {
+			toolName := "load_tools"
+			arguments := `{"groups":["execution"]}`
+			tools, _ := body["tools"].([]any)
+			hasLoader := false
+			for _, rawTool := range tools {
+				if item, ok := rawTool.(map[string]any); ok {
+					if function, ok := item["function"].(map[string]any); ok && function["name"] == "load_tools" {
+						hasLoader = true
+					}
+				}
+			}
+			if !hasLoader {
+				toolName = "shell"
+				arguments = `{"command":"pwd"}`
+			}
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"id": "load-call", "model": "fixture",
 				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": "load_tools", "arguments": `{"groups":["execution"]}`}},
+					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": toolName, "arguments": arguments}},
 				}}}},
 			})
 			return
@@ -130,14 +175,24 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		toolMessage := messages[len(messages)-1].(map[string]any)
 		toolOutput, _ := toolMessage["content"].(string)
 		if callCount == 2 {
-			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"loaded_groups":["execution"]`) || !strings.Contains(toolOutput, `"shell"`) {
-				t.Fatalf("模型没有收到工具加载结果: %+v", toolMessage)
+			if strings.Contains(toolOutput, `"loaded_groups":["execution"]`) {
+				if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"shell"`) {
+					t.Fatalf("模型没有收到工具加载结果: %+v", toolMessage)
+				}
+				_ = json.NewEncoder(response).Encode(map[string]any{
+					"id": "shell-call", "model": "fixture",
+					"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+						map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
+					}}}},
+				})
+				return
+			}
+			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, workingDirectory) || strings.Contains(toolOutput, "<workspace>") {
+				t.Fatalf("模型没有收到 Shell 原始路径: %+v", toolMessage)
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"id": "shell-call", "model": "fixture",
-				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-					map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
-				}}}},
+				"id": "shell-answer", "model": "fixture",
+				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "目录是 " + workingDirectory}}},
 			})
 			return
 		}
@@ -195,7 +250,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		}
 	}
 	if modelResponses != 3 {
-		t.Fatalf("加载工具、执行工具和最终回答应有三次一一对应的模型响应，实际 %d", modelResponses)
+		t.Fatalf("Shell 任务应有加载工具、执行工具和最终回答三次模型响应，实际 %d", modelResponses)
 	}
 }
 

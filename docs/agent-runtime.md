@@ -84,7 +84,7 @@ Prompt 规则只能降低模型服从直接或间接注入的概率，不能替�
 
 Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 
-内置 Tool 首轮只注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露 13 个尚未加载的函数名。模型自主选出最少能力组，Runtime 动态注册组内 Schema；Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 同样先提供服务元数据；模型调用 `search_mcp_tools(id, query)` 后，Runtime 在远端工具的名称、描述和参数元数据中通用检索，一次最多注册 5 个最相关 Schema。检索器不判断 GitHub、浏览器等业务类型。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
+内置 Tool 首轮常驻 `current_time`、`weather`、`calculate` 三个高频核心工具，同时注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露其余函数名。简单的时间、天气和计算任务因此可以直接进入真实工具调用；文件、Shell、网页和 Skill 仍由模型自主选出最少能力组，Runtime 动态注册组内 Schema。Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 默认同样先提供服务元数据；用户明确输入 `@mcp:id` 时，如果该 MCP 不超过 5 个工具且 Schema 体积较小，Runtime 直接预加载，否则仍调用 `search_mcp_tools(id, query)` 按需检索，一次最多注册 5 个最相关 Schema。检索器不判断 GitHub、浏览器等产品类型。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt、工具排序与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 

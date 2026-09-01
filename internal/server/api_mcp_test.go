@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,25 @@ import (
 	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
 	"github.com/lakernote/easy-agent/internal/store"
 )
+
+func TestPublicMCPDoesNotExposeCredentialBearingFields(t *testing.T) {
+	value := publicMCP(store.MCPConfig{
+		Token: "bearer-secret", Password: "password-secret", Args: []string{"--headless", "--token", "arg-secret"},
+		Headers: map[string]string{"Authorization": "header-secret", "X-MCP-Toolsets": "repos"}, Environment: map[string]string{"SERVICE_TOKEN": "env-secret", "NODE_ENV": "test"},
+	})
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"bearer-secret", "password-secret", "arg-secret", "header-secret", "env-secret"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("public MCP 泄露秘密 %q: %s", secret, encoded)
+		}
+	}
+	if !value.SecretConfigured || value.Token != "" || value.Password != "" || value.Args[0] != "--headless" || value.Args[2] != redactedMCPValue || value.Headers["Authorization"] != redactedMCPValue || value.Headers["X-MCP-Toolsets"] != "repos" || value.Environment["SERVICE_TOKEN"] != redactedMCPValue || value.Environment["NODE_ENV"] != "test" {
+		t.Fatalf("public MCP 脱敏结果错误: %+v", value)
+	}
+}
 
 func TestPresetRuntimeCheckReportsMissingCommand(t *testing.T) {
 	preset := builtinmcp.Preset{Name: "fixture", Requirement: "fixture runtime", RequiredCommands: []string{"easyagent-command-that-does-not-exist"}}

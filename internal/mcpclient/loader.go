@@ -17,6 +17,8 @@ import (
 const (
 	defaultMCPToolLimit = 5
 	maxMCPToolLimit     = 5
+	directMCPToolLimit  = 5
+	directMCPSchemaSize = 12 * 1024
 )
 
 // ServerInfo 是写入 System Prompt 的 MCP 元数据。这里只告诉模型“有什么服务”，
@@ -73,6 +75,49 @@ func (loader *Loader) Servers() []ServerInfo {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// Preload 只服务于用户明确选择的 @mcp:id。小型 MCP 可以直接进入首轮，
+// 避免再消耗一次 search_mcp_tools；大型 MCP 继续走语义搜索，避免 Schema
+// 把上下文窗口塞满。普通自然语言任务不会在这里提前连接外部服务。
+func (loader *Loader) Preload(ctx context.Context, ids []string) ([]agent.Tool, error) {
+	if loader == nil {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	result := make([]agent.Tool, 0)
+	for _, rawID := range ids {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		config, ok := loader.configs[id]
+		if !ok {
+			return nil, fmt.Errorf("MCP %q 不存在或未启用", id)
+		}
+		connection, err := loader.connection(ctx, id, config)
+		if err != nil {
+			return nil, err
+		}
+		if len(connection.Tools) > directMCPToolLimit || toolSchemaBytes(connection.Tools) > directMCPSchemaSize {
+			continue
+		}
+		if loader.loaded[id] == nil {
+			loader.loaded[id] = make(map[string]bool)
+		}
+		for _, tool := range connection.Tools {
+			if loader.loaded[id][tool.Spec.Name] {
+				continue
+			}
+			loader.loaded[id][tool.Spec.Name] = true
+			result = append(result, tool)
+		}
+	}
+	return result, nil
 }
 
 // Tool 返回唯一常驻的 MCP 入口。它只加载本次任务最相关的少量工具，避免一个
@@ -175,6 +220,18 @@ func (loader *Loader) connection(ctx context.Context, id string, config store.MC
 	}
 	loader.connections[id] = connection
 	return connection, nil
+}
+
+func toolSchemaBytes(tools []agent.Tool) int {
+	specs := make([]agent.ToolSpec, 0, len(tools))
+	for _, tool := range tools {
+		specs = append(specs, tool.Spec)
+	}
+	data, err := json.Marshal(specs)
+	if err != nil {
+		return directMCPSchemaSize + 1
+	}
+	return len(data)
 }
 
 type scoredTool struct {

@@ -144,6 +144,23 @@ func TestFileToolsRejectOutsideWorkspace(t *testing.T) {
 	}
 }
 
+func TestGrepRejectsSymlinkToOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	root, _ = filepath.EvalSymlinks(root)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("outside-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "linked.txt")); err != nil {
+		t.Fatal(err)
+	}
+	workspace := &fileWorkspace{root: root, reads: map[string][sha256.Size]byte{}}
+	output, err := workspace.grep(context.Background(), json.RawMessage(`{"query":"outside-secret"}`))
+	if err != nil || strings.Contains(output, "outside-secret") {
+		t.Fatalf("grep 不应读取工作区外符号链接: output=%s err=%v", output, err)
+	}
+}
+
 func TestShellTimeout(t *testing.T) {
 	raw := json.RawMessage(`{"command":"sleep 5","timeout_seconds":1}`)
 	startedAt := time.Now()

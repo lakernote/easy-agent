@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,6 +98,8 @@ func Connect(ctx context.Context, environment *appenv.Environment, config store.
 			},
 		})
 	}
+	sort.Slice(connection.Tools, func(i, j int) bool { return connection.Tools[i].Spec.Name < connection.Tools[j].Spec.Name })
+	sort.Slice(connection.Info, func(i, j int) bool { return connection.Info[i].Name < connection.Info[j].Name })
 	if len(connection.Tools) == 0 {
 		_ = connection.Close()
 		return nil, fmt.Errorf("MCP %s 没有提供可调用的工具", config.Name)

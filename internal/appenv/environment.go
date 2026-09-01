@@ -51,9 +51,21 @@ func Open(config Config) (*Environment, error) {
 	}
 	runtimeDirectory := filepath.Join(home, "runtime")
 	binDirectory := filepath.Join(runtimeDirectory, "bin")
-	for _, directory := range []string{home, workspace, runtimeDirectory, binDirectory, filepath.Join(runtimeDirectory, "mcp")} {
-		if err := os.MkdirAll(directory, 0o755); err != nil {
+	mcpDirectory := filepath.Join(runtimeDirectory, "mcp")
+	for _, directory := range []string{home, workspace, runtimeDirectory, binDirectory, mcpDirectory} {
+		// EasyAgent Home、运行时和默认工作区可能包含凭证、数据库及工具输出，
+		// 新建目录默认只允许当前用户访问；已有用户工作区不强行改权限。
+		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("创建 EasyAgent 目录 %s: %w", directory, err)
+		}
+	}
+	privateDirectories := []string{home, runtimeDirectory, binDirectory, mcpDirectory}
+	if strings.TrimSpace(config.Workspace) == "" {
+		privateDirectories = append(privateDirectories, workspace)
+	}
+	for _, directory := range privateDirectories {
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return nil, fmt.Errorf("保护 EasyAgent 目录 %s: %w", directory, err)
 		}
 	}
 

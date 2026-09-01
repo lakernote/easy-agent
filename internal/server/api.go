@@ -336,15 +336,6 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 	if input.Description == "" {
 		input.Description = input.Name + " 提供的外部工具"
 	}
-	if input.Args == nil {
-		input.Args = []string{}
-	}
-	if input.Headers == nil {
-		input.Headers = map[string]string{}
-	}
-	if input.Environment == nil {
-		input.Environment = map[string]string{}
-	}
 	// 页面不会回传已经保存的密钥，因此必须先恢复旧值，再做认证校验和连接测试。
 	current, _ := server.store.MCPs()
 	for _, value := range current {
@@ -355,7 +346,28 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 			if input.Password == "" {
 				input.Password = value.Password
 			}
+			if input.Args == nil {
+				input.Args = append([]string(nil), value.Args...)
+			}
+			if input.Headers == nil {
+				input.Headers = cloneMap(value.Headers)
+			}
+			if input.Environment == nil {
+				input.Environment = cloneMap(value.Environment)
+			}
+			input.Args = restoreRedactedArgs(input.Args, value.Args)
+			input.Headers = restoreRedactedMap(input.Headers, value.Headers)
+			input.Environment = restoreRedactedMap(input.Environment, value.Environment)
 		}
+	}
+	if input.Args == nil {
+		input.Args = []string{}
+	}
+	if input.Headers == nil {
+		input.Headers = map[string]string{}
+	}
+	if input.Environment == nil {
+		input.Environment = map[string]string{}
 	}
 	if err := validateMCP(input); err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
@@ -735,9 +747,98 @@ func publicMCPs(values []store.MCPConfig) []store.MCPConfig {
 }
 
 func publicMCP(value store.MCPConfig) store.MCPConfig {
-	value.SecretConfigured = value.Token != "" || value.Password != ""
+	value.SecretConfigured = value.Token != "" || value.Password != "" || hasRedactedMCPValue(value.Args, value.Headers, value.Environment)
 	value.Token, value.Password = "", ""
+	// Args、Header 和环境变量都可能承载凭证；只遮蔽敏感值并保留非敏感配置，
+	// 保存时由服务端把占位恢复成原值，避免 bootstrap 把秘密发到浏览器。
+	value.Args = redactMCPArgs(value.Args)
+	value.Headers = redactMCPMap(value.Headers)
+	value.Environment = redactMCPMap(value.Environment)
 	return value
+}
+
+const redactedMCPValue = "__EASYAGENT_REDACTED__"
+
+func isSensitiveMCPKey(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, marker := range []string{"authorization", "api-key", "apikey", "token", "secret", "password", "passwd", "cookie", "credential", "private-key", "access-key"} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func redactMCPMap(values map[string]string) map[string]string {
+	result := cloneMap(values)
+	for key, value := range result {
+		if isSensitiveMCPKey(key) || isSensitiveMCPKey(value) {
+			result[key] = redactedMCPValue
+		}
+	}
+	return result
+}
+
+func restoreRedactedMap(values, original map[string]string) map[string]string {
+	result := cloneMap(values)
+	for key, value := range result {
+		if value == redactedMCPValue && original != nil {
+			if old, ok := original[key]; ok {
+				result[key] = old
+			}
+		}
+	}
+	return result
+}
+
+func redactMCPArgs(values []string) []string {
+	result := append([]string(nil), values...)
+	redactNext := false
+	for index, value := range result {
+		if redactNext {
+			result[index] = redactedMCPValue
+			redactNext = false
+			continue
+		}
+		if key, _, found := strings.Cut(value, "="); found && isSensitiveMCPKey(key) {
+			result[index] = key + "=" + redactedMCPValue
+			continue
+		}
+		if isSensitiveMCPKey(value) {
+			redactNext = true
+		}
+	}
+	return result
+}
+
+func restoreRedactedArgs(values, original []string) []string {
+	result := append([]string(nil), values...)
+	for index, value := range result {
+		if value != redactedMCPValue || index >= len(original) {
+			continue
+		}
+		result[index] = original[index]
+	}
+	return result
+}
+
+func hasRedactedMCPValue(args []string, headers, environment map[string]string) bool {
+	for _, value := range args {
+		if value == redactedMCPValue || isSensitiveMCPKey(value) {
+			return true
+		}
+	}
+	for key, value := range headers {
+		if isSensitiveMCPKey(key) || isSensitiveMCPKey(value) {
+			return true
+		}
+	}
+	for key, value := range environment {
+		if isSensitiveMCPKey(key) || isSensitiveMCPKey(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateModel(value store.ModelSettings) error {

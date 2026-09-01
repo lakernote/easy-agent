@@ -37,6 +37,20 @@ func TestLoaderRegistersOnlySelectedTools(t *testing.T) {
 	}
 }
 
+func TestLoaderPreloadsCoreTools(t *testing.T) {
+	loader, err := NewLoader([]agent.Tool{
+		{Spec: agent.ToolSpec{Name: "current_time", Group: "information", Description: "读取时间", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
+		{Spec: agent.ToolSpec{Name: "calculate", Group: "execution", Description: "计算", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := loader.PreloadCore()
+	if len(tools) != 2 || tools[0].Spec.Name != "calculate" || tools[1].Spec.Name != "current_time" {
+		t.Fatalf("核心工具应直接预加载且稳定排序: tools=%+v", tools)
+	}
+}
+
 func TestLoaderPreloadsExplicitSelection(t *testing.T) {
 	tool := agent.Tool{Spec: agent.ToolSpec{Name: "read", Group: "files", GroupDescription: "文件操作"}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }}
 	loader, err := NewLoader([]agent.Tool{tool})

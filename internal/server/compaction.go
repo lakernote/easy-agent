@@ -36,10 +36,12 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	}
 
 	startedAt := time.Now()
-	_ = server.store.AppendEvent(session.ID, store.Event{
+	if err := server.store.AppendEvent(session.ID, store.Event{
 		Kind: "compaction_start", Turn: turn, Status: "started", Name: settings.Model, CreatedAt: startedAt,
 		Detail: fmt.Sprintf("估算上下文 %d Token，达到自动压缩阈值 %d；准备压缩 %d 条较早消息", plan.EstimatedTokens, plan.ThresholdTokens, plan.SourceMessages),
-	})
+	}); err != nil {
+		return false, fmt.Errorf("保存压缩开始 Trace 失败: %w", err)
+	}
 
 	request := agent.Request{
 		Model: settings.Model,
@@ -52,9 +54,12 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	response, err := model.Generate(ctx, request)
 	duration := time.Since(startedAt)
 	if err != nil {
-		_ = server.store.AppendEvent(session.ID, store.Event{
+		traceErr := server.store.AppendEvent(session.ID, store.Event{
 			Kind: "compaction_end", Turn: turn, Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
 		})
+		if traceErr != nil {
+			return false, errors.Join(fmt.Errorf("上下文压缩失败: %w", err), fmt.Errorf("保存压缩失败 Trace 失败: %w", traceErr))
+		}
 		return false, fmt.Errorf("上下文压缩失败: %w", err)
 	}
 	if len(response.Message.ToolCalls) > 0 {
@@ -63,9 +68,12 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 		err = errors.New("压缩模型返回了空摘要")
 	}
 	if err != nil {
-		_ = server.store.AppendEvent(session.ID, store.Event{
+		traceErr := server.store.AppendEvent(session.ID, store.Event{
 			Kind: "compaction_end", Turn: turn, Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
 		})
+		if traceErr != nil {
+			return false, errors.Join(err, fmt.Errorf("保存压缩失败 Trace 失败: %w", traceErr))
+		}
 		return false, err
 	}
 
@@ -80,7 +88,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 	}
 	addStoreUsage(usage, currentUsage)
 	historyMode, requestMessages, toolDefinitions := modelRequestShape(response.Exchange)
-	_ = server.store.AppendEvent(session.ID, store.Event{
+	if err := server.store.AppendEvent(session.ID, store.Event{
 		Kind: "compaction_end", Turn: turn, Status: "success", Name: response.Exchange.Model,
 		Detail: fmt.Sprintf("检查点已保存；%d 条原始消息由摘要表示，最近消息继续原样保留", plan.CompactedMessages),
 		Input:  response.Exchange.Request, Output: response.Exchange.Response,
@@ -90,7 +98,9 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 		Protocol: response.Exchange.Protocol, StatusCode: response.Exchange.StatusCode, HistoryMode: historyMode,
 		RequestMessages: requestMessages, ToolDefinitions: toolDefinitions,
 		DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		return false, fmt.Errorf("保存压缩结束 Trace 失败: %w", err)
+	}
 
 	updated, err := server.store.Session(session.ID)
 	if err != nil {

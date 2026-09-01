@@ -23,7 +23,7 @@ func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("SQLite 路径不能为空")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", path)
@@ -36,7 +36,20 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := protectDatabaseFiles(path); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return store, nil
+}
+
+func protectDatabaseFiles(path string) error {
+	for _, file := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(file, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("保护 SQLite 文件 %s: %w", file, err)
+		}
+	}
+	return nil
 }
 
 func (store *Store) Close() error { return store.db.Close() }

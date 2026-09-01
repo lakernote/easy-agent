@@ -11,6 +11,8 @@ import (
 	"github.com/lakernote/easy-agent/internal/agent"
 )
 
+var coreToolNames = []string{"calculate", "current_time", "weather"}
+
 // Loader 只把一个精简的工具组目录放进首轮请求。模型确认需要某类能力后，调用
 // load_tools 按组加载真实 Tool Schema；下一轮即可调用这些工具。
 //
@@ -78,6 +80,12 @@ func (loader *Loader) Preload(names []string) []agent.Tool {
 		result = append(result, tool)
 	}
 	return result
+}
+
+// PreloadCore 只常驻极少数高频、低风险工具。这样“现在几点/天气/计算”不需要
+// 先调用一次 load_tools；文件、Shell、网页和 Skill 等较大的能力仍按需加载。
+func (loader *Loader) PreloadCore() []agent.Tool {
+	return loader.Preload(coreToolNames)
 }
 
 // Tool 是常驻模型上下文的唯一内置工具入口。目录只提供少量能力组，不暴露组内

@@ -36,6 +36,12 @@ func TestLoaderSearchesAndRegistersOnlyMatchingTools(t *testing.T) {
 		registered = append(registered, tools...)
 		return nil
 	})
+	directLoader := NewLoader(testEnvironment(t), []store.MCPConfig{{ID: "demo", Name: "Demo", Enabled: true, Transport: "http", Endpoint: httpServer.URL}})
+	defer directLoader.Close()
+	direct, err := directLoader.Preload(context.Background(), []string{"demo"})
+	if err != nil || len(direct) != 2 || direct[0].Spec.Name != "mcp__demo__greet" || direct[1].Spec.Name != "mcp__demo__read_issue" {
+		t.Fatalf("显式选择的小 MCP 应直接预加载且稳定排序: tools=%+v err=%v", direct, err)
+	}
 	if len(registered) != 0 {
 		t.Fatal("search_mcp_tools 调用前不应注册远端工具")
 	}

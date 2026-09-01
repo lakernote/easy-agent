@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -140,9 +141,10 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
-	// 首轮只发送精简工具组目录。只有用户在输入框明确 @tool:name 时，才把对应
-	// 完整 Schema 一并预加载；自然语言任务由模型调用 load_tools 自主选择。
-	activeTools := []agent.Tool{toolLoader.Tool()}
+	// 只把极少数高频、低风险工具常驻首轮；文件、Shell、网页和 Skill 等较大
+	// 能力仍只发送精简目录，避免“全量 Schema”在每个模型回合重复计费。
+	activeTools := toolLoader.PreloadCore()
+	activeTools = append(activeTools, toolLoader.Tool())
 	activeTools = append(activeTools, toolLoader.Preload(selectedToolNames(session.Messages))...)
 	mcps, err := server.store.MCPs()
 	if err != nil {
@@ -150,11 +152,16 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	}
 	mcpLoader := mcpclient.NewLoader(runEnvironment, mcps)
 	defer mcpLoader.Close()
+	selectedMCPTools, err := mcpLoader.Preload(ctx, selectedMCPIDs(session.Messages))
+	if err != nil {
+		return err
+	}
 	mcpMeta := make([]prompt.MCPMeta, 0)
 	for _, info := range mcpLoader.Servers() {
 		mcpMeta = append(mcpMeta, prompt.MCPMeta{ID: info.ID, Name: info.Name, Description: info.Description})
 	}
 	if !mcpLoader.Empty() {
+		activeTools = append(activeTools, selectedMCPTools...)
 		activeTools = append(activeTools, mcpLoader.Tool())
 	}
 	apiKey := settings.APIKey
@@ -184,7 +191,16 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	mcpLoader.SetRegister(runner.AddTools)
 	toolLoader.SetRegister(runner.AddTools)
 	runner.MaxOutputTokens = settings.MaxOutputTokens
-	runner.Observe = server.observer(id, turn, usage)
+	var traceErr error
+	var traceMu sync.Mutex
+	recordTraceError := func(err error) {
+		traceMu.Lock()
+		defer traceMu.Unlock()
+		if traceErr == nil {
+			traceErr = err
+		}
+	}
+	runner.Observe = server.observer(id, turn, usage, recordTraceError)
 
 	coreMessages := coreMessagesForSession(session, systemPrompt)
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
@@ -213,6 +229,12 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	})
 	if err != nil {
 		return err
+	}
+	traceMu.Lock()
+	savedTraceErr := traceErr
+	traceMu.Unlock()
+	if savedTraceErr != nil {
+		return fmt.Errorf("保存 Agent Trace 失败: %w", savedTraceErr)
 	}
 	return server.store.FinishSession(id, result.ResponseID, providerKey, *usage, time.Now())
 }
@@ -298,7 +320,7 @@ func promptCacheKey(settings store.ModelSettings) string {
 	return ""
 }
 
-func (server *Server) observer(id string, turn int, usage *store.Usage) agent.Observer {
+func (server *Server) observer(id string, turn int, usage *store.Usage, onTraceError func(error)) agent.Observer {
 	return func(event agent.Event) {
 		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
 		if event.ToolCall != nil {
@@ -343,7 +365,9 @@ func (server *Server) observer(id string, turn int, usage *store.Usage) agent.Ob
 		// 否则用户无法根据 Trace 复现问题。附件二进制仍只保留结构和 MIME。
 		value.Input = redactTraceAttachmentData(value.Input)
 		value.Output = redactTraceAttachmentData(value.Output)
-		_ = server.store.AppendEvent(id, value)
+		if err := server.store.AppendEvent(id, value); err != nil && onTraceError != nil {
+			onTraceError(err)
+		}
 	}
 }
 

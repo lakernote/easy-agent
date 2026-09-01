@@ -319,6 +319,17 @@ func (workspace *fileWorkspace) grep(ctx context.Context, raw json.RawMessage) (
 		if entry.IsDir() {
 			return nil
 		}
+		// WalkDir 不会进入符号链接目录，但普通文件链接会被 read 跟随；
+		// 先解析真实目标并校验工作区边界，避免 grep 读取工作区外文件。
+		if entry.Type()&os.ModeSymlink != 0 {
+			resolved, resolveErr := filepath.EvalSymlinks(path)
+			if resolveErr != nil {
+				return nil
+			}
+			if _, relativeErr := workspace.relative(resolved); relativeErr != nil {
+				return nil
+			}
+		}
 		relative, relErr := filepath.Rel(workspace.root, path)
 		if relErr != nil || (input.Glob != "" && !matchesFilePattern(filepath.ToSlash(relative), input.Glob)) {
 			return nil

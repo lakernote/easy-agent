@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -47,7 +48,15 @@ func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *
 	return server
 }
 
-func (server *Server) Handler() http.Handler { return server.mux }
+func (server *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		response.Header().Set("X-Content-Type-Options", "nosniff")
+		response.Header().Set("X-Frame-Options", "DENY")
+		response.Header().Set("Referrer-Policy", "no-referrer")
+		server.mux.ServeHTTP(response, request)
+	})
+}
 
 func (server *Server) Shutdown(ctx context.Context) error {
 	server.cancel()
@@ -126,6 +135,15 @@ func decodeJSON(response http.ResponseWriter, request *http.Request, value any) 
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
 		writeError(response, http.StatusBadRequest, "请求格式不正确: "+err.Error())
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			writeError(response, http.StatusBadRequest, "请求只能包含一个 JSON 对象")
+		} else {
+			writeError(response, http.StatusBadRequest, "请求格式不正确: "+err.Error())
+		}
 		return false
 	}
 	return true
