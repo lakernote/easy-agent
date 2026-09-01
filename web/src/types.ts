@@ -95,6 +95,11 @@ export type Session = {
   updatedAt: string
   messages: Message[]
   events: TraceEvent[]
+  messageCount?: number
+  eventCount?: number
+  userTurnCount?: number
+  messagesTruncated?: boolean
+  eventsTruncated?: boolean
   usage: Usage
   context: ContextInfo
   partialOutput?: string

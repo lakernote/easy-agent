@@ -315,16 +315,26 @@ func scanSession(row rowScanner) (Session, error) {
 }
 
 func (store *Store) Session(id string) (Session, error) {
+	return store.sessionWindow(id, 0, 0)
+}
+
+// SessionWindow 返回供页面使用的有界会话窗口。运行时仍使用 Session 获取完整
+// 历史；HTTP 页面和轮询不应随着单个会话增长而反复传输全部消息与 Trace。
+func (store *Store) SessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
+	return store.sessionWindow(id, messageLimit, eventLimit)
+}
+
+func (store *Store) sessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
 	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
 	if err != nil {
 		return Session{}, err
 	}
-	value.Messages, err = store.messages(id)
+	value.Messages, value.MessageCount, value.UserTurnCount, value.MessagesTruncated, err = store.messagesWindow(id, messageLimit)
 	if err != nil {
 		return Session{}, err
 	}
-	value.Events, err = store.events(id)
+	value.Events, value.EventCount, value.EventsTruncated, err = store.eventsWindow(id, eventLimit)
 	if err != nil {
 		return Session{}, err
 	}
@@ -342,9 +352,26 @@ func (store *Store) Session(id string) (Session, error) {
 }
 
 func (store *Store) messages(id string) ([]Message, error) {
-	rows, err := store.db.Query(`SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq`, id)
+	result, _, _, _, err := store.messagesWindow(id, 0)
+	return result, err
+}
+
+func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, bool, error) {
+	var count, userTurns int
+	if err := store.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN role='user' THEN 1 ELSE 0 END),0) FROM ea_messages WHERE session_id=?`, id).Scan(&count, &userTurns); err != nil {
+		return nil, 0, 0, false, err
+	}
+	query := `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq`
+	args := []any{id}
+	truncated := false
+	if limit > 0 {
+		query = `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq DESC LIMIT ?`
+		args = append(args, limit)
+		truncated = count > limit
+	}
+	rows, err := store.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, false, err
 	}
 	defer rows.Close()
 	result := []Message{}
@@ -353,7 +380,7 @@ func (store *Store) messages(id string) ([]Message, error) {
 		var data []byte
 		var created string
 		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &value.ToolCallID, &value.Name, &created); err != nil {
-			return nil, err
+			return nil, 0, 0, false, err
 		}
 		_ = json.Unmarshal(data, &value.ToolCalls)
 		if value.ToolCalls == nil {
@@ -364,14 +391,23 @@ func (store *Store) messages(id string) ([]Message, error) {
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, 0, false, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, 0, 0, false, err
 	}
-	attachments, err := store.messageAttachments(id)
+	if limit > 0 {
+		for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+			result[left], result[right] = result[right], result[left]
+		}
+	}
+	messageIDs := make([]int64, 0, len(result))
+	for _, message := range result {
+		messageIDs = append(messageIDs, message.ID)
+	}
+	attachments, err := store.messageAttachmentsForIDs(id, messageIDs)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, false, err
 	}
 	for index := range result {
 		result[index].Attachments = attachments[result[index].ID]
@@ -379,13 +415,31 @@ func (store *Store) messages(id string) ([]Message, error) {
 			result[index].Attachments = []Attachment{}
 		}
 	}
-	return result, nil
+	return result, count, userTurns, truncated, nil
 }
 
 func (store *Store) messageAttachments(sessionID string) (map[int64][]Attachment, error) {
-	rows, err := store.db.Query(`SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size,a.data
+	return store.messageAttachmentsForIDs(sessionID, nil)
+}
+
+func (store *Store) messageAttachmentsForIDs(sessionID string, messageIDs []int64) (map[int64][]Attachment, error) {
+	query := `SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size,a.data
 FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
-WHERE m.session_id=? ORDER BY a.rowid`, sessionID)
+	WHERE m.session_id=?`
+	args := []any{sessionID}
+	if messageIDs != nil {
+		if len(messageIDs) == 0 {
+			return map[int64][]Attachment{}, nil
+		}
+		placeholders := make([]string, len(messageIDs))
+		for index, id := range messageIDs {
+			placeholders[index] = "?"
+			args = append(args, id)
+		}
+		query += ` AND m.id IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	query += ` ORDER BY a.rowid`
+	rows, err := store.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -411,9 +465,26 @@ func (store *Store) Attachment(id string) (Attachment, error) {
 }
 
 func (store *Store) events(id string) ([]Event, error) {
-	rows, err := store.db.Query(`SELECT id,event_json,created_at FROM ea_events WHERE session_id=? ORDER BY seq`, id)
+	result, _, _, err := store.eventsWindow(id, 0)
+	return result, err
+}
+
+func (store *Store) eventsWindow(id string, limit int) ([]Event, int, bool, error) {
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM ea_events WHERE session_id=?`, id).Scan(&count); err != nil {
+		return nil, 0, false, err
+	}
+	query := `SELECT id,event_json,created_at FROM ea_events WHERE session_id=? ORDER BY seq`
+	args := []any{id}
+	truncated := false
+	if limit > 0 {
+		query = `SELECT id,event_json,created_at FROM ea_events WHERE session_id=? ORDER BY seq DESC LIMIT ?`
+		args = append(args, limit)
+		truncated = count > limit
+	}
+	rows, err := store.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
 	defer rows.Close()
 	result := []Event{}
@@ -423,17 +494,25 @@ func (store *Store) events(id string) ([]Event, error) {
 		var data []byte
 		var created string
 		if err := rows.Scan(&databaseID, &data, &created); err != nil {
-			return nil, err
+			return nil, 0, false, err
 		}
 		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, err
+			return nil, 0, false, err
 		}
 		// event_json 保存的是事件内容，行 ID 以数据库主键为准。
 		value.ID = databaseID
 		value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 		result = append(result, value)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, false, err
+	}
+	if limit > 0 {
+		for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+			result[left], result[right] = result[right], result[left]
+		}
+	}
+	return result, count, truncated, nil
 }
 
 func (store *Store) AppendMessage(id string, value Message) error {

@@ -137,6 +137,51 @@ func TestDecodeJSONRejectsTrailingData(t *testing.T) {
 	}
 }
 
+func TestGetSessionUsesBoundedHistoryWindow(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.CreateSession("window", "窗口", "fixture", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	messages := make([]store.Message, 0, 201)
+	for index := 0; index < 201; index++ {
+		role := "assistant"
+		if index%2 == 0 {
+			role = "user"
+		}
+		messages = append(messages, store.Message{Role: role, Content: fmt.Sprintf("消息 %d", index)})
+	}
+	if err := database.AppendMessages("window", messages); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 301; index++ {
+		if err := database.AppendEvent("window", store.Event{Kind: "trace", Detail: fmt.Sprintf("事件 %d", index)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/window", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("会话窗口接口状态错误: %d %s", response.Code, response.Body.String())
+	}
+	var value store.Session
+	if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Messages) != 200 || value.MessageCount != 201 || !value.MessagesTruncated || value.Messages[0].Content != "消息 1" || value.Messages[199].Content != "消息 200" {
+		t.Fatalf("会话消息没有按最近窗口返回: count=%d truncated=%v first=%q last=%q", value.MessageCount, value.MessagesTruncated, value.Messages[0].Content, value.Messages[199].Content)
+	}
+	if len(value.Events) != 300 || value.EventCount != 301 || !value.EventsTruncated || value.Events[0].Detail != "事件 1" || value.Events[299].Detail != "事件 300" {
+		t.Fatalf("会话 Trace 没有按最近窗口返回: count=%d truncated=%v", value.EventCount, value.EventsTruncated)
+	}
+}
+
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	workingDirectory := t.TempDir()
 	workingDirectory, _ = filepath.EvalSymlinks(workingDirectory)

@@ -52,6 +52,8 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
+页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。运行中的页面每 800ms 轮询也复用这个窗口，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent 运行时继续使用完整历史和上下文压缩逻辑。
+
 Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。Trace 默认展示 EasyAgent 聚合后的完整响应，并在折叠区保留 Provider 原始 JSON Chunks，Usage 和耗时与本次模型请求一一对应。若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
 
 Trace 保留 Shell 和工具真实返回的绝对工作目录与文件路径，便于直接复现问题；图片和 PDF 的 Base64 原文不进入 Trace，只保留 MIME 类型和请求结构。

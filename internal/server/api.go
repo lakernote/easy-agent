@@ -51,6 +51,11 @@ type modelRulesPayload struct {
 	MaxCompressionThresholdPercent     int `json:"maxCompressionThresholdPercent"`
 }
 
+const (
+	apiMessageWindow = 200
+	apiEventWindow   = 300
+)
+
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
 	sessions, err := server.store.ListSessions(100)
 	if err != nil {
@@ -102,7 +107,7 @@ func modelRules() modelRulesPayload {
 }
 
 func (server *Server) getSession(response http.ResponseWriter, request *http.Request) {
-	value, err := server.store.Session(request.PathValue("id"))
+	value, err := server.store.SessionWindow(request.PathValue("id"), apiMessageWindow, apiEventWindow)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(response, http.StatusNotFound, "会话不存在")
 		return
@@ -162,7 +167,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.Session(id)
+	value, _ := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, value)
@@ -193,7 +198,8 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		return
 	}
 	id := request.PathValue("id")
-	if _, err := server.store.Session(id); err != nil {
+	// 这里只验证会话存在，避免继续对话前把完整历史加载两次。
+	if _, err := server.store.SessionWindow(id, 1, 1); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(response, http.StatusNotFound, "会话不存在")
 		} else {
@@ -205,14 +211,15 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.Session(id)
+	value, _ := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, value)
 }
 
 func (server *Server) deleteSession(response http.ResponseWriter, request *http.Request) {
-	value, err := server.store.Session(request.PathValue("id"))
+	// 删除前只需要检查状态，不要为了一个状态字段把超长消息和 Trace 全量读入内存。
+	value, err := server.store.SessionWindow(request.PathValue("id"), 1, 1)
 	if err == nil && (value.Status == "queued" || value.Status == "running") {
 		writeError(response, http.StatusConflict, "Agent 正在运行，暂时不能删除")
 		return
@@ -236,7 +243,7 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 		return
 	}
 	server.cancelTask(id)
-	value, err := server.store.Session(id)
+	value, err := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return

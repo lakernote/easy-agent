@@ -450,10 +450,22 @@ func modelRequestShape(exchange agent.Exchange) (string, int, int) {
 // decorateContext 将消息数、真实 Usage、压缩检查点和模型配置组合成页面账本。
 func decorateContext(session *store.Session, settings store.ModelSettings) {
 	threshold := compressionThreshold(settings)
+	historyMessages := session.MessageCount
+	if historyMessages == 0 && len(session.Messages) > 0 {
+		historyMessages = len(session.Messages)
+	}
+	userTurns := session.UserTurnCount
+	if userTurns == 0 && len(session.Messages) > 0 {
+		for _, message := range session.Messages {
+			if message.Role == string(agent.RoleUser) {
+				userTurns++
+			}
+		}
+	}
 	info := store.ContextInfo{
-		HistoryMessages: len(session.Messages), ContextWindowTokens: settings.ContextWindowTokens,
+		HistoryMessages: historyMessages, ContextWindowTokens: settings.ContextWindowTokens,
 		CompressionMode: "auto", CompressionThresholdPercent: threshold,
-		RetainedMessages: len(session.Messages), HistoryMode: "full_history",
+		RetainedMessages: historyMessages, HistoryMode: "full_history",
 	}
 	if threshold <= 0 {
 		info.CompressionMode = "disabled"
@@ -462,16 +474,12 @@ func decorateContext(session *store.Session, settings store.ModelSettings) {
 		latest := session.Compactions[len(session.Compactions)-1]
 		info.CompressionCount = len(session.Compactions)
 		info.CompressedMessages = latest.CompactedMessages
-		info.RetainedMessages = len(session.Messages) - latest.CompactedMessages
+		info.RetainedMessages = max(0, historyMessages-latest.CompactedMessages)
 	}
 	if settings.Protocol == string(openai.Responses) {
 		info.HistoryMode = "responses_full_input"
 	}
-	for _, message := range session.Messages {
-		if message.Role == string(agent.RoleUser) {
-			info.UserTurns++
-		}
-	}
+	info.UserTurns = userTurns
 	for index := len(session.Events) - 1; index >= 0; index-- {
 		event := session.Events[index]
 		if event.Kind != string(agent.EventModelEnd) {

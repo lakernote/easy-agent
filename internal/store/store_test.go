@@ -92,6 +92,45 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	}
 }
 
+func TestSessionWindowBoundsMessagesAndEvents(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	if _, err := value.CreateSession("s1", "窗口", "fixture", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.AppendMessages("s1", []Message{
+		{Role: "user", Content: "第一条"},
+		{Role: "assistant", Content: "第二条"},
+		{Role: "user", Content: "第三条"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 4; index++ {
+		if err := value.AppendEvent("s1", Event{Kind: "event", Detail: string(rune('a' + index))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := value.SessionWindow("s1", 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 2 || loaded.MessageCount != 3 || !loaded.MessagesTruncated || loaded.UserTurnCount != 2 {
+		t.Fatalf("消息窗口或总数错误: %+v", loaded)
+	}
+	if loaded.Messages[0].Content != "第二条" || loaded.Messages[1].Content != "第三条" {
+		t.Fatalf("消息窗口必须保留最近记录且恢复正序: %+v", loaded.Messages)
+	}
+	if len(loaded.Events) != 2 || loaded.EventCount != 4 || !loaded.EventsTruncated {
+		t.Fatalf("Trace 窗口或总数错误: %+v", loaded)
+	}
+	if loaded.Events[0].Detail != "c" || loaded.Events[1].Detail != "d" {
+		t.Fatalf("Trace 窗口必须保留最近记录且恢复正序: %+v", loaded.Events)
+	}
+}
+
 func TestAppendMessagesCommitsToolStepTogether(t *testing.T) {
 	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
 	if err != nil {

@@ -218,18 +218,23 @@ type ContextInfo struct {
 }
 
 type Session struct {
-	ID        string      `json:"id"`
-	Title     string      `json:"title"`
-	Status    string      `json:"status"`
-	Error     string      `json:"error,omitempty"`
-	Model     string      `json:"model,omitempty"`
-	Workspace string      `json:"workspace"`
-	CreatedAt time.Time   `json:"createdAt"`
-	UpdatedAt time.Time   `json:"updatedAt"`
-	Messages  []Message   `json:"messages"`
-	Events    []Event     `json:"events"`
-	Usage     Usage       `json:"usage"`
-	Context   ContextInfo `json:"context"`
+	ID                string      `json:"id"`
+	Title             string      `json:"title"`
+	Status            string      `json:"status"`
+	Error             string      `json:"error,omitempty"`
+	Model             string      `json:"model,omitempty"`
+	Workspace         string      `json:"workspace"`
+	CreatedAt         time.Time   `json:"createdAt"`
+	UpdatedAt         time.Time   `json:"updatedAt"`
+	Messages          []Message   `json:"messages"`
+	Events            []Event     `json:"events"`
+	MessageCount      int         `json:"messageCount,omitempty"`
+	EventCount        int         `json:"eventCount,omitempty"`
+	UserTurnCount     int         `json:"userTurnCount,omitempty"`
+	MessagesTruncated bool        `json:"messagesTruncated,omitempty"`
+	EventsTruncated   bool        `json:"eventsTruncated,omitempty"`
+	Usage             Usage       `json:"usage"`
+	Context           ContextInfo `json:"context"`
 	// PartialOutput 只在模型流式生成期间由内存运行时填充，不写入 SQLite。
 	PartialOutput string       `json:"partialOutput,omitempty"`
 	Compactions   []Compaction `json:"-"`
