@@ -1,0 +1,11 @@
+export function TrashIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg> }
+export function Logo() { return <img src="/logo.svg" alt="" aria-hidden="true" /> }
+export function Icon({ name }: { name: string }) { const paths: Record<string, string> = { chat: 'M4 5h16v11H8l-4 4V5Z', skill: 'M6 3h12v18H6zM9 8h6M9 12h6', plug: 'M9 3v6m6-6v6M7 9h10v3a5 5 0 0 1-10 0V9Zm5 8v4' }; return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg> }
+export function AttachIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 6.8-6.8a3.5 3.5 0 0 1 5 5l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9m-6.2 11.4 8.5-8.5" /></svg> }
+export function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" /></svg> }
+export function CloseIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg> }
+export function FileIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h5M9 13h6m-6 4h5" /></svg> }
+export function Avatar() { return <div className="avatar"><Logo /></div> }
+export function Metric({ label, value, sub }: { label: string; value: string; sub: string }) { return <div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div> }
+import { useMemo } from 'react'
+export function Payload({ value }: { value: string }) { const formatted = useMemo(() => { try { return JSON.stringify(JSON.parse(value), null, 2) } catch { return value } }, [value]); return <pre>{formatted}</pre> }

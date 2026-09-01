@@ -60,10 +60,10 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 阅读“在已有 Session 中发送一条消息”时，按下面的调用顺序看源码：
 
 ```text
-web/src/App.tsx: Chat.send
+web/src/Chat.tsx: Chat.send
   → web/src/api.ts: sendMessage
   → internal/server/api.go: continueSession
-  → internal/server/agent.go: queue
+  → internal/server/agent.go: enqueueTurn
   → AppendMessage(user) + queued → goroutine/并发槽 → MarkRunning
   → internal/server/agent.go: run
   → store.RuntimeSession(检查点 + 活跃消息) + compactIfNeeded
@@ -71,7 +71,7 @@ web/src/App.tsx: Chat.send
   → Model.Generate ↔ Tool.Run 循环
   → OnTurnMessages → AppendMessages
   → FinishSession
-  → App.tsx 每 800ms 调用 api.session 刷新页面
+  → web/src/App.tsx 每 800ms 调用 api.session 刷新页面
 ```
 
 没有当前 Session 时，`Chat.send` 改走 `POST /api/v1/sessions` 和 `createSession`；它们从 `queue` 开始共享同一条运行链路。一个 Turn 是用户发送的一次消息及其完整 Agent 运行；其中每次模型决策是一个 Step，同一 Step 因瞬时错误或兼容性降级产生的重试是 Attempt。
