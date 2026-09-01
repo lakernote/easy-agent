@@ -48,6 +48,57 @@ func TestRunnerFeedsToolResultBackAsToolMessage(t *testing.T) {
 	}
 }
 
+func TestRunnerForcesUserSelectedTool(t *testing.T) {
+	requests := make([]Request, 0, 2)
+	toolCalls := 0
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		requests = append(requests, request)
+		if len(requests) == 1 {
+			if request.ToolChoice.Mode != ToolChoiceAuto || request.ToolChoice.Name != "" || len(request.Tools) != 1 || request.Tools[0].Name != "calculate" {
+				t.Fatalf("@tool 必须只暴露选中工具并交给模型发起调用: choice=%+v tools=%+v", request.ToolChoice, request.Tools)
+			}
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "call-1", Name: "calculate", Arguments: json.RawMessage(`{"expression":"17*19"}`)}}}}, nil
+		}
+		return Response{Message: Message{Content: "323"}}, nil
+	})
+	runner, err := NewRunner(model, "fixture", []Tool{{
+		Spec: ToolSpec{Name: "calculate"},
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			toolCalls++
+			return `{"result":"323"}`, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages:          []Message{{Role: RoleUser, Content: "@tool:calculate 17*19"}},
+		RequiredToolNames: []string{"calculate"},
+	})
+	if err != nil || result.Answer != "323" || toolCalls != 1 || len(requests) != 2 {
+		t.Fatalf("显式工具没有真实执行: result=%+v toolCalls=%d requests=%d err=%v", result, toolCalls, len(requests), err)
+	}
+}
+
+func TestRunnerRejectsProviderIgnoringUserSelectedTool(t *testing.T) {
+	runner, err := NewRunner(modelFunc(func(_ context.Context, _ Request) (Response, error) {
+		return Response{Message: Message{Content: "模型自行算出的结果"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "calculate"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return `{"result":"ok"}`, nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages:          []Message{{Role: RoleUser, Content: "@tool:calculate 17*19"}},
+		RequiredToolNames: []string{"calculate"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "没有发起工具调用") {
+		t.Fatalf("Provider 忽略显式工具选择时必须失败关闭: %v", err)
+	}
+}
+
 func TestRunnerDisablesToolsOnLastStep(t *testing.T) {
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
 		if len(request.Tools) != 0 {

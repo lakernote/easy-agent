@@ -47,6 +47,7 @@ type Context struct {
 	Skills         []SkillMeta
 	MCPs           []MCPMeta
 	SelectedSkills []SelectedSkill
+	SelectedTools  []string
 }
 
 // Render 生成一轮会话使用的 System Prompt。日期、星期和时区是稳定运行时事实；
@@ -89,6 +90,16 @@ func Render(context Context) string {
 		fmt.Fprintf(&selected, "\n<skill name=%q>\n%s\n</skill>\n", skill.Name, strings.TrimSpace(skill.Content))
 	}
 	result = strings.ReplaceAll(result, "{{SELECTED_SKILLS}}", strings.TrimSpace(selected.String()))
+	var selectedTools strings.Builder
+	for _, tool := range context.SelectedTools {
+		if strings.TrimSpace(tool) != "" {
+			fmt.Fprintf(&selectedTools, "- %s\n", strings.TrimSpace(tool))
+		}
+	}
+	if selectedTools.Len() == 0 {
+		selectedTools.WriteString("- 无")
+	}
+	result = strings.ReplaceAll(result, "{{SELECTED_TOOLS}}", strings.TrimSpace(selectedTools.String()))
 	return strings.TrimSpace(result)
 }
 

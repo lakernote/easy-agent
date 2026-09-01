@@ -114,6 +114,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	consecutiveFailedToolSteps := 0
 	forceConverge := false
 	requireLoadedToolCall := false
+	requiredToolNames := availableRequiredTools(runner.modelToolSpecs, input.RequiredToolNames)
 	failedCalls := make(map[string]failedToolCall)
 
 	for step := 1; step <= maxSteps; step++ {
@@ -123,6 +124,13 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		tools := runner.modelToolSpecs
 		toolChoice := ToolChoice{Mode: ToolChoiceNone}
 		if len(tools) > 0 {
+			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
+		}
+		if step == 1 && len(requiredToolNames) > 0 {
+			// 只暴露用户明确选择的工具。部分 Ollama 模型会忽略 required
+			// tool_choice，因此这里使用 auto 配合 System Prompt 约束，仍由
+			// 下面的 Runner 校验保证未调用时不会被当成成功。
+			tools = filterToolsByName(tools, requiredToolNames)
 			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
 		}
 		if requireLoadedToolCall {
@@ -243,6 +251,9 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 
 		if len(assistant.ToolCalls) == 0 {
+			if step == 1 && len(requiredToolNames) > 0 {
+				return RunResult{}, fmt.Errorf("用户明确指定了工具 %s，但模型没有发起工具调用", strings.Join(requiredToolNames, ", "))
+			}
 			if requireLoadedToolCall {
 				return RunResult{}, errors.New("模型在能力加载后没有调用真实工具")
 			}
@@ -358,6 +369,46 @@ func nonLoaderTools(tools []ToolSpec) []ToolSpec {
 	result := make([]ToolSpec, 0, len(tools))
 	for _, tool := range tools {
 		if !tool.Loader {
+			result = append(result, tool)
+		}
+	}
+	return result
+}
+
+func availableRequiredTools(tools []ToolSpec, names []string) []string {
+	available := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		if !tool.Loader {
+			available[tool.Name] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(names))
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := available[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
+func filterToolsByName(tools []ToolSpec, names []string) []ToolSpec {
+	allowed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		allowed[name] = struct{}{}
+	}
+	result := make([]ToolSpec, 0, len(names))
+	for _, tool := range tools {
+		if _, ok := allowed[tool.Name]; ok {
 			result = append(result, tool)
 		}
 	}

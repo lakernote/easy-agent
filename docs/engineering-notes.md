@@ -48,7 +48,7 @@ if matches(userText, "bug|修复") then load repair skill
 
 **解决**：把 Tool 的名称、用途和 JSON Schema 交给模型，通过原生 Function Calling 选择。Go 代码只处理协议、校验、超时、权限、执行和失败收敛。
 
-`@skill:name`、`@tool:name`、`@mcp:name` 是用户明确选择能力的输入协议，不是根据语义猜测用户意图。
+`@skill:name`、`@tool:name`、`@mcp:name` 是用户明确选择能力的输入协议，不是根据语义猜测用户意图；其中 `@tool:name` 会在首轮只暴露该工具并使用 `required tool_choice` 强制调用。
 
 ### 2.3 `toolCategory(name)` 按名字二次分类
 

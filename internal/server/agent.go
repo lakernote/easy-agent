@@ -143,9 +143,10 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 	}
 	// 只把极少数高频、低风险工具常驻首轮；文件、Shell、网页和 Skill 等较大
 	// 能力仍只发送精简目录，避免“全量 Schema”在每个模型回合重复计费。
+	selectedToolNamesForTurn := selectedToolNames(session.Messages)
 	activeTools := toolLoader.PreloadCore()
 	activeTools = append(activeTools, toolLoader.Tool())
-	activeTools = append(activeTools, toolLoader.Preload(selectedToolNames(session.Messages))...)
+	activeTools = append(activeTools, toolLoader.Preload(selectedToolNamesForTurn)...)
 	mcps, err := server.store.ListMCPConfigs()
 	if err != nil {
 		return err
@@ -178,7 +179,7 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 		return err
 	}
 	systemPrompt := prompt.Render(prompt.Context{
-		Now: time.Now(), Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog),
+		Now: time.Now(), Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog), SelectedTools: selectedToolNamesForTurn,
 	})
 	didCompact, err := server.compactIfNeeded(ctx, &session, settings, client, systemPrompt, activeTools, turn, usage, runtimeCompactionThreshold(settings), false)
 	if err != nil {
@@ -203,6 +204,13 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 	runner.Observe = server.newTraceObserver(id, turn, usage, recordTraceError)
 
 	coreMessages := coreMessagesForSession(session, systemPrompt)
+	// @tool 是 UI 控制标记，不是业务问题的一部分。保留它在数据库和页面中
+	// 便于审计，但不要让模型把标记当成普通文本而绕过 function calling。
+	for index := range coreMessages {
+		if coreMessages[index].Role == agent.RoleUser {
+			coreMessages[index].Content = stripToolMentions(coreMessages[index].Content)
+		}
+	}
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
 	previousID := ""
 	// Ollama 的 Responses 兼容端点目前不支持 previous_response_id，
@@ -213,8 +221,9 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 	newMessages := []agent.Message{coreMessages[len(coreMessages)-1]}
 	result, err := runner.Run(ctx, agent.RunRequest{
 		Messages: coreMessages, NewMessages: newMessages, PreviousResponseID: previousID,
-		PromptCacheKey: promptCacheKey(settings),
-		OnTextDelta:    func(delta string) { server.appendTaskPartial(id, delta) },
+		RequiredToolNames: selectedToolNamesForTurn,
+		PromptCacheKey:    promptCacheKey(settings),
+		OnTextDelta:       func(delta string) { server.appendTaskPartial(id, delta) },
 		OnTurnMessages: func(messages []agent.Message) error {
 			values := make([]store.Message, 0, len(messages))
 			for _, message := range messages {

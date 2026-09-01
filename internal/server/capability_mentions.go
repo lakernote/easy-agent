@@ -40,7 +40,7 @@ func selectedSkills(messages []store.Message, catalog *skillCatalog) []prompt.Se
 }
 
 // selectedToolNames 返回 UI 通过 @tool:name 明确选择的工具。它不分析自然语言，
-// 只把用户的显式选择转换成首轮预加载，作用类似 Codex 输入框中的能力选择器。
+// 只把用户的显式选择转换成首轮预加载和首轮工具约束。
 func selectedToolNames(messages []store.Message) []string {
 	matches := capabilityMentionPattern.FindAllStringSubmatch(latestUserMessage(messages), -1)
 	seen := make(map[string]struct{})
@@ -57,6 +57,16 @@ func selectedToolNames(messages []store.Message) []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+func stripToolMentions(text string) string {
+	return strings.TrimSpace(capabilityMentionPattern.ReplaceAllStringFunc(text, func(value string) string {
+		match := capabilityMentionPattern.FindStringSubmatch(value)
+		if len(match) > 1 && strings.EqualFold(match[1], "tool") {
+			return ""
+		}
+		return value
+	}))
 }
 
 // selectedMCPIDs 返回用户通过 @mcp:id 明确选择的小型 MCP。它只做精确选择，

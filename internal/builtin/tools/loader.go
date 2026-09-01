@@ -64,7 +64,7 @@ func (loader *Loader) SetRegister(register func([]agent.Tool) error) {
 }
 
 // Preload 用于 UI 中用户显式选择的 @tool:name。它只按准确名称取工具，不做
-// 语义猜测；普通自然语言任务仍由模型通过 load_tools 自主选择。
+// 语义猜测；是否强制调用由 Runner 的 RequiredToolNames 负责。
 func (loader *Loader) Preload(names []string) []agent.Tool {
 	result := make([]agent.Tool, 0, len(names))
 	for _, name := range names {

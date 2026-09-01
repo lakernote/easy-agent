@@ -32,6 +32,8 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const loadingOlderRef = useRef(false)
   const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const stickToBottomRef = useRef(true)
+  const previousSessionIDRef = useRef<string | undefined>(undefined)
   const capabilitySearchRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentRef = useRef<PendingAttachment[]>([])
@@ -48,8 +50,28 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
     data.runtime.workspace,
     ...data.sessions.map((item) => item.workspace).filter(Boolean),
   ])), [data.runtime.workspace, data.sessions])
-  // 新消息或流式输出才自动到底部；向上翻页 prepend 时不能把用户拽回底部。
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.at(-1)?.id, session?.status, session?.partialOutput])
+  // 只有用户当前就在底部时才跟随新消息/流式输出；用户向上阅读历史时不抢夺滚动位置。
+  useEffect(() => {
+    const node = conversationRef.current
+    if (!node) return
+    const sessionChanged = previousSessionIDRef.current !== session?.id
+    previousSessionIDRef.current = session?.id
+    if (sessionChanged) {
+      node.scrollTo({ top: node.scrollHeight, behavior: 'auto' })
+      stickToBottomRef.current = true
+      return
+    }
+    if (stickToBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [session?.id, session?.messages.at(-1)?.id, session?.status, session?.partialOutput])
+  useEffect(() => {
+    const node = conversationRef.current
+    if (!node) return
+    const updateStickiness = () => {
+      stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 96
+    }
+    node.addEventListener('scroll', updateStickiness, { passive: true })
+    return () => node.removeEventListener('scroll', updateStickiness)
+  }, [])
   useEffect(() => {
     const node = conversationRef.current
     if (!node || !session?.messagesHasMore) return
