@@ -23,7 +23,6 @@ internal/agent/
     └── responses.go         # Responses
 
 internal/builtin/
-├── models/                   # 可替换的免费模型配置模板
 ├── prompt/system.md         # 常规 Agent 的稳定基础 Prompt
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
@@ -53,6 +52,27 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
 页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。消息区域滚动到顶部时，页面通过 `/api/v1/sessions/{id}/history?kind=messages&before=<id>` 按主键游标加载更早的一页并保持滚动位置；Trace 面板提供同样的早期事件加载。运行中的页面每 800ms 轮询也复用这个窗口，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent 运行时继续使用完整历史和上下文压缩逻辑。
+
+### 从输入消息到新 Turn
+
+阅读“在已有 Session 中发送一条消息”时，按下面的调用顺序看源码：
+
+```text
+web/src/App.tsx: Chat.send
+  → web/src/api.ts: sendMessage
+  → internal/server/api.go: continueSession
+  → internal/server/agent.go: queue
+  → AppendMessage(user) + queued → goroutine/并发槽 → MarkRunning
+  → internal/server/agent.go: run
+  → store.Session(完整运行历史) + compactIfNeeded
+  → internal/agent/runner.go: Runner.Run
+  → Model.Generate ↔ Tool.Run 循环
+  → OnTurnMessages → AppendMessages
+  → FinishSession
+  → App.tsx 每 800ms 调用 api.session 刷新页面
+```
+
+没有当前 Session 时，`Chat.send` 改走 `POST /api/v1/sessions` 和 `createSession`；它们从 `queue` 开始共享同一条运行链路。一个 Turn 是用户发送的一次消息及其完整 Agent 运行；其中每次模型决策是一个 Step，同一 Step 因瞬时错误或兼容性降级产生的重试是 Attempt。
 
 Chat Completions 使用标准 SSE 流式读取，可见回答在内存中增量展示，完成后仍保存为一条标准 Assistant 消息。Trace 默认展示 EasyAgent 聚合后的完整响应，并在折叠区保留 Provider 原始 JSON Chunks，Usage 和耗时与本次模型请求一一对应。若兼容 Provider 忽略 `stream=true` 并返回普通 JSON，适配器会自动降级。
 

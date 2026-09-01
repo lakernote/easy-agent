@@ -278,11 +278,6 @@ func (store *Store) CreateSession(id, title, model, workspace string, now time.T
 	return store.Session(id)
 }
 
-func (store *Store) ListSessions(limit int) ([]Session, error) {
-	result, _, err := store.listSessionsPage(limit, "", "")
-	return result, err
-}
-
 // ListSessionsBefore 按更新时间和 ID 游标读取更早的会话，供侧栏无限滚动使用。
 func (store *Store) ListSessionsBefore(limit int, beforeUpdatedAt, beforeID string) ([]Session, bool, error) {
 	return store.listSessionsPage(limit, beforeUpdatedAt, beforeID)
@@ -351,13 +346,6 @@ func (store *Store) SessionWindow(id string, messageLimit, eventLimit int) (Sess
 	return store.sessionWindowBefore(id, messageLimit, eventLimit, 0, 0)
 }
 
-// SessionWindowBefore 返回指定游标之前的窗口；游标是对应集合中最早一条
-// 记录的数据库 ID。首屏传 0，读取最新窗口。消息和事件的 ID 都是单调递增
-// 的 SQLite 主键，因此可以用 ID 做稳定且便宜的 keyset pagination。
-func (store *Store) SessionWindowBefore(id string, messageLimit, eventLimit int, messageBefore, eventBefore int64) (Session, error) {
-	return store.sessionWindowBefore(id, messageLimit, eventLimit, messageBefore, eventBefore)
-}
-
 func (store *Store) sessionWindowBefore(id string, messageLimit, eventLimit int, messageBefore, eventBefore int64) (Session, error) {
 	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
@@ -383,11 +371,6 @@ func (store *Store) sessionWindowBefore(id string, messageLimit, eventLimit int,
 		}
 	}
 	return value, err
-}
-
-func (store *Store) messages(id string) ([]Message, error) {
-	result, _, _, _, _, err := store.messagesWindow(id, 0, 0)
-	return result, err
 }
 
 func (store *Store) messagesWindow(id string, limit int, before int64) ([]Message, int, int, bool, bool, error) {
@@ -469,10 +452,6 @@ func (store *Store) OlderMessages(id string, before int64, limit int) ([]Message
 	return result, count, hasMore, err
 }
 
-func (store *Store) messageAttachments(sessionID string) (map[int64][]Attachment, error) {
-	return store.messageAttachmentsForIDs(sessionID, nil)
-}
-
 func (store *Store) messageAttachmentsForIDs(sessionID string, messageIDs []int64) (map[int64][]Attachment, error) {
 	query := `SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size,a.data
 FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
@@ -513,11 +492,6 @@ func (store *Store) Attachment(id string) (Attachment, error) {
 	err := store.db.QueryRow(`SELECT id,name,mime_type,kind,size,data FROM ea_attachments WHERE id=?`, id).
 		Scan(&value.ID, &value.Name, &value.MIMEType, &value.Kind, &value.Size, &value.Data)
 	return value, err
-}
-
-func (store *Store) events(id string) ([]Event, error) {
-	result, _, _, _, err := store.eventsWindow(id, 0, 0)
-	return result, err
 }
 
 func (store *Store) eventsWindow(id string, limit int, before int64) ([]Event, int, bool, bool, error) {
