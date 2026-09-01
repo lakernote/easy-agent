@@ -14,21 +14,21 @@ import (
 	"strings"
 	"time"
 
-	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtinskills "github.com/lakernote/easy-agent/internal/builtin/skills"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
+	mcppresets "github.com/lakernote/easy-agent/internal/mcp/presets"
 	"github.com/lakernote/easy-agent/internal/mcpclient"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
 type bootstrapPayload struct {
-	Sessions        []store.Session       `json:"sessions"`
+	Sessions        []sessionView         `json:"sessions"`
 	SessionsHasMore bool                  `json:"sessionsHasMore,omitempty"`
 	Model           store.ModelSettings   `json:"model"`
 	Skills          []store.SkillOverride `json:"skills"`
 	BuiltinTools    []builtintools.Info   `json:"builtinTools"`
-	MCPPresets      []builtinmcp.Preset   `json:"mcpPresets"`
+	MCPPresets      []mcppresets.Preset   `json:"mcpPresets"`
 	ModelRules      modelRulesPayload     `json:"modelRules"`
 	MCPs            []store.MCPConfig     `json:"mcps"`
 	SystemPrompt    string                `json:"systemPrompt"`
@@ -67,8 +67,8 @@ type sessionHistoryPage struct {
 }
 
 type sessionListPage struct {
-	Sessions []store.Session `json:"sessions"`
-	HasMore  bool            `json:"hasMore"`
+	Sessions []sessionView `json:"sessions"`
+	HasMore  bool          `json:"hasMore"`
 }
 
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
@@ -77,7 +77,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	model, err := server.store.Model()
+	model, err := server.store.GetModelSettings()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -87,7 +87,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	mcps, err := server.store.MCPs()
+	mcps, err := server.store.ListMCPConfigs()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -102,8 +102,8 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
-		Sessions: sessions, SessionsHasMore: sessionsHasMore, Model: publicModel(model), Skills: catalog.All(),
-		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelRules: modelRules(),
+		Sessions: publicSessions(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), Skills: catalog.All(),
+		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
 	})
@@ -125,7 +125,7 @@ func (server *Server) getOlderSessions(response http.ResponseWriter, request *ht
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(response, http.StatusOK, sessionListPage{Sessions: sessions, HasMore: hasMore})
+	writeJSON(response, http.StatusOK, sessionListPage{Sessions: publicSessions(sessions), HasMore: hasMore})
 }
 
 func modelRules() modelRulesPayload {
@@ -141,7 +141,7 @@ func modelRules() modelRulesPayload {
 }
 
 func (server *Server) getSession(response http.ResponseWriter, request *http.Request) {
-	value, err := server.store.SessionWindow(request.PathValue("id"), apiMessageWindow, apiEventWindow)
+	value, err := server.store.LoadSessionWindow(request.PathValue("id"), apiMessageWindow, apiEventWindow)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(response, http.StatusNotFound, "会话不存在")
 		return
@@ -150,18 +150,18 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	settings, _ := server.store.Model()
+	settings, _ := server.store.GetModelSettings()
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
 	value.PartialOutput = server.taskPartial(value.ID)
-	writeJSON(response, http.StatusOK, value)
+	writeJSON(response, http.StatusOK, publicSession(value))
 }
 
 // getSessionHistory 是页面的 keyset pagination 接口。kind 决定只读取消息或
 // Trace，避免为了滚动其中一类历史而重新查询、传输另一类历史。
 func (server *Server) getSessionHistory(response http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("id")
-	if _, err := server.store.SessionWindow(id, 1, 1); err != nil {
+	if _, err := server.store.LoadSessionWindow(id, 1, 1); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(response, http.StatusNotFound, "会话不存在")
 		} else {
@@ -178,9 +178,9 @@ func (server *Server) getSessionHistory(response http.ResponseWriter, request *h
 	page := sessionHistoryPage{}
 	switch kind {
 	case "messages":
-		page.Messages, page.MessageCount, page.MessagesHasMore, err = server.store.OlderMessages(id, before, apiMessageWindow)
+		page.Messages, page.MessageCount, page.MessagesHasMore, err = server.store.ListMessagesBefore(id, before, apiMessageWindow)
 	case "events":
-		page.Events, page.EventCount, page.EventsHasMore, err = server.store.OlderEvents(id, before, apiEventWindow)
+		page.Events, page.EventCount, page.EventsHasMore, err = server.store.ListEventsBefore(id, before, apiEventWindow)
 	default:
 		writeError(response, http.StatusBadRequest, "历史类型必须是 messages 或 events")
 		return
@@ -221,7 +221,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
-	model, err := server.store.Model()
+	model, err := server.store.GetModelSettings()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -231,15 +231,15 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := server.queue(id, input.Message, attachments, model); err != nil {
+	if err := server.enqueueTurn(id, input.Message, attachments, model); err != nil {
 		_ = server.store.DeleteSession(id)
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
+	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
-	writeJSON(response, http.StatusAccepted, value)
+	writeJSON(response, http.StatusAccepted, publicSession(value))
 }
 
 func (server *Server) continueSession(response http.ResponseWriter, request *http.Request) {
@@ -261,14 +261,14 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		writeError(response, http.StatusBadRequest, "工作区在创建会话时确定；请新建会话后选择其他工作区")
 		return
 	}
-	model, err := server.store.Model()
+	model, err := server.store.GetModelSettings()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	id := request.PathValue("id")
 	// 这里只验证会话存在，避免继续对话前把完整历史加载两次。
-	if _, err := server.store.SessionWindow(id, 1, 1); err != nil {
+	if _, err := server.store.LoadSessionWindow(id, 1, 1); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(response, http.StatusNotFound, "会话不存在")
 		} else {
@@ -276,19 +276,19 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		}
 		return
 	}
-	if err := server.queue(id, input.Message, attachments, model); err != nil {
+	if err := server.enqueueTurn(id, input.Message, attachments, model); err != nil {
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
+	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
-	writeJSON(response, http.StatusAccepted, value)
+	writeJSON(response, http.StatusAccepted, publicSession(value))
 }
 
 func (server *Server) deleteSession(response http.ResponseWriter, request *http.Request) {
 	// 删除前只需要检查状态，不要为了一个状态字段把超长消息和 Trace 全量读入内存。
-	value, err := server.store.SessionWindow(request.PathValue("id"), 1, 1)
+	value, err := server.store.LoadSessionWindow(request.PathValue("id"), 1, 1)
 	if err == nil && (value.Status == "queued" || value.Status == "running") {
 		writeError(response, http.StatusConflict, "Agent 正在运行，暂时不能删除")
 		return
@@ -312,15 +312,15 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 		return
 	}
 	server.cancelTask(id)
-	value, err := server.store.SessionWindow(id, apiMessageWindow, apiEventWindow)
+	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	settings, _ := server.store.Model()
+	settings, _ := server.store.GetModelSettings()
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
-	writeJSON(response, http.StatusOK, value)
+	writeJSON(response, http.StatusOK, publicSession(value))
 }
 
 func (server *Server) saveModel(response http.ResponseWriter, request *http.Request) {
@@ -328,14 +328,14 @@ func (server *Server) saveModel(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	current, _ := server.store.Model()
+	current, _ := server.store.GetModelSettings()
 	input, err := prepareModelInput(input, current)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
 	input.SecretConfigured = false
-	if err := server.store.SaveModel(input); err != nil {
+	if err := server.store.SaveModelSettings(input); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -413,7 +413,7 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 		input.Description = input.Name + " 提供的外部工具"
 	}
 	// 页面不会回传已经保存的密钥，因此必须先恢复旧值，再做认证校验和连接测试。
-	current, _ := server.store.MCPs()
+	current, _ := server.store.ListMCPConfigs()
 	for _, value := range current {
 		if value.ID == input.ID {
 			if input.Token == "" {
@@ -452,7 +452,7 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 	// “已启用”必须代表此刻确实可以连接，避免保存一个看似开启、实际不可用的配置。
 	if input.Enabled {
 		ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
-		connection, err := mcpclient.Connect(ctx, server.env, input)
+		connection, err := mcpclient.Connect(ctx, server.env, mcpClientConfig(input))
 		cancel()
 		if err != nil {
 			writeError(response, http.StatusBadGateway, "MCP 连接测试失败，未启用："+err.Error())
@@ -477,7 +477,7 @@ func (server *Server) deleteMCP(response http.ResponseWriter, request *http.Requ
 }
 
 func (server *Server) testMCP(response http.ResponseWriter, request *http.Request) {
-	configs, err := server.store.MCPs()
+	configs, err := server.store.ListMCPConfigs()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -501,7 +501,7 @@ func (server *Server) testMCP(response http.ResponseWriter, request *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
 	defer cancel()
-	connection, err := mcpclient.Connect(ctx, server.env, *selected)
+	connection, err := mcpclient.Connect(ctx, server.env, mcpClientConfig(*selected))
 	if err != nil {
 		writeError(response, http.StatusBadGateway, err.Error())
 		return
@@ -528,7 +528,7 @@ type mcpPresetCheckResult struct {
 // checkMCPPreset 只读取宿主命令、版本和私有安装目录，不保存 MCP 配置，也不
 // 下载依赖。页面因此可以明确区分“检测环境”和“安装并启用”。
 func (server *Server) checkMCPPreset(response http.ResponseWriter, request *http.Request) {
-	preset, found := builtinmcp.Find(request.PathValue("id"))
+	preset, found := mcppresets.Find(request.PathValue("id"))
 	if !found {
 		writeError(response, http.StatusNotFound, "MCP 预设不存在")
 		return
@@ -556,7 +556,7 @@ func (server *Server) checkMCPPreset(response http.ResponseWriter, request *http
 // installMCPPreset 完成真正的一键流程：检查 Node.js、把固定版本安装到
 // EasyAgent 私有 runtime 目录、连接并读取工具清单，全部成功后才启用。
 func (server *Server) installMCPPreset(response http.ResponseWriter, request *http.Request) {
-	preset, found := builtinmcp.Find(request.PathValue("id"))
+	preset, found := mcppresets.Find(request.PathValue("id"))
 	if !found {
 		writeError(response, http.StatusNotFound, "MCP 预设不存在")
 		return
@@ -586,7 +586,7 @@ func (server *Server) installMCPPreset(response http.ResponseWriter, request *ht
 	candidate.Enabled = true
 	ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
 	defer cancel()
-	connection, err := mcpclient.Connect(ctx, server.env, candidate)
+	connection, err := mcpclient.Connect(ctx, server.env, mcpClientConfig(candidate))
 	if err != nil {
 		// 包已经成功安装时保留一份停用配置，方便用户检查路径、调整参数并重试；
 		// 缺少宿主依赖或安装命令失败时不会提前写入误导性的 MCP 记录。
@@ -608,7 +608,7 @@ func (server *Server) installMCPPreset(response http.ResponseWriter, request *ht
 // uninstallMCPPreset 删除预设安装在 EasyAgent 私有 Runtime 中的包和对应配置。
 // 宿主机 Node/npm、全局包以及工作区文件都不在删除范围内。
 func (server *Server) uninstallMCPPreset(response http.ResponseWriter, request *http.Request) {
-	preset, found := builtinmcp.Find(request.PathValue("id"))
+	preset, found := mcppresets.Find(request.PathValue("id"))
 	if !found {
 		writeError(response, http.StatusNotFound, "MCP 预设不存在")
 		return
@@ -628,7 +628,7 @@ func (server *Server) uninstallMCPPreset(response http.ResponseWriter, request *
 	response.WriteHeader(http.StatusNoContent)
 }
 
-func mcpConfigFromPreset(preset builtinmcp.Preset) store.MCPConfig {
+func mcpConfigFromPreset(preset mcppresets.Preset) store.MCPConfig {
 	return store.MCPConfig{
 		ID: preset.ID, Name: preset.Name, Description: preset.Description, Enabled: false, Transport: preset.Transport,
 		Command: preset.Command, Args: append([]string(nil), preset.Args...), Endpoint: preset.Endpoint, AuthType: preset.AuthType,
@@ -644,7 +644,7 @@ func cloneMap(source map[string]string) map[string]string {
 	return result
 }
 
-func (server *Server) checkMCPPresetRuntime(parent context.Context, preset builtinmcp.Preset) error {
+func (server *Server) checkMCPPresetRuntime(parent context.Context, preset mcppresets.Preset) error {
 	for _, command := range preset.RequiredCommands {
 		if _, err := server.env.ResolveCommand(command); err != nil {
 			return errors.New("服务器 PATH 中找不到 " + command + "；" + preset.Requirement + "。EasyAgent 不执行系统级运行时安装")
@@ -801,7 +801,7 @@ func (server *Server) useOllama(response http.ResponseWriter, request *http.Requ
 	model := store.DefaultModelSettings()
 	model.BaseURL = strings.TrimRight(status.BaseURL, "/") + "/v1"
 	model.Model = input.Model
-	if err := server.store.SaveModel(model); err != nil {
+	if err := server.store.SaveModelSettings(model); err != nil {
 		writeError(response, 500, err.Error())
 		return
 	}

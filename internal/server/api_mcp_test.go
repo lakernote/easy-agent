@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
-	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
+	mcppresets "github.com/lakernote/easy-agent/internal/mcp/presets"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -36,7 +36,7 @@ func TestPublicMCPDoesNotExposeCredentialBearingFields(t *testing.T) {
 }
 
 func TestPresetRuntimeCheckReportsMissingCommand(t *testing.T) {
-	preset := builtinmcp.Preset{Name: "fixture", Requirement: "fixture runtime", RequiredCommands: []string{"easyagent-command-that-does-not-exist"}}
+	preset := mcppresets.Preset{Name: "fixture", Requirement: "fixture runtime", RequiredCommands: []string{"easyagent-command-that-does-not-exist"}}
 	environment, openErr := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
 	if openErr != nil {
 		t.Fatal(openErr)
@@ -87,7 +87,7 @@ func TestUninstallPresetRemovesOnlyPrivatePackageAndConfig(t *testing.T) {
 	if _, err := os.Stat(neighbor); err != nil {
 		t.Fatalf("其他 MCP 包受到影响: %v", err)
 	}
-	values, err := database.MCPs()
+	values, err := database.ListMCPConfigs()
 	if err != nil || len(values) != 0 {
 		t.Fatalf("MCP 配置没有删除: values=%+v err=%v", values, err)
 	}

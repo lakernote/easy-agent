@@ -11,7 +11,6 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
-	"github.com/lakernote/easy-agent/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -29,14 +28,14 @@ func TestLoaderSearchesAndRegistersOnlyMatchingTools(t *testing.T) {
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	defer httpServer.Close()
 
-	loader := NewLoader(testEnvironment(t), []store.MCPConfig{{ID: "demo", Name: "Demo", Enabled: true, Transport: "http", Endpoint: httpServer.URL}})
+	loader := NewLoader(testEnvironment(t), []Config{{ID: "demo", Name: "Demo", Enabled: true, Transport: "http", Endpoint: httpServer.URL}})
 	defer loader.Close()
 	var registered []agent.Tool
 	loader.SetRegister(func(tools []agent.Tool) error {
 		registered = append(registered, tools...)
 		return nil
 	})
-	directLoader := NewLoader(testEnvironment(t), []store.MCPConfig{{ID: "demo", Name: "Demo", Enabled: true, Transport: "http", Endpoint: httpServer.URL}})
+	directLoader := NewLoader(testEnvironment(t), []Config{{ID: "demo", Name: "Demo", Enabled: true, Transport: "http", Endpoint: httpServer.URL}})
 	defer directLoader.Close()
 	direct, err := directLoader.Preload(context.Background(), []string{"demo"})
 	if err != nil || len(direct) != 2 || direct[0].Spec.Name != "mcp__demo__greet" || direct[1].Spec.Name != "mcp__demo__read_issue" {
@@ -88,14 +87,14 @@ func TestConnectRejectsServerWithoutTools(t *testing.T) {
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	defer httpServer.Close()
 
-	_, err := Connect(context.Background(), testEnvironment(t), store.MCPConfig{ID: "empty", Name: "Empty", Enabled: true, Transport: "http", Endpoint: httpServer.URL})
+	_, err := Connect(context.Background(), testEnvironment(t), Config{ID: "empty", Name: "Empty", Enabled: true, Transport: "http", Endpoint: httpServer.URL})
 	if err == nil || !strings.Contains(err.Error(), "没有提供可调用的工具") {
 		t.Fatalf("空 MCP 应被拒绝，实际错误: %v", err)
 	}
 }
 
 func TestServerMetadataUsesPurposeInsteadOfCommand(t *testing.T) {
-	loader := NewLoader(testEnvironment(t), []store.MCPConfig{{
+	loader := NewLoader(testEnvironment(t), []Config{{
 		ID: "private", Name: "Private", Description: "查询内部工单", Enabled: true,
 		Transport: "stdio", Command: "secret-command", Args: []string{"--token", "secret"},
 	}})

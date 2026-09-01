@@ -11,7 +11,6 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
-	"github.com/lakernote/easy-agent/internal/store"
 )
 
 const (
@@ -32,16 +31,16 @@ type ServerInfo struct {
 // Loader 管理一轮 Agent 任务中的 MCP 连接。每轮创建、每轮关闭，不保存跨任务状态。
 // 模型先按任务语义搜索一个 MCP，Loader 再只注册少量匹配工具。
 type Loader struct {
-	configs     map[string]store.MCPConfig
+	configs     map[string]Config
 	connections map[string]*Connection
 	loaded      map[string]map[string]bool
 	environment *appenv.Environment
 	register    func([]agent.Tool) error
 }
 
-func NewLoader(environment *appenv.Environment, configs []store.MCPConfig) *Loader {
+func NewLoader(environment *appenv.Environment, configs []Config) *Loader {
 	loader := &Loader{
-		configs:     make(map[string]store.MCPConfig),
+		configs:     make(map[string]Config),
 		connections: make(map[string]*Connection),
 		loaded:      make(map[string]map[string]bool),
 		environment: environment,
@@ -210,7 +209,7 @@ func (loader *Loader) search(ctx context.Context, raw json.RawMessage) (string, 
 	return searchResult(config, query, matches, len(newTools)), nil
 }
 
-func (loader *Loader) connection(ctx context.Context, id string, config store.MCPConfig) (*Connection, error) {
+func (loader *Loader) connection(ctx context.Context, id string, config Config) (*Connection, error) {
 	if current := loader.connections[id]; current != nil {
 		return current, nil
 	}
@@ -327,7 +326,7 @@ func splitSearchText(value string) []string {
 	})
 }
 
-func searchResult(config store.MCPConfig, query string, matches []agent.Tool, newlyAvailable int) string {
+func searchResult(config Config, query string, matches []agent.Tool, newlyAvailable int) string {
 	tools := make([]ToolInfo, 0, len(matches))
 	for _, tool := range matches {
 		tools = append(tools, ToolInfo{Name: tool.Spec.Name, Description: tool.Spec.Description})
@@ -343,7 +342,7 @@ func searchResult(config store.MCPConfig, query string, matches []agent.Tool, ne
 	return string(data)
 }
 
-func noMatchResult(config store.MCPConfig, query string, tools []ToolInfo) string {
+func noMatchResult(config Config, query string, tools []ToolInfo) string {
 	suggestions := append([]ToolInfo(nil), tools...)
 	sort.Slice(suggestions, func(i, j int) bool { return suggestions[i].Name < suggestions[j].Name })
 	if len(suggestions) > 12 {

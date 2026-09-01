@@ -102,7 +102,7 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 		return false, fmt.Errorf("保存压缩结束 Trace 失败: %w", err)
 	}
 
-	updated, err := server.store.Session(session.ID)
+	updated, err := server.store.RuntimeSession(session.ID)
 	if err != nil {
 		return false, err
 	}

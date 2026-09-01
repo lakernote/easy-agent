@@ -183,7 +183,7 @@ func TestGetSessionUsesBoundedHistoryWindow(t *testing.T) {
 	if !value.MessagesHasMore || !value.EventsHasMore {
 		t.Fatal("最近窗口应标记仍有更早历史")
 	}
-	full, err := database.Session("window")
+	full, err := database.LoadSession("window")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
 	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
@@ -363,7 +363,7 @@ func TestMessageAttachmentsReachModelAndDownloadEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
 	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
@@ -465,7 +465,7 @@ func TestMultiTurnSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
 	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}
@@ -544,7 +544,7 @@ func TestLongSessionCreatesCompactionCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{
+	if err := database.SaveModelSettings(store.ModelSettings{
 		Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture",
 		MaxOutputTokens: 50, ContextWindowTokens: 200, CompressionThresholdPercent: 50,
 	}); err != nil {
@@ -599,7 +599,7 @@ func TestRunningSessionCanBeCanceled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
 	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
@@ -633,7 +633,7 @@ func TestRunningSessionCanBeCanceled(t *testing.T) {
 	for application.hasTask(session.ID) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	stored, _ := database.Session(session.ID)
+	stored, _ := database.LoadSession(session.ID)
 	if stored.Status != "canceled" {
 		t.Fatalf("后台请求结束后不应覆盖 canceled: %+v", stored)
 	}
@@ -653,7 +653,7 @@ func TestFailedModelCallPersistsAttemptAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := database.SaveModel(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: modelServer.URL, Model: "fixture", MaxOutputTokens: 200}); err != nil {
 		t.Fatal(err)
 	}
 	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
@@ -946,7 +946,7 @@ func waitSession(t *testing.T, database *store.Store, id string) store.Session {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		value, err := database.Session(id)
+		value, err := database.LoadSession(id)
 		if err != nil {
 			t.Fatal(err)
 		}

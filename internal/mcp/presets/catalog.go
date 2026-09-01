@@ -2,7 +2,7 @@
 //
 // 预设本身不是另一套工具协议，也不会进入 Agent 核心；用户启用后，MCP 客户端
 // 才连接服务器并把远端能力转换为普通 agent.Tool。
-package mcp
+package presets
 
 type Preset struct {
 	ID               string            `json:"id"`

@@ -18,7 +18,6 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
-	"github.com/lakernote/easy-agent/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -48,7 +47,7 @@ func (connection *Connection) Close() error {
 }
 
 // Connect 连接一个已启用的 MCP 配置并读取它的工具清单。
-func Connect(ctx context.Context, environment *appenv.Environment, config store.MCPConfig) (*Connection, error) {
+func Connect(ctx context.Context, environment *appenv.Environment, config Config) (*Connection, error) {
 	if !config.Enabled {
 		return nil, errors.New("MCP 尚未启用")
 	}
@@ -107,7 +106,7 @@ func Connect(ctx context.Context, environment *appenv.Environment, config store.
 	return connection, nil
 }
 
-func createTransport(environment *appenv.Environment, config store.MCPConfig) (mcp.Transport, error) {
+func createTransport(environment *appenv.Environment, config Config) (mcp.Transport, error) {
 	switch strings.ToLower(strings.TrimSpace(config.Transport)) {
 	case "stdio":
 		if strings.TrimSpace(config.Command) == "" {
@@ -134,7 +133,7 @@ func createTransport(environment *appenv.Environment, config store.MCPConfig) (m
 
 type authTransport struct {
 	base   http.RoundTripper
-	config store.MCPConfig
+	config Config
 }
 
 func (transport authTransport) RoundTrip(request *http.Request) (*http.Response, error) {

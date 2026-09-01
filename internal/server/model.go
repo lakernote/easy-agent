@@ -48,7 +48,7 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	current, _ := server.store.Model()
+	current, _ := server.store.GetModelSettings()
 	settings, err := prepareModelInput(input, current)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())

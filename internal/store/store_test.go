@@ -103,7 +103,7 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	if err := value.AppendEvent("s1", Event{Kind: "llm", Status: "success", InputTokens: 10}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := value.Session("s1")
+	loaded, err := value.LoadSession("s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestSessionWindowBoundsMessagesAndEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	loaded, err := value.SessionWindow("s1", 2, 2)
+	loaded, err := value.LoadSessionWindow("s1", 2, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,13 +152,49 @@ func TestSessionWindowBoundsMessagesAndEvents(t *testing.T) {
 	if loaded.Events[0].Detail != "c" || loaded.Events[1].Detail != "d" {
 		t.Fatalf("Trace 窗口必须保留最近记录且恢复正序: %+v", loaded.Events)
 	}
-	olderMessages, messageCount, messagesHaveMore, err := value.OlderMessages("s1", loaded.Messages[0].ID, 2)
+	olderMessages, messageCount, messagesHaveMore, err := value.ListMessagesBefore("s1", loaded.Messages[0].ID, 2)
 	if err != nil || len(olderMessages) != 1 || messageCount != 3 || messagesHaveMore || olderMessages[0].Content != "第一条" {
 		t.Fatalf("消息游标分页错误: values=%+v count=%d hasMore=%v err=%v", olderMessages, messageCount, messagesHaveMore, err)
 	}
-	olderEvents, eventCount, eventsHaveMore, err := value.OlderEvents("s1", loaded.Events[0].ID, 2)
+	olderEvents, eventCount, eventsHaveMore, err := value.ListEventsBefore("s1", loaded.Events[0].ID, 2)
 	if err != nil || len(olderEvents) != 2 || eventCount != 4 || eventsHaveMore || olderEvents[0].Detail != "a" || olderEvents[1].Detail != "b" {
 		t.Fatalf("Trace 游标分页错误: values=%+v count=%d hasMore=%v err=%v", olderEvents, eventCount, eventsHaveMore, err)
+	}
+}
+
+func TestRuntimeSessionLoadsOnlyMessagesAfterLatestCompaction(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	if _, err := value.CreateSession("runtime", "运行时", "fixture", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.AppendMessages("runtime", []Message{
+		{Role: "user", Content: "旧问题"},
+		{Role: "assistant", Content: "旧答案"},
+		{Role: "user", Content: "当前问题"},
+		{Role: "assistant", Content: "当前答案"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	full, err := value.LoadSession("runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := value.AppendCompaction("runtime", Compaction{Summary: "旧会话摘要", ThroughMessageID: full.Messages[1].ID, SourceMessages: 2, CompactedMessages: 2}); err != nil {
+		t.Fatal(err)
+	}
+	runtimeSession, err := value.RuntimeSession("runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimeSession.Messages) != 2 || runtimeSession.Messages[0].Content != "当前问题" || runtimeSession.Messages[1].Content != "当前答案" {
+		t.Fatalf("运行时应只加载检查点之后的消息: %+v", runtimeSession.Messages)
+	}
+	if runtimeSession.MessageCount != 4 || runtimeSession.UserTurnCount != 2 || len(runtimeSession.Compactions) != 1 || len(runtimeSession.Events) != 0 {
+		t.Fatalf("运行时 Session 统计或 Trace 状态错误: %+v", runtimeSession)
 	}
 }
 
@@ -177,7 +213,7 @@ func TestAppendMessagesCommitsToolStepTogether(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := value.Session("s1")
+	loaded, err := value.LoadSession("s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +236,7 @@ func TestMessageAttachmentsStayInSQLite(t *testing.T) {
 	if err := value.AppendMessage("s1", Message{Role: "user", Content: "分析", Attachments: []Attachment{attachment}}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := value.Session("s1")
+	loaded, err := value.LoadSession("s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +261,7 @@ func TestCompactionSplitTurnRoundTripsInSQLite(t *testing.T) {
 	if err := value.AppendCompaction("s1", Compaction{Summary: "checkpoint", ThroughMessageID: 7, SplitTurn: true, SourceMessages: 3, CompactedMessages: 7}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := value.Session("s1")
+	loaded, err := value.LoadSession("s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +283,7 @@ func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	if err := value.QueueSession("s1", "fixture", now); err != nil {
 		t.Fatal(err)
 	}
-	queued, _ := value.Session("s1")
+	queued, _ := value.LoadSession("s1")
 	if queued.Status != "queued" {
 		t.Fatalf("任务应先进入 queued，实际为 %s", queued.Status)
 	}
@@ -258,14 +294,14 @@ func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("取消运行中任务失败: changed=%v err=%v", changed, err)
 	}
-	canceled, _ := value.Session("s1")
+	canceled, _ := value.LoadSession("s1")
 	if canceled.Status != "canceled" {
 		t.Fatalf("任务应进入 canceled，实际为 %s", canceled.Status)
 	}
 	if err := value.FailSession("s1", context.Canceled, Usage{ModelCalls: 1, ModelDurationMS: 90000}, now); err != nil {
 		t.Fatal(err)
 	}
-	stillCanceled, _ := value.Session("s1")
+	stillCanceled, _ := value.LoadSession("s1")
 	if stillCanceled.Status != "canceled" {
 		t.Fatalf("后台退出不应覆盖用户取消状态: %s", stillCanceled.Status)
 	}

@@ -65,7 +65,7 @@ func (server *Server) prepareRuntimeRequest(
 		return fitRuntimeOutputBudget(request, settings), microChanged, nil
 	}
 
-	session, err := server.store.Session(id)
+	session, err := server.store.RuntimeSession(id)
 	if err != nil {
 		return request, microChanged, err
 	}

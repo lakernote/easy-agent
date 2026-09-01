@@ -27,7 +27,9 @@ internal/builtin/
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
 ├── tools/                   # 文件、网页、时间、天气、计算、Shell 和 Skill 加载
-└── mcp/                     # 页面一键安装预设
+
+internal/mcp/
+└── presets/                 # 页面一键安装预设
 
 internal/mcpclient/          # 把远端 MCP Tool 转为 agent.Tool
 internal/server/             # 配置、会话、API 和运行时组装
@@ -51,7 +53,7 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
-页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。消息区域滚动到顶部时，页面通过 `/api/v1/sessions/{id}/history?kind=messages&before=<id>` 按主键游标加载更早的一页并保持滚动位置；Trace 面板提供同样的早期事件加载。运行中的页面每 800ms 轮询也复用这个窗口，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent 运行时继续使用完整历史和上下文压缩逻辑。
+页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。消息区域滚动到顶部时，页面通过 `/api/v1/sessions/{id}/history?kind=messages&before=<id>` 按主键游标加载更早的一页并保持滚动位置；Trace 面板提供同样的早期事件加载。运行中的页面每 800ms 轮询也复用这个窗口，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent Runtime 只读取最新检查点之后的活跃消息，未压缩历史通过检查点摘要参与上下文。
 
 ### 从输入消息到新 Turn
 
@@ -64,7 +66,7 @@ web/src/App.tsx: Chat.send
   → internal/server/agent.go: queue
   → AppendMessage(user) + queued → goroutine/并发槽 → MarkRunning
   → internal/server/agent.go: run
-  → store.Session(完整运行历史) + compactIfNeeded
+  → store.RuntimeSession(检查点 + 活跃消息) + compactIfNeeded
   → internal/agent/runner.go: Runner.Run
   → Model.Generate ↔ Tool.Run 循环
   → OnTurnMessages → AppendMessages
@@ -83,7 +85,7 @@ OpenRouter 等兼容网关可能在 Tool Call 旁返回 `reasoning` 或 `reasoni
 达到配置阈值（默认窗口的 75%）后，Server 会在普通 Agent 循环前调用同一个模型生成结构化检查点：
 
 ```text
-完整 SQLite 历史
+检查点 + 检查点之后的活跃消息
      ↓ 达到阈值
 较早完整轮次 ──→ compaction.md ──→ 结构化摘要
                                       + 最近的完整原始轮次
@@ -132,7 +134,7 @@ mcp__<server_id>__<remote_tool_name>
 
 整轮 Agent 不设置隐藏的固定总超时：每次模型请求使用页面配置的超时，每次 Tool 自己声明超时，Runner 还有最大循环步数，用户也能主动停止。这样长任务不会被一个与页面配置无关的总计时器提前杀掉。
 
-模型默认值和校验范围集中在 `internal/store/model.go`。页面只提供通用的 Chat Completions / Responses 配置表单，不内置容易过期的厂商、模型或免费额度清单。切换 Provider 或 Base URL 时不会继承旧服务的 API Key。
+模型默认值和校验范围集中在 `internal/store/settings.go`；持久化实体集中在 `internal/store/entities.go`。页面只提供通用的 Chat Completions / Responses 配置表单，不内置容易过期的厂商、模型或免费额度清单。切换 Provider 或 Base URL 时不会继承旧服务的 API Key。
 
 页面的“测试当前模型”会执行一次无副作用的两阶段诊断：要求模型返回原生 `tool_calls`，回传固定工具结果，再确认模型能读取结果并生成最终文本。把工具调用 JSON 写在普通回答里的模型会被明确判定为不适合，而不会显示成“连接成功”。
 

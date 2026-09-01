@@ -21,7 +21,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
-func (server *Server) queue(id, userMessage string, attachments []store.Attachment, model store.ModelSettings) error {
+func (server *Server) enqueueTurn(id, userMessage string, attachments []store.Attachment, model store.ModelSettings) error {
 	if server.hasTask(id) {
 		return errors.New("上一条任务正在结束，请稍后再发送")
 	}
@@ -56,7 +56,7 @@ func (server *Server) queue(id, userMessage string, attachments []store.Attachme
 		// 不再给整轮 Agent 叠加一个固定总超时。每次模型请求和工具调用都有
 		// 自己的超时，循环也有最大步数；用户还可以随时点击“停止”。固定总
 		// 超时会让合法的多步任务在最后阶段被无故中断。
-		if err := server.run(taskContext, id, model, &usage); err != nil {
+		if err := server.runAgentTurn(taskContext, id, model, &usage); err != nil {
 			_ = server.store.FailSession(id, err, usage, time.Now())
 		}
 	}()
@@ -113,9 +113,9 @@ func (server *Server) hasTask(id string) bool {
 	return exists
 }
 
-func (server *Server) run(ctx context.Context, id string, settings store.ModelSettings, usage *store.Usage) error {
+func (server *Server) runAgentTurn(ctx context.Context, id string, settings store.ModelSettings, usage *store.Usage) error {
 	settings = enrichOllamaContextWindow(ctx, settings)
-	session, err := server.store.Session(id)
+	session, err := server.store.RuntimeSession(id)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return fmt.Errorf("打开会话工作区: %w", err)
 	}
-	turn := userTurnCount(session.Messages)
+	turn := session.UserTurnCount
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
 		return err
@@ -146,11 +146,11 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	activeTools := toolLoader.PreloadCore()
 	activeTools = append(activeTools, toolLoader.Tool())
 	activeTools = append(activeTools, toolLoader.Preload(selectedToolNames(session.Messages))...)
-	mcps, err := server.store.MCPs()
+	mcps, err := server.store.ListMCPConfigs()
 	if err != nil {
 		return err
 	}
-	mcpLoader := mcpclient.NewLoader(runEnvironment, mcps)
+	mcpLoader := mcpclient.NewLoader(runEnvironment, mcpClientConfigs(mcps))
 	defer mcpLoader.Close()
 	selectedMCPTools, err := mcpLoader.Preload(ctx, selectedMCPIDs(session.Messages))
 	if err != nil {
@@ -200,7 +200,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 			traceErr = err
 		}
 	}
-	runner.Observe = server.observer(id, turn, usage, recordTraceError)
+	runner.Observe = server.newTraceObserver(id, turn, usage, recordTraceError)
 
 	coreMessages := coreMessagesForSession(session, systemPrompt)
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
@@ -320,7 +320,7 @@ func promptCacheKey(settings store.ModelSettings) string {
 	return ""
 }
 
-func (server *Server) observer(id string, turn int, usage *store.Usage, onTraceError func(error)) agent.Observer {
+func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, onTraceError func(error)) agent.Observer {
 	return func(event agent.Event) {
 		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
 		if event.ToolCall != nil {

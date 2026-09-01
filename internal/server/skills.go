@@ -19,7 +19,7 @@ func loadSkillCatalog(database *store.Store) (*skillCatalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	overrides, err := database.SkillOverrides()
+	overrides, err := database.ListSkillOverrides()
 	if err != nil {
 		return nil, err
 	}

@@ -178,14 +178,14 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 		return err
 	}
 	if count == 0 {
-		return store.SaveModel(DefaultModelSettings())
+		return store.SaveModelSettings(DefaultModelSettings())
 	}
 	return nil
 }
 
 func encode(value any) ([]byte, error) { return json.Marshal(value) }
 
-func (store *Store) Model() (ModelSettings, error) {
+func (store *Store) GetModelSettings() (ModelSettings, error) {
 	var data []byte
 	if err := store.db.QueryRow(`SELECT value_json FROM ea_settings WHERE key='model'`).Scan(&data); err != nil {
 		return ModelSettings{}, err
@@ -197,7 +197,7 @@ func (store *Store) Model() (ModelSettings, error) {
 	return result.WithDefaults(), nil
 }
 
-func (store *Store) SaveModel(value ModelSettings) error {
+func (store *Store) SaveModelSettings(value ModelSettings) error {
 	data, err := encode(value)
 	if err != nil {
 		return err
@@ -206,7 +206,7 @@ func (store *Store) SaveModel(value ModelSettings) error {
 	return err
 }
 
-func (store *Store) SkillOverrides() ([]SkillOverride, error) {
+func (store *Store) ListSkillOverrides() ([]SkillOverride, error) {
 	rows, err := store.db.Query(`SELECT name,description,content,enabled,builtin FROM ea_skills ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (store *Store) DeleteSkill(name string) error {
 	return err
 }
 
-func (store *Store) MCPs() ([]MCPConfig, error) {
+func (store *Store) ListMCPConfigs() ([]MCPConfig, error) {
 	rows, err := store.db.Query(`SELECT config_json FROM ea_mcp ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -275,7 +275,7 @@ func (store *Store) CreateSession(id, title, model, workspace string, now time.T
 	if err != nil {
 		return Session{}, err
 	}
-	return store.Session(id)
+	return store.LoadSession(id)
 }
 
 // ListSessionsBefore 按更新时间和 ID 游标读取更早的会话，供侧栏无限滚动使用。
@@ -336,13 +336,13 @@ func scanSession(row rowScanner) (Session, error) {
 	return value, nil
 }
 
-func (store *Store) Session(id string) (Session, error) {
+func (store *Store) LoadSession(id string) (Session, error) {
 	return store.sessionWindowBefore(id, 0, 0, 0, 0)
 }
 
-// SessionWindow 返回供页面使用的有界会话窗口。运行时仍使用 Session 获取完整
-// 历史；HTTP 页面和轮询不应随着单个会话增长而反复传输全部消息与 Trace。
-func (store *Store) SessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
+// LoadSessionWindow 返回供页面使用的有界会话窗口。Agent Runtime 使用 RuntimeSession
+// 读取检查点之后的活跃消息；HTTP 页面和轮询不应随着单个会话增长而反复传输全部历史。
+func (store *Store) LoadSessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
 	return store.sessionWindowBefore(id, messageLimit, eventLimit, 0, 0)
 }
 
@@ -446,8 +446,8 @@ func (store *Store) messagesWindow(id string, limit int, before int64) ([]Messag
 	return result, count, userTurns, truncated, hasMore, nil
 }
 
-// OlderMessages 读取指定消息之前的一页，不会加载会话的其他历史。
-func (store *Store) OlderMessages(id string, before int64, limit int) ([]Message, int, bool, error) {
+// ListMessagesBefore 读取指定消息之前的一页，不会加载会话的其他历史。
+func (store *Store) ListMessagesBefore(id string, before int64, limit int) ([]Message, int, bool, error) {
 	result, count, _, _, hasMore, err := store.messagesWindow(id, limit, before)
 	return result, count, hasMore, err
 }
@@ -550,8 +550,8 @@ func (store *Store) eventsWindow(id string, limit int, before int64) ([]Event, i
 	return result, count, truncated, hasMore, nil
 }
 
-// OlderEvents 读取指定 Trace 事件之前的一页，不会加载会话的其他历史。
-func (store *Store) OlderEvents(id string, before int64, limit int) ([]Event, int, bool, error) {
+// ListEventsBefore 读取指定 Trace 事件之前的一页，不会加载会话的其他历史。
+func (store *Store) ListEventsBefore(id string, before int64, limit int) ([]Event, int, bool, error) {
 	result, count, _, hasMore, err := store.eventsWindow(id, limit, before)
 	return result, count, hasMore, err
 }
