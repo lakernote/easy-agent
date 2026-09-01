@@ -37,6 +37,22 @@ func TestCurrentTimeIncludesOffset(t *testing.T) {
 	}
 }
 
+func TestBuildWeatherForecast(t *testing.T) {
+	forecast := buildWeatherForecast(weatherDaily{
+		Time:                 []string{"2026-09-01", "2026-09-02"},
+		WeatherCode:          []int{1, 61},
+		TemperatureMax:       []float64{31.5, 28},
+		TemperatureMin:       []float64{24, 22.5},
+		PrecipitationProbMax: []int{10, 70},
+	})
+	if len(forecast) != 2 || forecast[1]["condition"] != "雨" || forecast[1]["precipitation_probability_percent"] != 70 {
+		t.Fatalf("天气预报结构错误: %+v", forecast)
+	}
+	if got := buildWeatherForecast(weatherDaily{Time: []string{"2026-09-01"}, WeatherCode: []int{0}}); len(got) != 0 {
+		t.Fatalf("缺少温度字段时不应生成不完整预报: %+v", got)
+	}
+}
+
 func TestCalculate(t *testing.T) {
 	tool := calculateTool()
 	output, err := tool.Run(context.Background(), json.RawMessage(`{"expression":"pow(2, 10) + sqrt(81)"}`))

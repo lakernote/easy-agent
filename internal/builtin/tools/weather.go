@@ -19,7 +19,7 @@ const maxHTTPResult = 512 * 1024
 func weatherTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name: "weather", Description: "查询指定城市的实时天气，数据来自 Open-Meteo。",
+			Name: "weather", Description: "查询指定城市的当前天气和未来 4 天预报，数据来自 Open-Meteo。",
 			Parameters: objectSchema(map[string]any{"location": stringSchema("城市或地区，例如 上海、北京、Shenzhen")}, []string{"location"}),
 		},
 		Run: func(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -53,7 +53,14 @@ func queryWeather(ctx context.Context, location string) (string, error) {
 		return "", fmt.Errorf("没有找到地点 %q", location)
 	}
 	place := geo.Results[0]
-	endpoint := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto", place.Latitude, place.Longitude)
+	endpoint := "https://api.open-meteo.com/v1/forecast?" + url.Values{
+		"latitude":      {fmt.Sprintf("%f", place.Latitude)},
+		"longitude":     {fmt.Sprintf("%f", place.Longitude)},
+		"current":       {"temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m"},
+		"daily":         {"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"},
+		"forecast_days": {"4"},
+		"timezone":      {"auto"},
+	}.Encode()
 	var forecast struct {
 		Timezone string `json:"timezone"`
 		Current  struct {
@@ -64,6 +71,7 @@ func queryWeather(ctx context.Context, location string) (string, error) {
 			WeatherCode int     `json:"weather_code"`
 			Wind        float64 `json:"wind_speed_10m"`
 		} `json:"current"`
+		Daily weatherDaily `json:"daily"`
 	}
 	if err := getJSON(ctx, client, endpoint, &forecast); err != nil {
 		return "", fmt.Errorf("查询天气失败: %w", err)
@@ -73,9 +81,45 @@ func queryWeather(ctx context.Context, location string) (string, error) {
 		"observed_at": forecast.Current.Time, "timezone": forecast.Timezone, "condition": weatherText(forecast.Current.WeatherCode),
 		"temperature_c": forecast.Current.Temperature, "feels_like_c": forecast.Current.Apparent,
 		"humidity_percent": forecast.Current.Humidity, "wind_kmh": forecast.Current.Wind, "source": "Open-Meteo",
+		"forecast": buildWeatherForecast(forecast.Daily),
 	}
 	data, _ := json.MarshalIndent(value, "", "  ")
 	return string(data), nil
+}
+
+type weatherDaily struct {
+	Time                 []string  `json:"time"`
+	WeatherCode          []int     `json:"weather_code"`
+	TemperatureMax       []float64 `json:"temperature_2m_max"`
+	TemperatureMin       []float64 `json:"temperature_2m_min"`
+	PrecipitationProbMax []int     `json:"precipitation_probability_max"`
+}
+
+func buildWeatherForecast(daily weatherDaily) []map[string]any {
+	count := len(daily.Time)
+	if len(daily.WeatherCode) < count {
+		count = len(daily.WeatherCode)
+	}
+	if len(daily.TemperatureMax) < count {
+		count = len(daily.TemperatureMax)
+	}
+	if len(daily.TemperatureMin) < count {
+		count = len(daily.TemperatureMin)
+	}
+	forecast := make([]map[string]any, 0, count)
+	for index := 0; index < count; index++ {
+		day := map[string]any{
+			"date":       daily.Time[index],
+			"condition":  weatherText(daily.WeatherCode[index]),
+			"temp_max_c": daily.TemperatureMax[index],
+			"temp_min_c": daily.TemperatureMin[index],
+		}
+		if index < len(daily.PrecipitationProbMax) {
+			day["precipitation_probability_percent"] = daily.PrecipitationProbMax[index]
+		}
+		forecast = append(forecast, day)
+	}
+	return forecast
 }
 
 func getJSON(ctx context.Context, client *http.Client, endpoint string, target any) error {

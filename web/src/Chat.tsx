@@ -54,6 +54,11 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   useEffect(() => {
     const node = conversationRef.current
     if (!node) return
+    if (!session) {
+      node.scrollTo({ top: 0, behavior: 'auto' })
+      stickToBottomRef.current = false
+      return
+    }
     const sessionChanged = previousSessionIDRef.current !== session?.id
     previousSessionIDRef.current = session?.id
     if (sessionChanged) {
@@ -244,6 +249,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   }
   return <section className="chat-page">
     <div ref={conversationRef} className="conversation">
+      <div className="conversation-content">
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">一个核心 Agent · 能力按需加载</p><h1>想解决什么问题？</h1><p>直接描述目标，也可以添加代码、日志、图片或 PDF；输入 <code>@</code> 可明确指定 Tool、Skill 或 MCP。</p><div className="suggestion-heading"><strong>从一个场景开始</strong><span>点击即可运行；文件场景会先请你选择附件</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
@@ -258,6 +264,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       }} onOpenCapabilities={onOpenCapabilities} />}
       {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
       <div ref={endRef} />
+      </div>
     </div>
     <div className="composer-wrap"><div ref={composerRef} className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
       {capabilityOpen && <CapabilityPicker items={visibleCapabilities} activeIndex={capabilityIndex} query={capabilityQuery} searchRef={capabilitySearchRef} onQuery={setCapabilityQuery} onKeyDown={handleCapabilityKey} onPick={insertCapability} onOpenSkills={onOpenSkills} onOpenCapabilities={onOpenCapabilities} />}
