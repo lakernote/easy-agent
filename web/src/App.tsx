@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
-import type { AttachmentInput, Bootstrap, MCPConfig, ModelSettings, Session, Skill, TraceEvent } from './types'
+import type { AttachmentInput, Bootstrap, MCPConfig, ModelSettings, Session, SessionHistoryPage, Skill, TraceEvent } from './types'
 
 type Page = 'chat' | 'skills' | 'capabilities'
 type CapabilityKind = 'skill' | 'tool' | 'mcp'
@@ -37,6 +37,31 @@ const isActive = (status?: Session['status']) => status === 'queued' || status =
 const MathMarkdown = lazy(() => import('./MathMarkdown'))
 const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
 
+function mergeSessionHistory(current: Session, page: SessionHistoryPage, kind: 'messages' | 'events'): Session {
+  if (kind === 'messages') {
+    const messages = Array.from(new Map([...page.messages || [], ...current.messages].map((item) => [item.id, item])).values()).sort((left, right) => left.id - right.id)
+    const messageCount = page.messageCount ?? current.messageCount
+    return { ...current, messages, messageCount, messagesTruncated: messageCount !== undefined && messages.length < messageCount, messagesHasMore: page.messagesHasMore }
+  }
+  const events = Array.from(new Map([...page.events || [], ...current.events].map((item) => [item.id, item])).values()).sort((left, right) => left.id - right.id)
+  const eventCount = page.eventCount ?? current.eventCount
+  return { ...current, events, eventCount, eventsTruncated: eventCount !== undefined && events.length < eventCount, eventsHasMore: page.eventsHasMore }
+}
+
+function mergeSessionSnapshot(current: Session, next: Session): Session {
+  const messages = Array.from(new Map([...current.messages, ...next.messages].map((item) => [item.id, item])).values()).sort((left, right) => left.id - right.id)
+  const events = Array.from(new Map([...current.events, ...next.events].map((item) => [item.id, item])).values()).sort((left, right) => left.id - right.id)
+  return {
+    ...next,
+    messages,
+    events,
+    messagesTruncated: next.messageCount !== undefined && messages.length < next.messageCount,
+    eventsTruncated: next.eventCount !== undefined && events.length < next.eventCount,
+    messagesHasMore: next.messageCount !== undefined && messages.length < next.messageCount,
+    eventsHasMore: next.eventCount !== undefined && events.length < next.eventCount,
+  }
+}
+
 function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
   const [session, setSession] = useState<Session | null>(null)
@@ -61,12 +86,17 @@ function App() {
     try { setSession(await api.session(id)) } catch (reason) { setError((reason as Error).message) }
   }, [])
 
+  const loadSessionHistory = useCallback(async (id: string, kind: 'messages' | 'events', before: number) => {
+    const page = await api.sessionHistory(id, kind, before)
+    setSession((current) => current?.id === id ? mergeSessionHistory(current, page, kind) : current)
+  }, [])
+
   useEffect(() => {
     if (!session || !isActive(session.status)) return
     const timer = window.setInterval(async () => {
       try {
         const current = await api.session(session.id)
-        setSession(current)
+        setSession((previous) => previous?.id === current.id ? mergeSessionSnapshot(previous, current) : current)
         if (!isActive(current.status)) await refresh()
       } catch (reason) { setError((reason as Error).message) }
     }, 800)
@@ -77,7 +107,8 @@ function App() {
   const stopSession = async () => {
     if (!session || !isActive(session.status)) return
     try {
-      setSession(await api.cancelSession(session.id))
+      const next = await api.cancelSession(session.id)
+      setSession((previous) => previous?.id === next.id ? mergeSessionSnapshot(previous, next) : next)
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
   }
@@ -98,11 +129,11 @@ function App() {
         <div className="topbar-actions"><span className={`model-dot ${modelReady ? 'ready' : ''}`} /><span className="model-name">{modelLabel}</span>{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('capabilities')} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('capabilities')} />}
       {page === 'skills' && <Skills data={data} onRefresh={refresh} onError={setError} />}
       {page === 'capabilities' && <Capabilities data={data} onRefresh={refresh} onError={setError} />}
     </main>
-    {traceOpen && session && <TracePanel session={session} onClose={() => setTraceOpen(false)} />}
+    {traceOpen && session && <TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} />}
   </div>
 }
 
@@ -209,7 +240,7 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
   </aside>
 }
 
-function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
+function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -221,6 +252,8 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
   const [workspace, setWorkspace] = useState(session?.workspace || data.runtime.workspace)
   const endRef = useRef<HTMLDivElement>(null)
+  const conversationRef = useRef<HTMLDivElement>(null)
+  const loadingOlderRef = useRef(false)
   const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const capabilitySearchRef = useRef<HTMLInputElement>(null)
@@ -239,7 +272,30 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
     data.runtime.workspace,
     ...data.sessions.map((item) => item.workspace).filter(Boolean),
   ])), [data.runtime.workspace, data.sessions])
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.length, session?.status, session?.partialOutput])
+  // 新消息或流式输出才自动到底部；向上翻页 prepend 时不能把用户拽回底部。
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.messages.at(-1)?.id, session?.status, session?.partialOutput])
+  useEffect(() => {
+    const node = conversationRef.current
+    if (!node || !session?.messagesHasMore) return
+    const loadOlder = async () => {
+      if (loadingOlderRef.current || node.scrollTop > 120) return
+      const first = session.messages[0]
+      if (!first) return
+      loadingOlderRef.current = true
+      const previousHeight = node.scrollHeight
+      const previousTop = node.scrollTop
+      try {
+        await onLoadOlder(session.id, 'messages', first.id)
+        window.requestAnimationFrame(() => { node.scrollTop = node.scrollHeight - previousHeight + previousTop })
+      } catch (reason) {
+        onError((reason as Error).message)
+      } finally {
+        loadingOlderRef.current = false
+      }
+    }
+    node.addEventListener('scroll', loadOlder)
+    return () => node.removeEventListener('scroll', loadOlder)
+  }, [session?.id, session?.messagesHasMore, session?.messages.length, onLoadOlder, onError])
   useEffect(() => {
     if (!textareaRef.current) return
     textareaRef.current.style.height = 'auto'
@@ -371,7 +427,7 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
       const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim())
-      onSession(next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
+      onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
       if (/附件|Base64|MiB|格式/.test(message)) setAttachmentError(message)
@@ -389,10 +445,10 @@ function Chat({ session, data, onSession, onRefresh, onError, onOpenSkills, onOp
     send(suggestion.prompt)
   }
   return <section className="chat-page">
-    <div className="conversation">
+    <div ref={conversationRef} className="conversation">
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">一个核心 Agent · 能力按需加载</p><h1>想解决什么问题？</h1><p>直接描述目标，也可以添加代码、日志、图片或 PDF；输入 <code>@</code> 可明确指定 Tool、Skill 或 MCP。</p><div className="suggestion-heading"><strong>从一个场景开始</strong><span>点击即可运行；文件场景会先请你选择附件</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
-      {session?.messagesTruncated && <div className="history-window-note">当前只显示最近 200 条消息；更早原始记录仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
+      {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
       {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued"><i /><i /><i /><span>任务正在排队，等待本地执行槽…</span></div></div>}
       {session?.status === 'running' && (session.partialOutput
@@ -508,10 +564,18 @@ function ContextDatum({ label, value, hint }: { label: string; value: string; hi
   return <div><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>
 }
 
-function TracePanel({ session, onClose }: { session: Session; onClose: () => void }) {
+function TracePanel({ session, onLoadOlder, onError, onClose }: { session: Session; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onError: (value: string) => void; onClose: () => void }) {
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const cacheRate = session.usage.cacheReported && session.usage.cacheInputTokens ? Math.round(session.usage.cachedTokens / session.usage.cacheInputTokens * 100) : 0
   const context = session.context
-  return <aside className="trace-panel"><div className="trace-head"><div><p className="eyebrow">AUDITABLE RUNTIME</p><h2>Agent Trace</h2></div><button aria-label="关闭 Agent Trace" onClick={onClose}>×</button></div><div className="metrics"><Metric label="LLM" value={`${session.usage.modelCalls} 次`} sub={formatDuration(session.usage.modelDurationMs)} /><Metric label="工具" value={`${session.usage.toolCalls} 次`} sub={formatDuration(session.usage.toolDurationMs)} /><Metric label="Token" value={session.usage.totalTokens.toLocaleString()} sub={`入 ${session.usage.inputTokens} · 出 ${session.usage.outputTokens}`} /><Metric label="Prompt Cache" value={session.usage.cacheReported ? `${cacheRate}%` : '未上报'} sub={session.usage.cacheReported ? `命中 ${session.usage.cachedTokens} · 写入 ${session.usage.cacheWriteTokens}` : 'Provider 未返回缓存字段'} /></div><div className="context-ledger"><div><span>最近上下文</span><strong>{context.lastInputTokens ? formatTokens(context.lastInputTokens) : session.status === 'failed' ? '未上报' : '—'}{context.contextWindowTokens ? ` / ${formatTokens(context.contextWindowTokens)}` : ''}</strong></div><div><span>会话历史</span><strong>{context.userTurns} 个用户轮次 · {context.historyMessages} 条消息{session.messagesTruncated ? ' · 已显示最近 200 条' : ''}</strong></div><div><span>发送方式</span><strong>{historyModeLabel(context.historyMode)}</strong></div><div><span>压缩</span><strong>{context.compressionCount > 0 ? `${context.compressionCount} 次 · ${context.compressedMessages} 条` : context.compressionMode === 'auto' ? `自动 ${context.compressionThresholdPercent}%` : '已停用'}</strong></div></div>{session.eventsTruncated && <div className="trace-empty">Trace 较多，仅显示最近 300 条</div>}<div className="trace-events">{session.events.length === 0 && <div className="trace-empty">还没有 Trace</div>}{session.events.map((event) => <TraceRow key={event.id} event={event} />)}</div></aside>
+  const loadOlder = async () => {
+    const first = session.events[0]
+    if (!first || loadingOlder) return
+    setLoadingOlder(true)
+    try { await onLoadOlder(session.id, 'events', first.id) } catch (reason) { onError((reason as Error).message) }
+    finally { setLoadingOlder(false) }
+  }
+  return <aside className="trace-panel"><div className="trace-head"><div><p className="eyebrow">AUDITABLE RUNTIME</p><h2>Agent Trace</h2></div><button aria-label="关闭 Agent Trace" onClick={onClose}>×</button></div><div className="metrics"><Metric label="LLM" value={`${session.usage.modelCalls} 次`} sub={formatDuration(session.usage.modelDurationMs)} /><Metric label="工具" value={`${session.usage.toolCalls} 次`} sub={formatDuration(session.usage.toolDurationMs)} /><Metric label="Token" value={session.usage.totalTokens.toLocaleString()} sub={`入 ${session.usage.inputTokens} · 出 ${session.usage.outputTokens}`} /><Metric label="Prompt Cache" value={session.usage.cacheReported ? `${cacheRate}%` : '未上报'} sub={session.usage.cacheReported ? `命中 ${session.usage.cachedTokens} · 写入 ${session.usage.cacheWriteTokens}` : 'Provider 未返回缓存字段'} /></div><div className="context-ledger"><div><span>最近上下文</span><strong>{context.lastInputTokens ? formatTokens(context.lastInputTokens) : session.status === 'failed' ? '未上报' : '—'}{context.contextWindowTokens ? ` / ${formatTokens(context.contextWindowTokens)}` : ''}</strong></div><div><span>会话历史</span><strong>{context.userTurns} 个用户轮次 · {context.historyMessages} 条消息{session.messagesTruncated ? ' · 历史窗口' : ''}</strong></div><div><span>发送方式</span><strong>{historyModeLabel(context.historyMode)}</strong></div><div><span>压缩</span><strong>{context.compressionCount > 0 ? `${context.compressionCount} 次 · ${context.compressedMessages} 条` : context.compressionMode === 'auto' ? `自动 ${context.compressionThresholdPercent}%` : '已停用'}</strong></div></div>{session.eventsTruncated && <div className="trace-empty">Trace 较多；点击下方按钮加载更早记录</div>}{session.eventsHasMore && session.events.length > 0 && <button className="history-load-more" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? '加载中…' : '加载更早 Trace'}</button>}<div className="trace-events">{session.events.length === 0 && <div className="trace-empty">还没有 Trace</div>}{session.events.map((event) => <TraceRow key={event.id} event={event} />)}</div></aside>
 }
 
 function TraceRow({ event }: { event: TraceEvent }) {

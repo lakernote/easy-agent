@@ -180,6 +180,39 @@ func TestGetSessionUsesBoundedHistoryWindow(t *testing.T) {
 	if len(value.Events) != 300 || value.EventCount != 301 || !value.EventsTruncated || value.Events[0].Detail != "事件 1" || value.Events[299].Detail != "事件 300" {
 		t.Fatalf("会话 Trace 没有按最近窗口返回: count=%d truncated=%v", value.EventCount, value.EventsTruncated)
 	}
+	if !value.MessagesHasMore || !value.EventsHasMore {
+		t.Fatal("最近窗口应标记仍有更早历史")
+	}
+	full, err := database.Session("window")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sessions/window/history?kind=messages&before=%d", full.Messages[1].ID), nil)
+	response = httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("消息历史分页接口状态错误: %d %s", response.Code, response.Body.String())
+	}
+	var page sessionHistoryPage
+	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].Content != "消息 0" || page.MessageCount != 201 || page.MessagesHasMore {
+		t.Fatalf("消息历史分页结果错误: %+v", page)
+	}
+	request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sessions/window/history?kind=events&before=%d", full.Events[1].ID), nil)
+	response = httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("Trace 历史分页接口状态错误: %d %s", response.Code, response.Body.String())
+	}
+	page = sessionHistoryPage{}
+	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Detail != "事件 0" || page.EventCount != 301 || page.EventsHasMore {
+		t.Fatalf("Trace 历史分页结果错误: %+v", page)
+	}
 }
 
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {

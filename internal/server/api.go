@@ -56,6 +56,15 @@ const (
 	apiEventWindow   = 300
 )
 
+type sessionHistoryPage struct {
+	Messages        []store.Message `json:"messages,omitempty"`
+	Events          []store.Event   `json:"events,omitempty"`
+	MessageCount    int             `json:"messageCount,omitempty"`
+	EventCount      int             `json:"eventCount,omitempty"`
+	MessagesHasMore bool            `json:"messagesHasMore,omitempty"`
+	EventsHasMore   bool            `json:"eventsHasMore,omitempty"`
+}
+
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
 	sessions, err := server.store.ListSessions(100)
 	if err != nil {
@@ -121,6 +130,41 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 	decorateContext(&value, settings)
 	value.PartialOutput = server.taskPartial(value.ID)
 	writeJSON(response, http.StatusOK, value)
+}
+
+// getSessionHistory 是页面的 keyset pagination 接口。kind 决定只读取消息或
+// Trace，避免为了滚动其中一类历史而重新查询、传输另一类历史。
+func (server *Server) getSessionHistory(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if _, err := server.store.SessionWindow(id, 1, 1); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, "会话不存在")
+		} else {
+			writeError(response, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	kind := request.URL.Query().Get("kind")
+	before, err := strconv.ParseInt(strings.TrimSpace(request.URL.Query().Get("before")), 10, 64)
+	if err != nil || before <= 0 {
+		writeError(response, http.StatusBadRequest, "历史游标必须是正整数")
+		return
+	}
+	page := sessionHistoryPage{}
+	switch kind {
+	case "messages":
+		page.Messages, page.MessageCount, page.MessagesHasMore, err = server.store.OlderMessages(id, before, apiMessageWindow)
+	case "events":
+		page.Events, page.EventCount, page.EventsHasMore, err = server.store.OlderEvents(id, before, apiEventWindow)
+	default:
+		writeError(response, http.StatusBadRequest, "历史类型必须是 messages 或 events")
+		return
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, page)
 }
 
 type messageRequest struct {

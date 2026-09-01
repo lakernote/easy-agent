@@ -74,6 +74,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/v1/health", server.health)
 	server.mux.HandleFunc("GET /api/v1/bootstrap", server.bootstrap)
 	server.mux.HandleFunc("GET /api/v1/sessions/{id}", server.getSession)
+	server.mux.HandleFunc("GET /api/v1/sessions/{id}/history", server.getSessionHistory)
 	server.mux.HandleFunc("GET /api/v1/attachments/{id}", server.getAttachment)
 	server.mux.HandleFunc("POST /api/v1/sessions", server.createSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/messages", server.continueSession)

@@ -233,6 +233,8 @@ type Session struct {
 	UserTurnCount     int         `json:"userTurnCount,omitempty"`
 	MessagesTruncated bool        `json:"messagesTruncated,omitempty"`
 	EventsTruncated   bool        `json:"eventsTruncated,omitempty"`
+	MessagesHasMore   bool        `json:"messagesHasMore,omitempty"`
+	EventsHasMore     bool        `json:"eventsHasMore,omitempty"`
 	Usage             Usage       `json:"usage"`
 	Context           ContextInfo `json:"context"`
 	// PartialOutput 只在模型流式生成期间由内存运行时填充，不写入 SQLite。

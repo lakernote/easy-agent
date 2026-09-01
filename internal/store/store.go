@@ -139,10 +139,12 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
   created_at TEXT NOT NULL,
   UNIQUE(session_id, seq)
 );
-CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
-CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
-CREATE INDEX IF NOT EXISTS idx_ea_events_session ON ea_events(session_id, seq);
+	CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
+	CREATE INDEX IF NOT EXISTS idx_ea_messages_session_id ON ea_messages(session_id, id);
+	CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
+	CREATE INDEX IF NOT EXISTS idx_ea_events_session ON ea_events(session_id, seq);
+	CREATE INDEX IF NOT EXISTS idx_ea_events_session_id ON ea_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_id, seq);
 `
 	_, err := store.db.Exec(schema)
@@ -315,26 +317,33 @@ func scanSession(row rowScanner) (Session, error) {
 }
 
 func (store *Store) Session(id string) (Session, error) {
-	return store.sessionWindow(id, 0, 0)
+	return store.sessionWindowBefore(id, 0, 0, 0, 0)
 }
 
 // SessionWindow 返回供页面使用的有界会话窗口。运行时仍使用 Session 获取完整
 // 历史；HTTP 页面和轮询不应随着单个会话增长而反复传输全部消息与 Trace。
 func (store *Store) SessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
-	return store.sessionWindow(id, messageLimit, eventLimit)
+	return store.sessionWindowBefore(id, messageLimit, eventLimit, 0, 0)
 }
 
-func (store *Store) sessionWindow(id string, messageLimit, eventLimit int) (Session, error) {
+// SessionWindowBefore 返回指定游标之前的窗口；游标是对应集合中最早一条
+// 记录的数据库 ID。首屏传 0，读取最新窗口。消息和事件的 ID 都是单调递增
+// 的 SQLite 主键，因此可以用 ID 做稳定且便宜的 keyset pagination。
+func (store *Store) SessionWindowBefore(id string, messageLimit, eventLimit int, messageBefore, eventBefore int64) (Session, error) {
+	return store.sessionWindowBefore(id, messageLimit, eventLimit, messageBefore, eventBefore)
+}
+
+func (store *Store) sessionWindowBefore(id string, messageLimit, eventLimit int, messageBefore, eventBefore int64) (Session, error) {
 	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
 	if err != nil {
 		return Session{}, err
 	}
-	value.Messages, value.MessageCount, value.UserTurnCount, value.MessagesTruncated, err = store.messagesWindow(id, messageLimit)
+	value.Messages, value.MessageCount, value.UserTurnCount, value.MessagesTruncated, value.MessagesHasMore, err = store.messagesWindow(id, messageLimit, messageBefore)
 	if err != nil {
 		return Session{}, err
 	}
-	value.Events, value.EventCount, value.EventsTruncated, err = store.eventsWindow(id, eventLimit)
+	value.Events, value.EventCount, value.EventsTruncated, value.EventsHasMore, err = store.eventsWindow(id, eventLimit, eventBefore)
 	if err != nil {
 		return Session{}, err
 	}
@@ -352,26 +361,32 @@ func (store *Store) sessionWindow(id string, messageLimit, eventLimit int) (Sess
 }
 
 func (store *Store) messages(id string) ([]Message, error) {
-	result, _, _, _, err := store.messagesWindow(id, 0)
+	result, _, _, _, _, err := store.messagesWindow(id, 0, 0)
 	return result, err
 }
 
-func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, bool, error) {
+func (store *Store) messagesWindow(id string, limit int, before int64) ([]Message, int, int, bool, bool, error) {
 	var count, userTurns int
 	if err := store.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN role='user' THEN 1 ELSE 0 END),0) FROM ea_messages WHERE session_id=?`, id).Scan(&count, &userTurns); err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, 0, false, false, err
 	}
 	query := `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq`
 	args := []any{id}
 	truncated := false
+	hasMore := false
 	if limit > 0 {
-		query = `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq DESC LIMIT ?`
-		args = append(args, limit)
-		truncated = count > limit
+		query = `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=?`
+		if before > 0 {
+			query += ` AND id < ?`
+			args = append(args, before)
+		}
+		query += ` ORDER BY seq DESC LIMIT ?`
+		// 多取一条只用于判断是否还有更早记录，响应仍然严格保持固定窗口大小。
+		args = append(args, limit+1)
 	}
 	rows, err := store.db.Query(query, args...)
 	if err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, 0, false, false, err
 	}
 	defer rows.Close()
 	result := []Message{}
@@ -380,7 +395,7 @@ func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, b
 		var data []byte
 		var created string
 		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &value.ToolCallID, &value.Name, &created); err != nil {
-			return nil, 0, 0, false, err
+			return nil, 0, 0, false, false, err
 		}
 		_ = json.Unmarshal(data, &value.ToolCalls)
 		if value.ToolCalls == nil {
@@ -391,12 +406,17 @@ func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, b
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, 0, false, false, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, 0, false, false, err
 	}
 	if limit > 0 {
+		hasMore = len(result) > limit
+		if hasMore {
+			result = result[:limit]
+		}
+		truncated = count > len(result)
 		for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
 			result[left], result[right] = result[right], result[left]
 		}
@@ -407,7 +427,7 @@ func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, b
 	}
 	attachments, err := store.messageAttachmentsForIDs(id, messageIDs)
 	if err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, 0, false, false, err
 	}
 	for index := range result {
 		result[index].Attachments = attachments[result[index].ID]
@@ -415,7 +435,13 @@ func (store *Store) messagesWindow(id string, limit int) ([]Message, int, int, b
 			result[index].Attachments = []Attachment{}
 		}
 	}
-	return result, count, userTurns, truncated, nil
+	return result, count, userTurns, truncated, hasMore, nil
+}
+
+// OlderMessages 读取指定消息之前的一页，不会加载会话的其他历史。
+func (store *Store) OlderMessages(id string, before int64, limit int) ([]Message, int, bool, error) {
+	result, count, _, _, hasMore, err := store.messagesWindow(id, limit, before)
+	return result, count, hasMore, err
 }
 
 func (store *Store) messageAttachments(sessionID string) (map[int64][]Attachment, error) {
@@ -465,26 +491,31 @@ func (store *Store) Attachment(id string) (Attachment, error) {
 }
 
 func (store *Store) events(id string) ([]Event, error) {
-	result, _, _, err := store.eventsWindow(id, 0)
+	result, _, _, _, err := store.eventsWindow(id, 0, 0)
 	return result, err
 }
 
-func (store *Store) eventsWindow(id string, limit int) ([]Event, int, bool, error) {
+func (store *Store) eventsWindow(id string, limit int, before int64) ([]Event, int, bool, bool, error) {
 	var count int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM ea_events WHERE session_id=?`, id).Scan(&count); err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, false, err
 	}
 	query := `SELECT id,event_json,created_at FROM ea_events WHERE session_id=? ORDER BY seq`
 	args := []any{id}
 	truncated := false
+	hasMore := false
 	if limit > 0 {
-		query = `SELECT id,event_json,created_at FROM ea_events WHERE session_id=? ORDER BY seq DESC LIMIT ?`
-		args = append(args, limit)
-		truncated = count > limit
+		query = `SELECT id,event_json,created_at FROM ea_events WHERE session_id=?`
+		if before > 0 {
+			query += ` AND id < ?`
+			args = append(args, before)
+		}
+		query += ` ORDER BY seq DESC LIMIT ?`
+		args = append(args, limit+1)
 	}
 	rows, err := store.db.Query(query, args...)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, false, err
 	}
 	defer rows.Close()
 	result := []Event{}
@@ -494,10 +525,10 @@ func (store *Store) eventsWindow(id string, limit int) ([]Event, int, bool, erro
 		var data []byte
 		var created string
 		if err := rows.Scan(&databaseID, &data, &created); err != nil {
-			return nil, 0, false, err
+			return nil, 0, false, false, err
 		}
 		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, 0, false, err
+			return nil, 0, false, false, err
 		}
 		// event_json 保存的是事件内容，行 ID 以数据库主键为准。
 		value.ID = databaseID
@@ -505,14 +536,25 @@ func (store *Store) eventsWindow(id string, limit int) ([]Event, int, bool, erro
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, false, err
 	}
 	if limit > 0 {
+		hasMore = len(result) > limit
+		if hasMore {
+			result = result[:limit]
+		}
+		truncated = count > len(result)
 		for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
 			result[left], result[right] = result[right], result[left]
 		}
 	}
-	return result, count, truncated, nil
+	return result, count, truncated, hasMore, nil
+}
+
+// OlderEvents 读取指定 Trace 事件之前的一页，不会加载会话的其他历史。
+func (store *Store) OlderEvents(id string, before int64, limit int) ([]Event, int, bool, error) {
+	result, count, _, hasMore, err := store.eventsWindow(id, limit, before)
+	return result, count, hasMore, err
 }
 
 func (store *Store) AppendMessage(id string, value Message) error {

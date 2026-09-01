@@ -117,17 +117,25 @@ func TestSessionWindowBoundsMessagesAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Messages) != 2 || loaded.MessageCount != 3 || !loaded.MessagesTruncated || loaded.UserTurnCount != 2 {
+	if len(loaded.Messages) != 2 || loaded.MessageCount != 3 || !loaded.MessagesTruncated || !loaded.MessagesHasMore || loaded.UserTurnCount != 2 {
 		t.Fatalf("消息窗口或总数错误: %+v", loaded)
 	}
 	if loaded.Messages[0].Content != "第二条" || loaded.Messages[1].Content != "第三条" {
 		t.Fatalf("消息窗口必须保留最近记录且恢复正序: %+v", loaded.Messages)
 	}
-	if len(loaded.Events) != 2 || loaded.EventCount != 4 || !loaded.EventsTruncated {
+	if len(loaded.Events) != 2 || loaded.EventCount != 4 || !loaded.EventsTruncated || !loaded.EventsHasMore {
 		t.Fatalf("Trace 窗口或总数错误: %+v", loaded)
 	}
 	if loaded.Events[0].Detail != "c" || loaded.Events[1].Detail != "d" {
 		t.Fatalf("Trace 窗口必须保留最近记录且恢复正序: %+v", loaded.Events)
+	}
+	olderMessages, messageCount, messagesHaveMore, err := value.OlderMessages("s1", loaded.Messages[0].ID, 2)
+	if err != nil || len(olderMessages) != 1 || messageCount != 3 || messagesHaveMore || olderMessages[0].Content != "第一条" {
+		t.Fatalf("消息游标分页错误: values=%+v count=%d hasMore=%v err=%v", olderMessages, messageCount, messagesHaveMore, err)
+	}
+	olderEvents, eventCount, eventsHaveMore, err := value.OlderEvents("s1", loaded.Events[0].ID, 2)
+	if err != nil || len(olderEvents) != 2 || eventCount != 4 || eventsHaveMore || olderEvents[0].Detail != "a" || olderEvents[1].Detail != "b" {
+		t.Fatalf("Trace 游标分页错误: values=%+v count=%d hasMore=%v err=%v", olderEvents, eventCount, eventsHaveMore, err)
 	}
 }
 

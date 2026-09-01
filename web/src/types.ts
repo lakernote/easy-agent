@@ -100,9 +100,20 @@ export type Session = {
   userTurnCount?: number
   messagesTruncated?: boolean
   eventsTruncated?: boolean
+  messagesHasMore?: boolean
+  eventsHasMore?: boolean
   usage: Usage
   context: ContextInfo
   partialOutput?: string
+}
+
+export type SessionHistoryPage = {
+  messages?: Message[]
+  events?: TraceEvent[]
+  messageCount?: number
+  eventCount?: number
+  messagesHasMore?: boolean
+  eventsHasMore?: boolean
 }
 
 export type ModelSettings = {
