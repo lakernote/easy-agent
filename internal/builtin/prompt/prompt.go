@@ -50,14 +50,15 @@ type Context struct {
 }
 
 // Render 生成一轮会话使用的 System Prompt。日期、星期和时区是稳定运行时事实；
-// 精确到秒的时间仍由 current_time 工具读取。
+// 精确到秒的时间仍由模型选择信息能力核验。这里不写具体函数名，避免渐进加载时
+// 小模型把尚未加载的工具误认为当前可调用函数。
 func Render(context Context) string {
 	now := context.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 	zone, offset := now.Zone()
-	runtime := fmt.Sprintf("当前日期：%s；星期：%s；时区：%s（UTC%+03d:%02d）。精确当前时间请调用 current_time。",
+	runtime := fmt.Sprintf("当前日期：%s；星期：%s；时区：%s（UTC%+03d:%02d）。需要精确到时分秒时使用信息能力核验。",
 		now.Format("2006-01-02"), weekday(now.Weekday()), zone, offset/3600, abs(offset%3600)/60)
 	if strings.TrimSpace(context.Workspace) != "" {
 		runtime += fmt.Sprintf(" 当前会话工作区：%q。文件和命令默认在该目录中运行。", context.Workspace)

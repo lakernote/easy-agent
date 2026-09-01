@@ -113,6 +113,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	totalUsage := Usage{}
 	consecutiveFailedToolSteps := 0
 	forceConverge := false
+	requireLoadedToolCall := false
 	failedCalls := make(map[string]failedToolCall)
 
 	for step := 1; step <= maxSteps; step++ {
@@ -123,6 +124,14 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		toolChoice := ToolChoice{Mode: ToolChoiceNone}
 		if len(tools) > 0 {
 			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
+		}
+		if requireLoadedToolCall {
+			// Loader 的结果只代表“能力已可用”，不是用户任务的证据。下一轮临时
+			// 隐藏所有 Loader，并要求模型从真实工具中选择至少一个调用。
+			tools = nonLoaderTools(tools)
+			if len(tools) > 0 {
+				toolChoice = ToolChoice{Mode: ToolChoiceRequired}
+			}
 		}
 		if forceConverge {
 			tools = nil
@@ -231,6 +240,9 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 
 		if len(assistant.ToolCalls) == 0 {
+			if requireLoadedToolCall {
+				return RunResult{}, errors.New("模型在能力加载后没有调用真实工具")
+			}
 			if input.OnTurnMessages != nil {
 				if err := input.OnTurnMessages(turnMessages); err != nil {
 					return RunResult{}, err
@@ -248,6 +260,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 
 		pending = pending[:0]
 		failedToolCalls := 0
+		calledLoader := false
+		calledRealTool := false
 		for _, call := range assistant.ToolCalls {
 			key := toolCallKey(call)
 			previous, repeated := failedCalls[key]
@@ -276,6 +290,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 				failedCalls[key] = failedToolCall{attempts: previous.attempts + 1, retryable: retryable}
 			} else {
 				delete(failedCalls, key)
+				if tool, exists := runner.toolsByName[call.Name]; exists && tool.Spec.Loader {
+					calledLoader = true
+				} else {
+					calledRealTool = true
+				}
 			}
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
 			messages = append(messages, toolMessage)
@@ -296,6 +315,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		// 连续两步所有工具都失败说明 Agent 没有取得新证据。停止继续暴露工具，
 		// 让模型根据现有错误收敛，而不是用略有不同的参数无限重复同一尝试。
 		forceConverge = consecutiveFailedToolSteps >= 2
+		requireLoadedToolCall = calledLoader && !calledRealTool
 		if input.OnTurnMessages != nil {
 			if err := input.OnTurnMessages(turnMessages); err != nil {
 				return RunResult{}, err
@@ -303,6 +323,16 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 	}
 	return RunResult{}, errors.New("Agent 达到最大步数")
+}
+
+func nonLoaderTools(tools []ToolSpec) []ToolSpec {
+	result := make([]ToolSpec, 0, len(tools))
+	for _, tool := range tools {
+		if !tool.Loader {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 func (runner *Runner) runTool(ctx context.Context, step int, call ToolCall, timeout time.Duration) (string, error, time.Duration) {

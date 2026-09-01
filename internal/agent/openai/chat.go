@@ -162,7 +162,7 @@ func (client *Client) generateChat(ctx context.Context, request core.Request) (c
 	for _, tool := range request.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: chatToolFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters}})
 	}
-	if client.disableThinking {
+	if client.thinkingDisabledFor(request) {
 		// OpenAI Chat Completions 和 Ollama 的兼容端点都使用 reasoning_effort；
 		// think 属于 Ollama 原生 /api/chat，不应发送给 OpenAI 兼容服务。
 		payload.ReasoningEffort = "none"

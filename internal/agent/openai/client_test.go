@@ -38,6 +38,49 @@ func TestDisabledThinkingUsesOpenAIReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestOllamaKeepsDefaultThinkingDuringToolSelection(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests++
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if requests == 1 {
+			if _, exists := body["reasoning_effort"]; exists {
+				t.Fatalf("Ollama 工具选择轮不能强制关闭推理: %+v", body)
+			}
+		} else if body["reasoning_effort"] != "none" {
+			t.Fatalf("无工具轮仍应尊重关闭思考配置: %+v", body)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "ok"}}},
+		})
+	}))
+	defer server.Close()
+	client, err := New(Config{
+		BaseURL: server.URL, Protocol: ChatCompletions,
+		DisableThinking: true, KeepThinkingForTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Generate(context.Background(), core.Request{
+		Model: "fixture", Messages: []core.Message{{Role: core.RoleUser, Content: "查询"}},
+		Tools: []core.ToolSpec{{Name: "lookup"}}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAuto},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Generate(context.Background(), core.Request{
+		Model: "fixture", Messages: []core.Message{{Role: core.RoleUser, Content: "回答"}},
+		ToolChoice: core.ToolChoice{Mode: core.ToolChoiceNone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatCompletionsStreamsTextAndUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		var body map[string]any

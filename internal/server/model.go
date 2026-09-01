@@ -69,7 +69,8 @@ func runModelTest(request *http.Request, settings store.ModelSettings) (modelTes
 	}
 	client, err := openai.New(openai.Config{
 		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
-		DisableThinking: settings.Thinking == "disabled", Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
+		DisableThinking: settings.Thinking == "disabled", KeepThinkingForTools: settings.IsOllama(),
+		Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
 	})
 	if err != nil {
 		return modelTestResult{}, err

@@ -26,20 +26,22 @@ const (
 
 // Config 只保存模型传输相关配置。业务 Prompt、Skill 和工具不属于模型客户端。
 type Config struct {
-	BaseURL         string
-	APIKey          string
-	Protocol        Protocol
-	HTTPClient      *http.Client
-	Timeout         time.Duration
-	DisableThinking bool
+	BaseURL              string
+	APIKey               string
+	Protocol             Protocol
+	HTTPClient           *http.Client
+	Timeout              time.Duration
+	DisableThinking      bool
+	KeepThinkingForTools bool
 }
 
 type Client struct {
-	baseURL         string
-	apiKey          string
-	protocol        Protocol
-	httpClient      *http.Client
-	disableThinking bool
+	baseURL              string
+	apiKey               string
+	protocol             Protocol
+	httpClient           *http.Client
+	disableThinking      bool
+	keepThinkingForTools bool
 }
 
 func New(config Config) (*Client, error) {
@@ -63,7 +65,22 @@ func New(config Config) (*Client, error) {
 		}
 		httpClient = &http.Client{Timeout: timeout}
 	}
-	return &Client{baseURL: baseURL, apiKey: strings.TrimSpace(config.APIKey), protocol: protocol, httpClient: httpClient, disableThinking: config.DisableThinking}, nil
+	return &Client{
+		baseURL: baseURL, apiKey: strings.TrimSpace(config.APIKey), protocol: protocol, httpClient: httpClient,
+		disableThinking: config.DisableThinking, keepThinkingForTools: config.KeepThinkingForTools,
+	}, nil
+}
+
+// thinkingDisabledFor 处理 Ollama/Qwen 的一个重要兼容差异：部分本地模型在
+// reasoning_effort=none 且允许调用工具时会返回空消息，而不是原生 tool_calls。
+// 对这些端点，工具选择轮保留模型默认推理；普通回答和明确禁用工具的收敛轮仍
+// 尊重用户的“关闭思考”配置。这里不判断任务语义，也不替模型选择任何工具。
+func (client *Client) thinkingDisabledFor(request core.Request) bool {
+	if !client.disableThinking {
+		return false
+	}
+	toolSelectionRound := len(request.Tools) > 0 && request.ToolChoice.Mode != core.ToolChoiceNone
+	return !(client.keepThinkingForTools && toolSelectionRound)
 }
 
 func (client *Client) Generate(ctx context.Context, request core.Request) (core.Response, error) {

@@ -35,6 +35,7 @@ type Info struct {
 type entry struct {
 	tool     agent.Tool
 	category string
+	group    string
 }
 
 const (
@@ -42,13 +43,29 @@ const (
 	categoryExecution   = "执行"
 	categoryInformation = "信息"
 	categoryExtension   = "扩展"
+	groupInformation    = "information"
+	groupFiles          = "files"
+	groupExecution      = "execution"
+	groupWeb            = "web"
+	groupSkills         = "skills"
 )
+
+var groupDescriptions = map[string]string{
+	groupInformation: "日期、时间和天气",
+	groupFiles:       "工作区文件的列出、查找、搜索、读取和修改",
+	groupExecution:   "数学计算、Shell、构建、测试和 CLI",
+	groupWeb:         "互联网搜索和已知网页读取",
+	groupSkills:      "按需加载与任务相关的 Skill 方法",
+}
 
 func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
 	entries := catalogEntries(environment, skills)
 	result := make([]agent.Tool, 0, len(entries))
 	for _, item := range entries {
-		result = append(result, item.tool)
+		tool := item.tool
+		tool.Spec.Group = item.group
+		tool.Spec.GroupDescription = groupDescriptions[item.group]
+		result = append(result, tool)
 	}
 	return result
 }
@@ -58,18 +75,18 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
 	files := newFileWorkspace(environment.Workspace())
 	result := []entry{
-		{tool: currentTimeTool(), category: categoryInformation},
-		{tool: weatherTool(), category: categoryInformation},
-		{tool: calculateTool(), category: categoryExecution},
-		{tool: webSearchTool(), category: categoryInformation},
-		{tool: webFetchTool(), category: categoryInformation},
+		{tool: currentTimeTool(), category: categoryInformation, group: groupInformation},
+		{tool: weatherTool(), category: categoryInformation, group: groupInformation},
+		{tool: calculateTool(), category: categoryExecution, group: groupExecution},
+		{tool: webSearchTool(), category: categoryInformation, group: groupWeb},
+		{tool: webFetchTool(), category: categoryInformation, group: groupWeb},
 	}
 	for _, tool := range files.tools() {
-		result = append(result, entry{tool: tool, category: categoryFile})
+		result = append(result, entry{tool: tool, category: categoryFile, group: groupFiles})
 	}
-	result = append(result, entry{tool: shellTool(environment), category: categoryExecution})
+	result = append(result, entry{tool: shellTool(environment), category: categoryExecution, group: groupExecution})
 	if skills != nil {
-		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension})
+		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension, group: groupSkills})
 	}
 	return result
 }

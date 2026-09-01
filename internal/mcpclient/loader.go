@@ -73,6 +73,7 @@ func (loader *Loader) Tool() agent.Tool {
 		Spec: agent.ToolSpec{
 			Name:        "load_mcp",
 			Description: "按 ID 连接一个与当前任务相关的 MCP Server，并加载它的工具；不要无目的加载全部 MCP。",
+			Loader:      true,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -64,7 +64,7 @@ func (client *Client) generateResponse(ctx context.Context, request core.Request
 		ToolChoice: encodeResponsesToolChoice(request.ToolChoice), PromptCacheKey: request.PromptCacheKey,
 		Temperature: request.Temperature, MaxOutputTokens: request.MaxOutputTokens, PreviousResponseID: request.PreviousResponseID,
 	}
-	if client.disableThinking {
+	if client.thinkingDisabledFor(request) {
 		payload.Reasoning = map[string]any{"effort": "none"}
 	} else if request.ReasoningEffort != "" {
 		payload.Reasoning = map[string]any{"effort": request.ReasoningEffort}

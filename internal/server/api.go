@@ -15,7 +15,6 @@ import (
 	"time"
 
 	builtinmcp "github.com/lakernote/easy-agent/internal/builtin/mcp"
-	builtinmodels "github.com/lakernote/easy-agent/internal/builtin/models"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtinskills "github.com/lakernote/easy-agent/internal/builtin/skills"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
@@ -24,17 +23,16 @@ import (
 )
 
 type bootstrapPayload struct {
-	Sessions     []store.Session        `json:"sessions"`
-	Model        store.ModelSettings    `json:"model"`
-	Skills       []store.SkillOverride  `json:"skills"`
-	BuiltinTools []builtintools.Info    `json:"builtinTools"`
-	MCPPresets   []builtinmcp.Preset    `json:"mcpPresets"`
-	ModelPresets []builtinmodels.Preset `json:"modelPresets"`
-	ModelRules   modelRulesPayload      `json:"modelRules"`
-	MCPs         []store.MCPConfig      `json:"mcps"`
-	SystemPrompt string                 `json:"systemPrompt"`
-	Ollama       ollamaStatus           `json:"ollama"`
-	Runtime      runtimeInfoPayload     `json:"runtime"`
+	Sessions     []store.Session       `json:"sessions"`
+	Model        store.ModelSettings   `json:"model"`
+	Skills       []store.SkillOverride `json:"skills"`
+	BuiltinTools []builtintools.Info   `json:"builtinTools"`
+	MCPPresets   []builtinmcp.Preset   `json:"mcpPresets"`
+	ModelRules   modelRulesPayload     `json:"modelRules"`
+	MCPs         []store.MCPConfig     `json:"mcps"`
+	SystemPrompt string                `json:"systemPrompt"`
+	Ollama       ollamaStatus          `json:"ollama"`
+	Runtime      runtimeInfoPayload    `json:"runtime"`
 }
 
 type runtimeInfoPayload struct {
@@ -85,7 +83,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
 		Sessions: sessions, Model: publicModel(model), Skills: catalog.All(),
-		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelPresets: publicModelPresets(), ModelRules: modelRules(),
+		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
 	})
@@ -647,14 +645,6 @@ func ollamaServerURL() string {
 		value = "http://" + value
 	}
 	return strings.TrimRight(value, "/")
-}
-
-func publicModelPresets() []builtinmodels.Preset {
-	result := builtinmodels.Catalog()
-	for index := range result {
-		result[index].Ready = strings.TrimSpace(os.Getenv(result[index].APIKeyEnv)) != ""
-	}
-	return result
 }
 
 // enrichOllamaContextWindow 从 /api/ps 读取当前真正加载的上下文窗口。

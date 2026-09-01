@@ -84,7 +84,7 @@ Prompt 规则只能降低模型服从直接或间接注入的概率，不能替�
 
 Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 
-内置 Tool 首轮只注册 `load_tools`：其描述包含稳定、自解释的名称目录，但不重复 13 份说明和参数 Schema。模型自主选出当前需要的最少工具，Runtime 动态注册后下一轮直接调用。`@tool:name` 是用户显式预加载，不是语义路由。MCP 则通过 `load_mcp` 按服务加载。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
+内置 Tool 首轮只注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露 13 个尚未加载的函数名。模型自主选出最少能力组，Runtime 动态注册组内 Schema；Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 同样通过 `load_mcp` 按服务加载并遵循 Loader 后必须执行真实工具的规则。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt 与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 
@@ -110,7 +110,7 @@ mcp__<server_id>__<remote_tool_name>
 
 整轮 Agent 不设置隐藏的固定总超时：每次模型请求使用页面配置的超时，每次 Tool 自己声明超时，Runner 还有最大循环步数，用户也能主动停止。这样长任务不会被一个与页面配置无关的总计时器提前杀掉。
 
-模型默认值和校验范围集中在 `internal/store/model.go`。免费模型端点与型号集中在 `internal/builtin/models`，它们只是帮助填表的可更新目录，不参与 Agent 的工具路由。切换 Provider 或 Base URL 时不会继承旧服务的 API Key。
+模型默认值和校验范围集中在 `internal/store/model.go`。页面只提供通用的 Chat Completions / Responses 配置表单，不内置容易过期的厂商、模型或免费额度清单。切换 Provider 或 Base URL 时不会继承旧服务的 API Key。
 
 页面的“测试当前模型”会执行一次无副作用的两阶段诊断：要求模型返回原生 `tool_calls`，回传固定工具结果，再确认模型能读取结果并生成最终文本。把工具调用 JSON 写在普通回答里的模型会被明确判定为不适合，而不会显示成“连接成功”。
 

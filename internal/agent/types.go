@@ -81,6 +81,13 @@ type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
+	// Group 和 GroupDescription 是 EasyAgent 渐进加载用的本地元数据。
+	// Provider 适配器只编码上面三个标准字段，因此它们不会污染 Function Schema。
+	Group            string
+	GroupDescription string
+	// Loader 表示这个工具只负责把真实工具加入下一轮，成功本身不构成任务证据。
+	// Runner 会在下一步临时隐藏 Loader，并要求模型至少调用一个真实工具。
+	Loader bool
 }
 
 // Tool 把声明与实际执行函数绑定起来。

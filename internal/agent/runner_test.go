@@ -281,6 +281,43 @@ func TestRunnerCanAddToolsAfterCreation(t *testing.T) {
 	}
 }
 
+func TestRunnerRequiresRealToolAfterLoader(t *testing.T) {
+	modelCalls := 0
+	var runner *Runner
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		modelCalls++
+		switch modelCalls {
+		case 1:
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "load-1", Name: "load_tools", Arguments: json.RawMessage(`{}`)}}}}, nil
+		case 2:
+			if request.ToolChoice.Mode != ToolChoiceRequired || len(request.Tools) != 1 || request.Tools[0].Name != "current_time" {
+				t.Fatalf("Loader 后必须隐藏 Loader 并要求调用真实工具: choice=%+v tools=%+v", request.ToolChoice, request.Tools)
+			}
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "time-1", Name: "current_time", Arguments: json.RawMessage(`{}`)}}}}, nil
+		default:
+			return Response{Message: Message{Content: "今天是星期二"}}, nil
+		}
+	})
+	loader := Tool{
+		Spec: ToolSpec{Name: "load_tools", Loader: true},
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			return `{"ok":true}`, runner.AddTools([]Tool{{
+				Spec: ToolSpec{Name: "current_time"},
+				Run:  func(context.Context, json.RawMessage) (string, error) { return `{"weekday":"星期二"}`, nil },
+			}})
+		},
+	}
+	var err error
+	runner, err = NewRunner(model, "fixture", []Tool{loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "今天星期几"}}})
+	if err != nil || result.Answer != "今天是星期二" || modelCalls != 3 {
+		t.Fatalf("Loader 后真实工具链异常: calls=%d result=%+v err=%v", modelCalls, result, err)
+	}
+}
+
 func TestRunnerRejectsDynamicToolBatchAtomically(t *testing.T) {
 	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) { return Response{}, nil }), "fixture", nil)
 	if err != nil {

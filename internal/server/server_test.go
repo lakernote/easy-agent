@@ -121,7 +121,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"id": "load-call", "model": "fixture",
 				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": "load_tools", "arguments": `{"names":["shell"]}`}},
+					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": "load_tools", "arguments": `{"groups":["execution"]}`}},
 				}}}},
 			})
 			return
@@ -130,7 +130,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		toolMessage := messages[len(messages)-1].(map[string]any)
 		toolOutput, _ := toolMessage["content"].(string)
 		if callCount == 2 {
-			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"loaded":["shell"]`) {
+			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"loaded_groups":["execution"]`) || !strings.Contains(toolOutput, `"shell"`) {
 				t.Fatalf("模型没有收到工具加载结果: %+v", toolMessage)
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{

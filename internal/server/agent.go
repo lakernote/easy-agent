@@ -140,7 +140,7 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	if err != nil {
 		return err
 	}
-	// 首轮只发送精简工具目录。只有用户在输入框明确 @tool:name 时，才把对应
+	// 首轮只发送精简工具组目录。只有用户在输入框明确 @tool:name 时，才把对应
 	// 完整 Schema 一并预加载；自然语言任务由模型调用 load_tools 自主选择。
 	activeTools := []agent.Tool{toolLoader.Tool()}
 	activeTools = append(activeTools, toolLoader.Preload(selectedToolNames(session.Messages))...)
@@ -163,8 +163,9 @@ func (server *Server) run(ctx context.Context, id string, settings store.ModelSe
 	}
 	client, err := openai.New(openai.Config{
 		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
-		DisableThinking: settings.Thinking == "disabled",
-		Timeout:         time.Duration(settings.RequestTimeoutSeconds) * time.Second,
+		DisableThinking:      settings.Thinking == "disabled",
+		KeepThinkingForTools: settings.IsOllama(),
+		Timeout:              time.Duration(settings.RequestTimeoutSeconds) * time.Second,
 	})
 	if err != nil {
 		return err
