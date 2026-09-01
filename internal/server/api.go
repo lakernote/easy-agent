@@ -23,16 +23,17 @@ import (
 )
 
 type bootstrapPayload struct {
-	Sessions     []store.Session       `json:"sessions"`
-	Model        store.ModelSettings   `json:"model"`
-	Skills       []store.SkillOverride `json:"skills"`
-	BuiltinTools []builtintools.Info   `json:"builtinTools"`
-	MCPPresets   []builtinmcp.Preset   `json:"mcpPresets"`
-	ModelRules   modelRulesPayload     `json:"modelRules"`
-	MCPs         []store.MCPConfig     `json:"mcps"`
-	SystemPrompt string                `json:"systemPrompt"`
-	Ollama       ollamaStatus          `json:"ollama"`
-	Runtime      runtimeInfoPayload    `json:"runtime"`
+	Sessions        []store.Session       `json:"sessions"`
+	SessionsHasMore bool                  `json:"sessionsHasMore,omitempty"`
+	Model           store.ModelSettings   `json:"model"`
+	Skills          []store.SkillOverride `json:"skills"`
+	BuiltinTools    []builtintools.Info   `json:"builtinTools"`
+	MCPPresets      []builtinmcp.Preset   `json:"mcpPresets"`
+	ModelRules      modelRulesPayload     `json:"modelRules"`
+	MCPs            []store.MCPConfig     `json:"mcps"`
+	SystemPrompt    string                `json:"systemPrompt"`
+	Ollama          ollamaStatus          `json:"ollama"`
+	Runtime         runtimeInfoPayload    `json:"runtime"`
 }
 
 type runtimeInfoPayload struct {
@@ -65,8 +66,13 @@ type sessionHistoryPage struct {
 	EventsHasMore   bool            `json:"eventsHasMore,omitempty"`
 }
 
+type sessionListPage struct {
+	Sessions []store.Session `json:"sessions"`
+	HasMore  bool            `json:"hasMore"`
+}
+
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
-	sessions, err := server.store.ListSessions(100)
+	sessions, sessionsHasMore, err := server.store.ListSessionsBefore(100, "", "")
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -96,11 +102,30 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
-		Sessions: sessions, Model: publicModel(model), Skills: catalog.All(),
+		Sessions: sessions, SessionsHasMore: sessionsHasMore, Model: publicModel(model), Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: builtinmcp.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
 	})
+}
+
+func (server *Server) getOlderSessions(response http.ResponseWriter, request *http.Request) {
+	beforeUpdatedAt := strings.TrimSpace(request.URL.Query().Get("beforeUpdatedAt"))
+	beforeID := strings.TrimSpace(request.URL.Query().Get("beforeID"))
+	if beforeUpdatedAt == "" || beforeID == "" {
+		writeError(response, http.StatusBadRequest, "会话游标不完整")
+		return
+	}
+	if _, err := time.Parse(time.RFC3339Nano, beforeUpdatedAt); err != nil {
+		writeError(response, http.StatusBadRequest, "会话时间游标无效")
+		return
+	}
+	sessions, hasMore, err := server.store.ListSessionsBefore(100, beforeUpdatedAt, beforeID)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, sessionListPage{Sessions: sessions, HasMore: hasMore})
 }
 
 func modelRules() modelRulesPayload {

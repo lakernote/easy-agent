@@ -3,11 +3,34 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestListSessionsUsesCursorWindow(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	base := time.Now().Add(-101 * time.Minute)
+	for index := 0; index < 101; index++ {
+		if _, err := database.CreateSession(fmt.Sprintf("session-%03d", index), "会话", "fixture", "", base.Add(time.Duration(index)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, hasMore, err := database.ListSessionsBefore(100, "", "")
+	if err != nil || len(first) != 100 || !hasMore || first[0].ID != "session-100" || first[99].ID != "session-001" {
+		t.Fatalf("会话首屏窗口错误: len=%d hasMore=%v first=%+v err=%v", len(first), hasMore, first, err)
+	}
+	older, hasMore, err := database.ListSessionsBefore(100, first[len(first)-1].UpdatedAt.Format(time.RFC3339Nano), first[len(first)-1].ID)
+	if err != nil || len(older) != 1 || hasMore || older[0].ID != "session-000" {
+		t.Fatalf("会话游标窗口错误: values=%+v hasMore=%v err=%v", older, hasMore, err)
+	}
+}
 
 func TestOpenProtectsDatabaseFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "private", "easyagent.db")

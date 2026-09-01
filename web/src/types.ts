@@ -201,6 +201,7 @@ export type OllamaStatus = {
 
 export type Bootstrap = {
   sessions: Session[]
+  sessionsHasMore?: boolean
   model: ModelSettings
   modelRules: ModelRules
   skills: Skill[]

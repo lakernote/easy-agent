@@ -91,6 +91,15 @@ function App() {
     setSession((current) => current?.id === id ? mergeSessionHistory(current, page, kind) : current)
   }, [])
 
+  const loadOlderSessions = useCallback(async (beforeUpdatedAt: string, beforeID: string) => {
+    const page = await api.olderSessions(beforeUpdatedAt, beforeID)
+    setData((current) => {
+      if (!current) return current
+      const sessions = Array.from(new Map([...current.sessions, ...page.sessions].map((item) => [item.id, item])).values()).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+      return { ...current, sessions, sessionsHasMore: page.hasMore }
+    })
+  }, [])
+
   useEffect(() => {
     if (!session || !isActive(session.status)) return
     const timer = window.setInterval(async () => {
@@ -121,7 +130,7 @@ function App() {
   const modelLabel = !data.model.model ? '未配置模型' : usesOllama && !data.ollama.running ? 'Ollama 未运行' : data.model.model
 
   return <div className="app-shell">
-    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onError={setError} />
+    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
     <main className="main-canvas">
       <header className="topbar">
         <div className="mobile-brand"><Logo /></div>
@@ -137,7 +146,7 @@ function App() {
   </div>
 }
 
-function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onError }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
+function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onLoadOlder, onError }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onRefresh: () => Promise<Bootstrap>; onLoadOlder: (beforeUpdatedAt: string, beforeID: string) => Promise<void>; onError: (value: string) => void }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [managing, setManaging] = useState(false)
@@ -145,6 +154,8 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
   const [deleting, setDeleting] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Session[]>([])
   const [feedback, setFeedback] = useState('')
+  const sessionListRef = useRef<HTMLDivElement>(null)
+  const loadingOlderSessionsRef = useRef(false)
 
   const visibleSessions = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase()
@@ -160,6 +171,21 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
   const selectableSessions = visibleSessions.filter((item) => !isActive(item.status))
   const selectedCount = selectableSessions.filter((item) => selectedIds.has(item.id)).length
   const allSelected = selectableSessions.length > 0 && selectableSessions.every((item) => selectedIds.has(item.id))
+
+  useEffect(() => {
+    const node = sessionListRef.current
+    if (!node || !data.sessionsHasMore || query.trim() || sort !== 'newest') return
+    const loadOlder = async () => {
+      if (loadingOlderSessionsRef.current || node.scrollTop + node.clientHeight < node.scrollHeight - 80) return
+      const last = data.sessions.at(-1)
+      if (!last) return
+      loadingOlderSessionsRef.current = true
+      try { await onLoadOlder(last.updatedAt, last.id) } catch (reason) { onError((reason as Error).message) }
+      finally { loadingOlderSessionsRef.current = false }
+    }
+    node.addEventListener('scroll', loadOlder)
+    return () => node.removeEventListener('scroll', loadOlder)
+  }, [data.sessions, data.sessionsHasMore, query, sort, onLoadOlder, onError])
 
   const showFeedback = (value: string) => {
     setFeedback(value)
@@ -217,7 +243,7 @@ function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh, onErro
       <select value={sort} onChange={(event) => setSort(event.target.value as 'newest' | 'oldest')} aria-label="按时间排序"><option value="newest">最新</option><option value="oldest">最早</option></select>
     </div>
     {managing && <div className="session-manage"><button onClick={toggleAll} disabled={!selectableSessions.length}>{allSelected ? '取消全选' : '全选'}</button><span>已选 {selectedCount}</span><button className="manage-delete" onClick={requestRemoveSelected} disabled={!selectedCount || deleting}>{deleting ? '删除中…' : `删除${selectedCount ? ` (${selectedCount})` : ''}`}</button></div>}
-    <div className="session-list">
+    <div ref={sessionListRef} className="session-list">
       {data.sessions.length === 0 && <div className="empty-list">还没有对话</div>}
       {data.sessions.length > 0 && visibleSessions.length === 0 && <div className="empty-list"><strong>没有匹配的会话</strong><button onClick={() => setQuery('')}>清空搜索</button></div>}
       {visibleSessions.map((item) => <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${managing ? 'managing' : ''}`}>

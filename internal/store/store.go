@@ -279,25 +279,50 @@ func (store *Store) CreateSession(id, title, model, workspace string, now time.T
 }
 
 func (store *Store) ListSessions(limit int) ([]Session, error) {
+	result, _, err := store.listSessionsPage(limit, "", "")
+	return result, err
+}
+
+// ListSessionsBefore 按更新时间和 ID 游标读取更早的会话，供侧栏无限滚动使用。
+func (store *Store) ListSessionsBefore(limit int, beforeUpdatedAt, beforeID string) ([]Session, bool, error) {
+	return store.listSessionsPage(limit, beforeUpdatedAt, beforeID)
+}
+
+func (store *Store) listSessionsPage(limit int, beforeUpdatedAt, beforeID string) ([]Session, bool, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := store.db.Query(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
+	query := `SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions`
+	args := []any{}
+	if strings.TrimSpace(beforeUpdatedAt) != "" && strings.TrimSpace(beforeID) != "" {
+		query += ` WHERE updated_at < ? OR (updated_at = ? AND id < ?)`
+		args = append(args, beforeUpdatedAt, beforeUpdatedAt, beforeID)
+	}
+	query += ` ORDER BY updated_at DESC, id DESC LIMIT ?`
+	args = append(args, limit+1)
+	rows, err := store.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	result := []Session{}
 	for rows.Next() {
 		value, err := scanSession(rows)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		value.Messages = []Message{}
 		value.Events = []Event{}
 		result = append(result, value)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+	return result, hasMore, nil
 }
 
 type rowScanner interface{ Scan(...any) error }
