@@ -26,7 +26,13 @@ export function TraceRow({ event }: { event: TraceEvent }) {
   const cacheRate = event.cacheReported && event.inputTokens ? Math.round((event.cachedTokens || 0) / event.inputTokens * 100) : 0
   const tokenMissing = event.status === 'error' && !event.totalTokens && !event.inputTokens && !event.outputTokens
   const location = `${event.turn ? `第 ${event.turn} 轮 · ` : ''}${event.step ? `第 ${event.step} 步` : '独立阶段'}${event.attempt ? ` · 尝试 ${event.attempt}` : ''}`
-  return <details className={`trace-row ${event.status}`} open={isModelResult && event.status === 'error'}><summary><span className="trace-node" /><div><strong>{title}</strong><small>{location} {event.statusCode ? `· HTTP ${event.statusCode} ` : ''}· {event.durationMs || 0} ms {event.totalTokens ? `· ${event.totalTokens} tokens` : tokenMissing ? '· Token 未上报' : ''}{isModelResult ? ` · ${event.cacheReported ? `缓存 ${cacheRate}%` : '缓存未上报'}` : ''}</small></div><em>{eventStatusLabel(event.status)}</em></summary>{event.detail && <p className="event-error">{event.detail}</p>}{isModelResult && <div className="event-usage"><span>输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>历史 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span></div>}{event.input && <div><p className="trace-label">{isModelResult ? '模型请求 · 实际发送' : '工具输入'}</p><Payload value={event.input} /></div>}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <div><p className="trace-label">工具响应 · 原始返回</p><Payload value={event.output} /></div>)}</details>
+  return <details className={`trace-row ${event.status}`} open={isModelResult && event.status === 'error'}><summary><span className="trace-node" /><div><strong>{title}</strong><small>{location} {event.statusCode ? `· HTTP ${event.statusCode} ` : ''}{eventDurationLabel(event)} {event.totalTokens ? `· ${event.totalTokens} tokens` : tokenMissing ? '· Token 未上报' : ''}{isModelResult ? ` · ${event.cacheReported ? `缓存 ${cacheRate}%` : '缓存未上报'}` : ''}</small></div><em>{eventStatusLabel(event.status)}</em></summary>{event.detail && <p className="event-error">{event.detail}</p>}{isModelResult && <div className="event-usage"><span>输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>历史 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span></div>}{event.input && <div><p className="trace-label">{isModelResult ? '模型请求 · 实际发送' : '工具输入'}</p><Payload value={event.input} /></div>}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <div><p className="trace-label">工具响应 · 原始返回</p><Payload value={event.output} /></div>)}</details>
+}
+
+function eventDurationLabel(event: TraceEvent) {
+  if (event.status === 'started') return ''
+  if ((event.durationMs || 0) > 0) return `· ${event.durationMs} ms`
+  return event.kind === 'model_end' || event.kind === 'compaction_end' || event.kind === 'codex_end' ? '· 耗时未上报' : ''
 }
 
 function codexItemLabel(value: string) {
@@ -34,6 +40,8 @@ function codexItemLabel(value: string) {
     agentMessage: '生成回答', reasoning: '分析任务', commandExecution: '执行命令',
     fileChange: '修改文件', mcpToolCall: '调用 MCP 工具', dynamicToolCall: '调用动态工具',
     plan: '制定计划', contextCompaction: '压缩上下文', userMessage: '接收消息',
+    webSearch: '联网搜索', imageView: '查看图片', enteredReviewMode: '进入审查模式',
+    exitedReviewMode: '退出审查模式', collabToolCall: '协作 Agent',
   }
   return labels[value] || value
 }

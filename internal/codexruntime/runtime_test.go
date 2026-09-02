@@ -2,8 +2,10 @@ package codexruntime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,5 +59,41 @@ done
 	}
 	if resumed.ThreadID != result.ThreadID || resumed.Answer != "hello" {
 		t.Fatalf("unexpected resumed result: %+v", resumed)
+	}
+}
+
+func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
+	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
+	var events []Event
+	config := Config{OnEvent: func(event Event) { events = append(events, event) }}
+	started := rpcMessage{Method: "item/started", Params: json.RawMessage(`{"item":{"id":"item-1","type":"webSearch","query":"合肥明天天气"}}`)}
+	completed := rpcMessage{Method: "item/completed", Params: json.RawMessage(`{"item":{"id":"item-1","type":"webSearch","status":"completed","query":"合肥明天天气","action":{"type":"search"}}}`)}
+	consumeNotificationWithAnswer(started, config, &strings.Builder{}, timers)
+	time.Sleep(2 * time.Millisecond)
+	consumeNotificationWithAnswer(completed, config, &strings.Builder{}, timers)
+	if len(events) != 2 {
+		t.Fatalf("expected start and completed events, got %d", len(events))
+	}
+	if events[0].Name != "webSearch" || events[0].Detail != "搜索：合肥明天天气" || events[0].Input != "合肥明天天气" {
+		t.Fatalf("unexpected web search event: %+v", events[0])
+	}
+	if events[1].Status != "success" || events[1].Duration <= 0 {
+		t.Fatalf("expected completed event with duration: %+v", events[1])
+	}
+
+	consumeNotificationWithAnswer(rpcMessage{Method: "turn/started", Params: json.RawMessage(`{"turn":{"status":"inProgress"}}`)}, config, &strings.Builder{}, timers)
+	time.Sleep(2 * time.Millisecond)
+	consumeNotificationWithAnswer(rpcMessage{Method: "turn/completed", Params: json.RawMessage(`{"turn":{"status":"completed","error":null}}`)}, config, &strings.Builder{}, timers)
+	if events[len(events)-1].Kind != "codex_turn" || events[len(events)-1].Duration <= 0 {
+		t.Fatalf("expected completed turn with duration: %+v", events[len(events)-1])
+	}
+}
+
+func TestCodexStatusAndItemDuration(t *testing.T) {
+	if codexStatus("in_progress") != "started" || codexStatus("cancelled") != "error" || codexStatus("completed") != "success" {
+		t.Fatal("unexpected Codex status mapping")
+	}
+	if got := itemDuration(map[string]any{"durationMs": float64(42)}); got != 42*time.Millisecond {
+		t.Fatalf("unexpected item duration: %s", got)
 	}
 }

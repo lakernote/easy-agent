@@ -118,6 +118,11 @@ type Event struct {
 	Duration time.Duration
 }
 
+type eventTimers struct {
+	itemStartedAt map[string]time.Time
+	turnStartedAt time.Time
+}
+
 type Result struct {
 	ThreadID     string
 	Answer       string
@@ -208,6 +213,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		}
 		return message, nil
 	}
+	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
 	request := func(method string, id int, params any) (json.RawMessage, error) {
 		if err := send(method, id, params); err != nil {
 			return nil, err
@@ -221,7 +227,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				return nil, fmt.Errorf("Codex Runtime 请求了 EasyAgent 尚未支持的交互: %s", message.Method)
 			}
 			if len(message.ID) == 0 {
-				consumeNotification(message, config)
+				consumeNotificationWithAnswer(message, config, &strings.Builder{}, timers)
 				continue
 			}
 			if string(message.ID) != fmt.Sprintf("%d", id) {
@@ -302,7 +308,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				} `json:"turn"`
 			}
 			_ = json.Unmarshal(message.Params, &params)
-			consumeNotificationWithAnswer(message, config, &answer)
+			consumeNotificationWithAnswer(message, config, &answer, timers)
 			if params.Turn.Status == "failed" || params.Turn.Status == "interrupted" {
 				return Result{}, rpcError(params.Turn.Error)
 			}
@@ -314,16 +320,11 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			}
 			return Result{ThreadID: threadID, Answer: strings.TrimSpace(answer.String()), Duration: time.Since(startedAt)}, nil
 		}
-		consumeNotificationWithAnswer(message, config, &answer)
+		consumeNotificationWithAnswer(message, config, &answer, timers)
 	}
 }
 
-func consumeNotification(message rpcMessage, config Config) {
-	var ignored strings.Builder
-	consumeNotificationWithAnswer(message, config, &ignored)
-}
-
-func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder) {
+func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder, timers *eventTimers) {
 	if message.Method == "item/completed" && answer.Len() == 0 && isAgentMessage(message.Params) {
 		answer.WriteString(extractCompletedAgentText(message.Params))
 	}
@@ -348,7 +349,16 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		if len(payload.Turn.Error) > 0 && string(payload.Turn.Error) != "null" {
 			detail = rpcErrorText(payload.Turn.Error)
 		}
-		config.OnEvent(Event{Kind: "codex_turn", Name: "turn", Status: status, Detail: detail})
+		duration := time.Duration(0)
+		if timers != nil {
+			if message.Method == "turn/started" {
+				timers.turnStartedAt = time.Now()
+			} else if !timers.turnStartedAt.IsZero() {
+				duration = time.Since(timers.turnStartedAt)
+				timers.turnStartedAt = time.Time{}
+			}
+		}
+		config.OnEvent(Event{Kind: "codex_turn", Name: "turn", Status: status, Detail: detail, Duration: duration})
 		return
 	}
 	if message.Method != "item/started" && message.Method != "item/completed" {
@@ -367,11 +377,26 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		status = codexStatus(itemStatus)
 	}
 	name, _ := payload.Item["type"].(string)
-	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item)})
+	itemID, _ := payload.Item["id"].(string)
+	duration := time.Duration(0)
+	if timers != nil && itemID != "" {
+		if message.Method == "item/started" {
+			timers.itemStartedAt[itemID] = time.Now()
+		} else if started, ok := timers.itemStartedAt[itemID]; ok {
+			duration = time.Since(started)
+			delete(timers.itemStartedAt, itemID)
+		}
+	}
+	if reported := itemDuration(payload.Item); reported > 0 {
+		duration = reported
+	}
+	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), Duration: duration})
 }
 
 func codexStatus(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(strings.ReplaceAll(normalized, "_", ""), "-", "")
+	switch normalized {
 	case "inprogress", "started", "running":
 		return "started"
 	case "failed", "error", "declined", "interrupted", "canceled", "cancelled":
@@ -395,8 +420,22 @@ func rpcErrorText(raw json.RawMessage) string {
 }
 
 func itemDetail(item map[string]any) string {
+	if query, ok := item["query"].(string); ok && strings.TrimSpace(query) != "" {
+		return "搜索：" + query
+	}
+	if action, ok := item["action"].(map[string]any); ok {
+		if actionType, ok := action["type"].(string); ok && strings.TrimSpace(actionType) != "" {
+			return actionType
+		}
+	}
 	for _, key := range []string{"reason", "cwd", "phase", "serverName"} {
 		if value, ok := item[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	if summary, ok := item["summary"]; ok {
+		value := marshalItemValue(summary)
+		if value != "" && value != "[]" && value != "{}" && value != "null" {
 			return value
 		}
 	}
@@ -404,7 +443,7 @@ func itemDetail(item map[string]any) string {
 }
 
 func itemInput(item map[string]any) string {
-	for _, key := range []string{"command", "arguments", "changes", "review"} {
+	for _, key := range []string{"query", "command", "arguments", "changes", "review", "action"} {
 		if value, ok := item[key]; ok {
 			return marshalItemValue(value)
 		}
@@ -413,12 +452,29 @@ func itemInput(item map[string]any) string {
 }
 
 func itemOutput(item map[string]any) string {
-	for _, key := range []string{"text", "aggregatedOutput", "output", "review", "contentItems"} {
+	for _, key := range []string{"text", "aggregatedOutput", "output", "review", "contentItems", "result", "error"} {
 		if value, ok := item[key]; ok {
 			return marshalItemValue(value)
 		}
 	}
 	return ""
+}
+
+func itemDuration(item map[string]any) time.Duration {
+	value, ok := item["durationMs"]
+	if !ok {
+		return 0
+	}
+	switch number := value.(type) {
+	case float64:
+		return time.Duration(number * float64(time.Millisecond))
+	case int:
+		return time.Duration(number) * time.Millisecond
+	case int64:
+		return time.Duration(number) * time.Millisecond
+	default:
+		return 0
+	}
 }
 
 func marshalItemValue(value any) string {

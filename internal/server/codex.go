@@ -91,6 +91,16 @@ func codexProgress(event codexruntime.Event) string {
 		return "Codex · 处理文件变更"
 	case "mcpToolCall", "dynamicToolCall":
 		return "Codex · 调用工具"
+	case "webSearch":
+		return "Codex · 联网搜索"
+	case "imageView":
+		return "Codex · 查看图片"
+	case "enteredReviewMode":
+		return "Codex · 进入审查模式"
+	case "exitedReviewMode":
+		return "Codex · 退出审查模式"
+	case "collabToolCall":
+		return "Codex · 协作 Agent"
 	case "turn":
 		return "Codex · 处理本轮任务"
 	default:
