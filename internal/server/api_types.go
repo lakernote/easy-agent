@@ -30,6 +30,7 @@ type sessionView struct {
 	Usage             store.Usage       `json:"usage"`
 	Context           store.ContextInfo `json:"context"`
 	PartialOutput     string            `json:"partialOutput,omitempty"`
+	RunProgress       string            `json:"runProgress,omitempty"`
 }
 
 func publicSession(value store.Session) sessionView {
@@ -39,7 +40,7 @@ func publicSession(value store.Session) sessionView {
 		Messages: value.Messages, Events: value.Events, MessageCount: value.MessageCount, EventCount: value.EventCount,
 		UserTurnCount: value.UserTurnCount, MessagesTruncated: value.MessagesTruncated, EventsTruncated: value.EventsTruncated,
 		MessagesHasMore: value.MessagesHasMore, EventsHasMore: value.EventsHasMore, Usage: value.Usage,
-		Context: value.Context, PartialOutput: value.PartialOutput,
+		Context: value.Context, PartialOutput: value.PartialOutput, RunProgress: value.RunProgress,
 	}
 }
 

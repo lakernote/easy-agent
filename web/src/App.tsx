@@ -33,6 +33,11 @@ export default function App() {
     try { setSession(await api.session(id)) } catch (reason) { setError((reason as Error).message) }
   }, [])
 
+  const setCurrentSession = useCallback((value: Bootstrap['sessions'][number]) => {
+    setSession(value)
+    setData((current) => current ? { ...current, sessions: current.sessions.map((item) => item.id === value.id ? { ...item, status: value.status, error: value.error, updatedAt: value.updatedAt, runProgress: value.runProgress, partialOutput: value.partialOutput } : item) } : current)
+  }, [])
+
   const loadSessionHistory = useCallback(async (id: string, kind: 'messages' | 'events', before: number) => {
     const page = await api.sessionHistory(id, kind, before)
     setSession((current) => current?.id === id ? mergeSessionHistory(current, page, kind) : current)
@@ -53,18 +58,19 @@ export default function App() {
       try {
         const current = await api.session(session.id)
         setSession((previous) => previous?.id === current.id ? mergeSessionSnapshot(previous, current) : current)
+        setData((previous) => previous ? { ...previous, sessions: previous.sessions.map((item) => item.id === current.id ? { ...item, status: current.status, error: current.error, updatedAt: current.updatedAt, runProgress: current.runProgress, partialOutput: current.partialOutput } : item) } : previous)
         if (!isActive(current.status)) await refresh()
       } catch (reason) { setError((reason as Error).message) }
     }, 800)
     return () => window.clearInterval(timer)
-  }, [session?.id, session?.status, refresh])
+  }, [session?.id, session?.status, refresh, setCurrentSession])
 
   const newChat = () => { setSession(null); setPage('chat'); setTraceOpen(false); setError('') }
   const stopSession = async () => {
     if (!session || !isActive(session.status)) return
     try {
       const next = await api.cancelSession(session.id)
-      setSession((previous) => previous?.id === next.id ? mergeSessionSnapshot(previous, next) : next)
+      setCurrentSession(next)
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
   }
@@ -72,10 +78,17 @@ export default function App() {
   if (loading) return <div className="boot"><span className="spinner" />正在启动 EasyAgent…</div>
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
+  // 已选会话的 Runtime 是创建时固定的；全局配置只代表新会话和设置页草稿。
+  // 顶部状态必须跟随会话，否则切换 Runtime 后继续旧会话会产生“显示 Codex、实际
+  // EasyAgent”的误导。
+  const effectiveRuntime = session?.runtime || data.model.runtime
+  const effectiveModel = session?.model || data.model.model
+  const usesCodex = effectiveRuntime === 'codex'
   const usesOllama = data.model.provider === 'ollama' || data.model.baseUrl.includes(':11434')
-  const usesCodex = data.model.runtime === 'codex'
-  const modelReady = usesCodex ? data.codex.installed : Boolean(data.model.model) && (!usesOllama || data.ollama.running)
-  const modelLabel = usesCodex ? (data.codex.installed ? `Codex Runtime${data.codex.version ? ` · ${data.codex.version}` : ''}` : 'Codex Runtime 未安装') : !data.model.model ? '未配置模型' : usesOllama && !data.ollama.running ? 'Ollama 未运行' : data.model.model
+  const modelReady = usesCodex ? data.codex.installed && data.codex.appServerAvailable : Boolean(effectiveModel) && (!usesOllama || data.ollama.running)
+  const modelLabel = usesCodex
+    ? (data.codex.installed && data.codex.appServerAvailable ? `Codex Runtime${effectiveModel ? ` · ${effectiveModel}` : ''}` : 'Codex app-server 未就绪')
+    : !effectiveModel ? 'EasyAgent · 未配置模型' : usesOllama && !data.ollama.running ? 'EasyAgent · Ollama 未运行' : `EasyAgent · ${effectiveModel}`
 
   return <div className="app-shell">
     <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
@@ -86,7 +99,7 @@ export default function App() {
         <div className="topbar-actions"><span className={`model-dot ${modelReady ? 'ready' : ''}`} /><span className="model-name">{modelLabel}</span>{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('capabilities')} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('capabilities')} />}
       {page === 'skills' && <Skills data={data} onRefresh={refresh} onError={setError} />}
       {page === 'capabilities' && <Capabilities data={data} onRefresh={refresh} onError={setError} />}
     </main>

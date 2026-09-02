@@ -36,9 +36,10 @@ type Server struct {
 }
 
 type taskHandle struct {
-	token   string
-	cancel  context.CancelFunc
-	partial string
+	token    string
+	cancel   context.CancelFunc
+	partial  string
+	progress string
 }
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {

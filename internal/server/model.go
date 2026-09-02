@@ -11,6 +11,7 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/agent/openai"
+	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -28,7 +29,19 @@ type modelTestResult struct {
 // 不允许两个入口各自解释“空 API Key”，否则容易再次跨 Provider 复用旧密钥。
 func prepareModelInput(input, current store.ModelSettings) (store.ModelSettings, error) {
 	input = input.WithDefaults()
-	if input.APIKey == "" && sameModelEndpoint(input, current) {
+	if input.Runtime == store.RuntimeCodex {
+		// Codex app-server 自己读取 ~/.codex 配置并负责认证、Provider 和协议。
+		// 清掉 EasyAgent/Ollama 字段，避免切换 Runtime 后旧配置继续显示或被误用。
+		input.Provider = "codex"
+		input.Protocol = "app_server"
+		input.BaseURL = ""
+		input.APIKey = ""
+		input.APIKeyEnv = ""
+		input.Thinking = ""
+		input.ContextWindowTokens = 0
+		input.CompressionThresholdPercent = 0
+	}
+	if input.Runtime != store.RuntimeCodex && input.APIKey == "" && sameModelEndpoint(input, current) {
 		input.APIKey = current.APIKey
 	}
 	if input.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(input.APIKeyEnv)) == "" {
@@ -60,7 +73,19 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 			writeError(response, http.StatusBadGateway, status.Message)
 			return
 		}
-		writeJSON(response, http.StatusOK, modelTestResult{OK: true, Model: "Codex Runtime", Answer: status.Version})
+		if !status.AppServerAvailable {
+			writeError(response, http.StatusBadGateway, status.Message)
+			return
+		}
+		result, runErr := codexruntime.RunMessage(request.Context(), codexruntime.Config{
+			Path: status.Path, Workspace: server.env.Workspace(), Model: settings.Model,
+			Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second, Env: server.env.Environ(nil),
+		}, "只回复 CODEX_RUNTIME_TEST_OK，不要调用工具。")
+		if runErr != nil {
+			writeError(response, http.StatusBadGateway, "Codex app-server 能启动，但实际会话测试失败："+runErr.Error())
+			return
+		}
+		writeJSON(response, http.StatusOK, modelTestResult{OK: true, Model: "Codex Runtime", Answer: result.Answer, DurationMS: result.Duration.Milliseconds()})
 		return
 	}
 	result, err := runModelTest(request, settings)

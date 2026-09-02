@@ -52,6 +52,7 @@ func (server *Server) enqueueTurn(id, userMessage string, attachments []store.At
 			_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
 			return
 		}
+		server.setTaskProgress(id, "正在准备运行时")
 		usage := store.Usage{}
 		// 不再给整轮 Agent 叠加一个固定总超时。每次模型请求和工具调用都有
 		// 自己的超时，循环也有最大步数；用户还可以随时点击“停止”。固定总
@@ -66,7 +67,7 @@ func (server *Server) enqueueTurn(id, userMessage string, attachments []store.At
 func (server *Server) setTask(id, token string, cancel context.CancelFunc) {
 	server.taskMu.Lock()
 	defer server.taskMu.Unlock()
-	server.tasks[id] = taskHandle{token: token, cancel: cancel}
+	server.tasks[id] = taskHandle{token: token, cancel: cancel, progress: "任务排队中 · 等待本地执行槽"}
 }
 
 func (server *Server) appendTaskPartial(id, delta string) {
@@ -87,6 +88,26 @@ func (server *Server) taskPartial(id string) string {
 	server.taskMu.Lock()
 	defer server.taskMu.Unlock()
 	return server.tasks[id].partial
+}
+
+func (server *Server) setTaskProgress(id, progress string) {
+	if strings.TrimSpace(progress) == "" {
+		return
+	}
+	server.taskMu.Lock()
+	defer server.taskMu.Unlock()
+	current, ok := server.tasks[id]
+	if !ok {
+		return
+	}
+	current.progress = progress
+	server.tasks[id] = current
+}
+
+func (server *Server) taskProgress(id string) string {
+	server.taskMu.Lock()
+	defer server.taskMu.Unlock()
+	return server.tasks[id].progress
 }
 
 func (server *Server) clearTask(id, token string) {
@@ -334,6 +355,13 @@ func promptCacheKey(settings store.ModelSettings) string {
 
 func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, onTraceError func(error)) agent.Observer {
 	return func(event agent.Event) {
+		if event.Kind == agent.EventModelStart {
+			server.setTaskProgress(id, "EasyAgent · 请求模型")
+		} else if event.Kind == agent.EventToolStart && event.ToolCall != nil {
+			server.setTaskProgress(id, "EasyAgent · 执行工具 "+event.ToolCall.Name)
+		} else if event.Kind == agent.EventModelEnd {
+			server.setTaskProgress(id, "EasyAgent · 整理回答")
+		}
 		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
 		if event.ToolCall != nil {
 			value.Name = event.ToolCall.Name

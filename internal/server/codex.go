@@ -29,6 +29,9 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	if !status.Installed {
 		return errors.New(status.Message)
 	}
+	if !status.AppServerAvailable {
+		return errors.New(status.Message)
+	}
 	message := ""
 	for index := len(session.Messages) - 1; index >= 0; index-- {
 		if session.Messages[index].Role == "user" {
@@ -40,6 +43,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		return errors.New("Codex Runtime 没有找到本轮用户消息")
 	}
 	startedAt := time.Now()
+	server.setTaskProgress(session.ID, "Codex · 启动 app-server")
 	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_start", Turn: session.UserTurnCount, Status: "started", Name: settings.Model, Detail: "由 Codex app-server 接管工具、Skill、沙箱和会话历史", CreatedAt: startedAt}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
 	}
@@ -49,6 +53,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		Env:     server.env.Environ(nil),
 		OnDelta: func(delta string) { server.appendTaskPartial(session.ID, delta) },
 		OnEvent: func(event codexruntime.Event) {
+			server.setTaskProgress(session.ID, codexProgress(event))
 			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
 		},
 	}, message)
@@ -69,4 +74,26 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	providerKey := strings.Join([]string{"codex", settings.Model, status.Path}, "|")
 	return server.store.FinishSession(session.ID, result.ThreadID, providerKey, *usage, time.Now())
+}
+
+func codexProgress(event codexruntime.Event) string {
+	if event.Detail != "" {
+		return "Codex · " + event.Detail
+	}
+	switch event.Name {
+	case "agentMessage":
+		return "Codex · 整理回答"
+	case "reasoning":
+		return "Codex · 分析任务"
+	case "commandExecution":
+		return "Codex · 执行命令"
+	case "fileChange":
+		return "Codex · 处理文件变更"
+	case "mcpToolCall", "dynamicToolCall":
+		return "Codex · 调用工具"
+	case "turn":
+		return "Codex · 处理本轮任务"
+	default:
+		return "Codex · 处理中"
+	}
 }

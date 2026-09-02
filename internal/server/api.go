@@ -148,6 +148,7 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
 	value.PartialOutput = server.taskPartial(value.ID)
+	value.RunProgress = server.taskProgress(value.ID)
 	writeJSON(response, http.StatusOK, publicSession(value))
 }
 
@@ -229,6 +230,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		return
 	}
 	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	value.RunProgress = server.taskProgress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, publicSession(value))
@@ -273,6 +275,7 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		return
 	}
 	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	value.RunProgress = server.taskProgress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, publicSession(value))
@@ -312,5 +315,6 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 	settings, _ := server.store.GetModelSettings()
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
+	value.RunProgress = server.taskProgress(id)
 	writeJSON(response, http.StatusOK, publicSession(value))
 }

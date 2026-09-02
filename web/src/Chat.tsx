@@ -37,7 +37,9 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const capabilitySearchRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentRef = useRef<PendingAttachment[]>([])
-  const capabilities = useMemo(() => capabilityOptions(data), [data])
+  const runtime = session?.runtime || data.model.runtime
+  const isCodexRuntime = runtime === 'codex'
+  const capabilities = useMemo(() => isCodexRuntime ? [] : capabilityOptions(data), [data, isCodexRuntime])
   const visibleCapabilities = useMemo(() => {
     const keyword = capabilityQuery.trim().toLocaleLowerCase()
     return capabilities.filter((item) => !keyword || item.name.toLocaleLowerCase().includes(keyword) || item.description.toLocaleLowerCase().includes(keyword) || item.token.slice(1).toLocaleLowerCase().includes(keyword) || capabilityKindLabel(item.kind).toLocaleLowerCase().includes(keyword))
@@ -248,16 +250,16 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
     send(suggestion.prompt)
   }
   return <section className="chat-page">
-    <div ref={conversationRef} className="conversation">
-      <div className="conversation-content">
+    <div className="conversation">
+      <div ref={conversationRef} className="conversation-content">
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">一个核心 Agent · 能力按需加载</p><h1>想解决什么问题？</h1><p>直接描述目标，也可以添加代码、日志、图片或 PDF；输入 <code>@</code> 可明确指定 Tool、Skill 或 MCP。</p><div className="suggestion-heading"><strong>从一个场景开始</strong><span>点击即可运行；文件场景会先请你选择附件</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
       {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
-      {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued"><i /><i /><i /><span>任务正在排队，等待本地执行槽…</span></div></div>}
+      {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
       {session?.status === 'running' && (session.partialOutput
         ? <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>
-        : <div className="assistant-row"><Avatar /><div className="thinking"><i /><i /><i /><span>Agent 正在思考和使用工具…</span></div></div>)}
+        : <div className="assistant-row"><Avatar /><div className="thinking" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 正在处理任务`}</span></div></div>)}
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
         const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
         if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)
@@ -276,18 +278,65 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       <datalist id="easyagent-workspaces">{workspaceOptions.map((item) => <option key={item} value={item} />)}</datalist>
       {attachments.length > 0 && <div className="attachment-preview-list" aria-label="待发送附件">{attachments.map((item) => <div className="attachment-preview" key={item.id}>{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="attachment-file-icon"><FileIcon /></span>}<span><strong title={item.file.name}>{item.file.name}</strong><small>{attachmentTypeLabel(item.file)} · {formatBytes(item.file.size)}</small></span><button type="button" disabled={sending || isActive(session?.status)} aria-label={`移除附件 ${item.file.name}`} onClick={() => removeAttachment(item.id)}><CloseIcon /></button></div>)}</div>}
       {selectedCapabilities.length > 0 && <div className="selected-capabilities" aria-label="已指定能力">{selectedCapabilities.map((item) => <span key={item.key}><b>{capabilityKindLabel(item.kind)}</b>{item.name}<button type="button" aria-label={`移除 ${item.name}`} onClick={() => removeCapability(item)}>×</button></span>)}</div>}
-      <textarea ref={textareaRef} value={draft} onChange={updateDraft} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : '给 EasyAgent 发消息… 输入 @ 选择能力'} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (handleCapabilityKey(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
-      <div className="composer-toolbar"><div className="composer-tools"><button type="button" className="attach-button" disabled={sending || isActive(session?.status)} aria-label="添加文件或图片" onClick={() => fileInputRef.current?.click()}><AttachIcon /><span>附件</span></button><button type="button" className={`capability-button ${capabilityOpen ? 'active' : ''}`} disabled={sending || isActive(session?.status)} aria-label={`选择 Agent 能力，共 ${capabilities.length} 项，${enabledCapabilityCount} 项已启用`} aria-expanded={capabilityOpen} aria-haspopup="listbox" onClick={() => capabilityOpen ? closeCapabilityPicker() : openCapabilityPicker()}><span aria-hidden="true">@</span><strong>能力</strong><small>{capabilities.length}</small></button><small>{enabledSkillCount}/{data.skills.length} Skills · {data.builtinTools.length} Tools · {enabledMCPCount}/{data.mcps.length} MCP</small><input ref={fileInputRef} className="visually-hidden" type="file" multiple tabIndex={-1} aria-hidden="true" accept={attachmentAccept} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} /></div><button type="button" className="send-button" aria-label={sending ? '正在发送' : '发送消息'} disabled={(!draft.trim() && attachments.length === 0) || sending || isActive(session?.status)} onClick={() => send()}>{sending ? <span className="send-spinner" /> : <SendIcon />}</button></div>
+      <textarea ref={textareaRef} value={draft} onChange={updateDraft} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述希望 Agent 如何处理这些附件…' : `${isCodexRuntime ? '给 Codex' : '给 EasyAgent'} 发消息…${isCodexRuntime ? '' : ' 输入 @ 选择能力'}`} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (handleCapabilityKey(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
+      <div className="composer-toolbar"><div className="composer-tools"><button type="button" className="attach-button" disabled={sending || isActive(session?.status)} aria-label="添加文件或图片" onClick={() => fileInputRef.current?.click()}><AttachIcon /><span>附件</span></button>{!isCodexRuntime && <button type="button" className={`capability-button ${capabilityOpen ? 'active' : ''}`} disabled={sending || isActive(session?.status)} aria-label={`选择 Agent 能力，共 ${capabilities.length} 项，${enabledCapabilityCount} 项已启用`} aria-expanded={capabilityOpen} aria-haspopup="listbox" onClick={() => capabilityOpen ? closeCapabilityPicker() : openCapabilityPicker()}><span aria-hidden="true">@</span><strong>能力</strong><small>{capabilities.length}</small></button>}<small>{isCodexRuntime ? 'Codex app-server · 工具、Skill、沙箱由 Codex 管理' : `${enabledSkillCount}/${data.skills.length} Skills · ${data.builtinTools.length} Tools · ${enabledMCPCount}/${data.mcps.length} MCP`}</small><input ref={fileInputRef} className="visually-hidden" type="file" multiple tabIndex={-1} aria-hidden="true" accept={attachmentAccept} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} /></div><button type="button" className="send-button" aria-label={sending ? '正在发送' : '发送消息'} disabled={(!draft.trim() && attachments.length === 0) || sending || isActive(session?.status)} onClick={() => send()}>{sending ? <span className="send-spinner" /> : <SendIcon />}</button></div>
       {attachmentError && <div id="attachment-error" className="composer-error" role="alert">{attachmentError}</div>}
     </div><small id="composer-help" className="composer-hint">Enter 发送 · Shift + Enter 换行 · 可拖入或粘贴 · 单文件最大 5 MiB · 图片/PDF 需要当前模型支持多模态</small></div>
   </section>
 }
 
 export function MessageView({ message }: { message: Session['messages'][number] }) {
-  if (message.role === 'tool') return <details className="tool-result"><summary><span>⌁</span>{message.name || '工具'} 返回结果</summary><Payload value={message.content || ''} /></details>
+  if (message.role === 'tool') return <details className="tool-result" open={message.name === 'weather'}><summary><span>⌁</span>{message.name === 'weather' ? '天气预报' : message.name || '工具'} 返回结果</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
   if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}{message.content && <div>{message.content}</div>}</div></div>
   if (message.role !== 'assistant') return null
   return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => <span key={call.id}>调用 {call.name}</span>)}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
+}
+
+type WeatherResult = {
+  location?: { name?: string; admin1?: string; country?: string }
+  observed_at?: string
+  timezone?: string
+  condition?: string
+  temperature_c?: number
+  feels_like_c?: number
+  humidity_percent?: number
+  wind_kmh?: number
+  source?: string
+  forecast?: Array<{ date?: string; condition?: string; temp_max_c?: number; temp_min_c?: number; precipitation_probability_percent?: number }>
+}
+
+function ToolResult({ name, value }: { name: string; value: string }) {
+  if (name !== 'weather') return <Payload value={value} />
+  let weather: WeatherResult
+  try {
+    weather = JSON.parse(value) as WeatherResult
+  } catch {
+    return <Payload value={value} />
+  }
+  if (!weather.location || !Array.isArray(weather.forecast)) return <Payload value={value} />
+  const place = [weather.location.name, weather.location.admin1, weather.location.country].filter(Boolean).join(' · ')
+  return <div className="weather-result">
+    <div className="weather-current">
+      <div><strong>{place || '天气'}</strong><span>{weather.condition || '—'}</span></div>
+      <b>{typeof weather.temperature_c === 'number' ? `${weather.temperature_c}°C` : '—'}</b>
+      <small>体感 {formatWeatherNumber(weather.feels_like_c)}°C · 湿度 {formatWeatherNumber(weather.humidity_percent)}% · 风速 {formatWeatherNumber(weather.wind_kmh)} km/h</small>
+      <small>{weather.observed_at ? `观测于 ${weather.observed_at}` : ''}{weather.source ? ` · ${weather.source}` : ''}</small>
+    </div>
+    <div className="weather-forecast" aria-label="未来天气预报">
+      {weather.forecast.map((day, index) => <div className="weather-day" key={`${day.date || 'day'}-${index}`}><strong>{formatWeatherDate(day.date)}</strong><span>{day.condition || '—'}</span><b>{formatWeatherNumber(day.temp_max_c)}° / {formatWeatherNumber(day.temp_min_c)}°</b>{typeof day.precipitation_probability_percent === 'number' && <small>降水 {day.precipitation_probability_percent}%</small>}</div>)}
+    </div>
+    <details className="weather-raw"><summary>查看原始天气数据</summary><Payload value={value} /></details>
+  </div>
+}
+
+function formatWeatherDate(value?: string) {
+  if (!value) return '—'
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(date)
+}
+
+function formatWeatherNumber(value?: number) {
+  return typeof value === 'number' ? Number.isInteger(value) ? String(value) : value.toFixed(1) : '—'
 }
 
 export function MessageAttachments({ attachments }: { attachments: Session['messages'][number]['attachments'] }) {

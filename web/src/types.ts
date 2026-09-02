@@ -106,6 +106,7 @@ export type Session = {
   usage: Usage
   context: ContextInfo
   partialOutput?: string
+  runProgress?: string
 }
 
 export type SessionHistoryPage = {
@@ -120,7 +121,7 @@ export type SessionHistoryPage = {
 export type ModelSettings = {
   runtime: 'easyagent' | 'codex'
   provider: string
-  protocol: 'chat_completions' | 'responses'
+  protocol: 'chat_completions' | 'responses' | 'app_server'
   baseUrl: string
   model: string
   apiKey?: string
@@ -203,6 +204,7 @@ export type OllamaStatus = {
 
 export type CodexRuntimeStatus = {
   installed: boolean
+  appServerAvailable: boolean
   path?: string
   version?: string
   message: string

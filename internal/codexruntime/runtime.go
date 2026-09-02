@@ -24,12 +24,16 @@ import (
 const installDocsURL = "https://developers.openai.com/codex/cli"
 
 type Status struct {
-	Installed      bool   `json:"installed"`
-	Path           string `json:"path,omitempty"`
-	Version        string `json:"version,omitempty"`
-	Message        string `json:"message"`
-	InstallCommand string `json:"installCommand"`
-	InstallURL     string `json:"installUrl"`
+	// Installed 表示 codex CLI 可执行文件存在。app-server 不是另一个安装包，
+	// 而是同一个 CLI 的子命令；单独暴露 AppServerAvailable，避免页面只检测到
+	// CLI 就误报“Runtime 可用”。
+	Installed          bool   `json:"installed"`
+	AppServerAvailable bool   `json:"appServerAvailable"`
+	Path               string `json:"path,omitempty"`
+	Version            string `json:"version,omitempty"`
+	Message            string `json:"message"`
+	InstallCommand     string `json:"installCommand"`
+	InstallURL         string `json:"installUrl"`
 }
 
 // Detect 只做本机文件和 --version 检查，不启动 app-server，也不修改用户环境。
@@ -74,7 +78,19 @@ func Detect(environment *appenv.Environment) Status {
 		status.Installed = true
 		status.Path = path
 		status.Version = strings.TrimSpace(string(output))
-		status.Message = "Codex Runtime 已就绪"
+		appCtx, appCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		appServer := exec.CommandContext(appCtx, path, "app-server", "--help")
+		if environment != nil {
+			appServer.Env = environment.Environ(nil)
+		}
+		_, appErr := appServer.Output()
+		appCancel()
+		if appErr == nil {
+			status.AppServerAvailable = true
+			status.Message = "Codex CLI 与 app-server 已就绪"
+		} else {
+			status.Message = "已找到 Codex CLI，但 app-server 子命令不可用"
+		}
 		return status
 	}
 	status.Message = "未检测到 Codex CLI；安装后点击重新检测"
@@ -286,6 +302,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				} `json:"turn"`
 			}
 			_ = json.Unmarshal(message.Params, &params)
+			consumeNotificationWithAnswer(message, config, &answer)
 			if params.Turn.Status == "failed" || params.Turn.Status == "interrupted" {
 				return Result{}, rpcError(params.Turn.Error)
 			}
@@ -310,7 +327,31 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 	if message.Method == "item/completed" && answer.Len() == 0 && isAgentMessage(message.Params) {
 		answer.WriteString(extractCompletedAgentText(message.Params))
 	}
-	if config.OnEvent == nil || (message.Method != "item/started" && message.Method != "item/completed") {
+	if config.OnEvent == nil {
+		return
+	}
+	if message.Method == "turn/started" || message.Method == "turn/completed" {
+		var payload struct {
+			Turn struct {
+				Status string          `json:"status"`
+				Error  json.RawMessage `json:"error"`
+			} `json:"turn"`
+		}
+		if json.Unmarshal(message.Params, &payload) != nil {
+			return
+		}
+		status := "started"
+		if message.Method == "turn/completed" {
+			status = codexStatus(payload.Turn.Status)
+		}
+		detail := ""
+		if len(payload.Turn.Error) > 0 && string(payload.Turn.Error) != "null" {
+			detail = rpcErrorText(payload.Turn.Error)
+		}
+		config.OnEvent(Event{Kind: "codex_turn", Name: "turn", Status: status, Detail: detail})
+		return
+	}
+	if message.Method != "item/started" && message.Method != "item/completed" {
 		return
 	}
 	var payload struct {
@@ -322,9 +363,73 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 	status := "success"
 	if message.Method == "item/started" {
 		status = "started"
+	} else if itemStatus, ok := payload.Item["status"].(string); ok {
+		status = codexStatus(itemStatus)
 	}
 	name, _ := payload.Item["type"].(string)
-	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status})
+	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item)})
+}
+
+func codexStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "inprogress", "started", "running":
+		return "started"
+	case "failed", "error", "declined", "interrupted", "canceled", "cancelled":
+		return "error"
+	default:
+		return "success"
+	}
+}
+
+func rpcErrorText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var value struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &value) == nil && value.Message != "" {
+		return value.Message
+	}
+	return string(raw)
+}
+
+func itemDetail(item map[string]any) string {
+	for _, key := range []string{"reason", "cwd", "phase", "serverName"} {
+		if value, ok := item[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func itemInput(item map[string]any) string {
+	for _, key := range []string{"command", "arguments", "changes", "review"} {
+		if value, ok := item[key]; ok {
+			return marshalItemValue(value)
+		}
+	}
+	return ""
+}
+
+func itemOutput(item map[string]any) string {
+	for _, key := range []string{"text", "aggregatedOutput", "output", "review", "contentItems"} {
+		if value, ok := item[key]; ok {
+			return marshalItemValue(value)
+		}
+	}
+	return ""
+}
+
+func marshalItemValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func isAgentMessage(raw json.RawMessage) bool {

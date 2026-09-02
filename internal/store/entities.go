@@ -156,8 +156,10 @@ type Session struct {
 	Usage             Usage       `json:"usage"`
 	Context           ContextInfo `json:"context"`
 	// PartialOutput 只在模型流式生成期间由内存运行时填充，不写入 SQLite。
-	PartialOutput string       `json:"partialOutput,omitempty"`
-	Compactions   []Compaction `json:"-"`
-	ResponseID    string       `json:"-"`
-	ProviderKey   string       `json:"-"`
+	PartialOutput string `json:"partialOutput,omitempty"`
+	// RunProgress 只在页面轮询运行中会话时填充，不写入 SQLite。
+	RunProgress string       `json:"-"`
+	Compactions []Compaction `json:"-"`
+	ResponseID  string       `json:"-"`
+	ProviderKey string       `json:"-"`
 }
