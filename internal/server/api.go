@@ -25,6 +25,7 @@ type bootstrapPayload struct {
 	MCPs            []store.MCPConfig     `json:"mcps"`
 	SystemPrompt    string                `json:"systemPrompt"`
 	Ollama          ollamaStatus          `json:"ollama"`
+	Codex           codexRuntimeStatus    `json:"codex"`
 	Runtime         runtimeInfoPayload    `json:"runtime"`
 }
 
@@ -98,6 +99,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
+		Codex:   server.detectCodex(request.Context()),
 	})
 }
 
@@ -217,7 +219,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		return
 	}
 	id := newID()
-	if _, err := server.store.CreateSession(id, attachmentTitle(input.Message, attachments), model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
+	if _, err := server.store.CreateSessionWithRuntime(id, attachmentTitle(input.Message, attachments), model.Runtime, model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}

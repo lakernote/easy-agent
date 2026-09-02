@@ -8,6 +8,8 @@ import (
 // 模型配置默认值集中在这里，避免 Store、HTTP API 和 Agent Runtime
 // 各自维护一份数字，后续调整时出现行为不一致。
 const (
+	RuntimeEasyAgent                   = "easyagent"
+	RuntimeCodex                       = "codex"
 	DefaultModelProtocol               = "chat_completions"
 	DefaultOllamaBaseURL               = "http://127.0.0.1:11434/v1"
 	DefaultMaxOutputTokens             = 1600
@@ -21,6 +23,7 @@ const (
 
 // ModelSettings 是持久化的模型连接和上下文预算设置。
 type ModelSettings struct {
+	Runtime                     string `json:"runtime"`
 	Provider                    string `json:"provider"`
 	Protocol                    string `json:"protocol"`
 	BaseURL                     string `json:"baseUrl"`
@@ -53,6 +56,9 @@ func DefaultModelSettings() ModelSettings {
 // WithDefaults 只补齐旧记录或不完整请求中可以安全推导的运行参数，
 // 不替用户猜测模型名称、密钥或上下文窗口。
 func (value ModelSettings) WithDefaults() ModelSettings {
+	if value.Runtime != RuntimeCodex {
+		value.Runtime = RuntimeEasyAgent
+	}
 	if value.Protocol == "" {
 		value.Protocol = DefaultModelProtocol
 	}

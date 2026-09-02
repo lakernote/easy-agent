@@ -73,8 +73,9 @@ export default function App() {
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
   const usesOllama = data.model.provider === 'ollama' || data.model.baseUrl.includes(':11434')
-  const modelReady = Boolean(data.model.model) && (!usesOllama || data.ollama.running)
-  const modelLabel = !data.model.model ? '未配置模型' : usesOllama && !data.ollama.running ? 'Ollama 未运行' : data.model.model
+  const usesCodex = data.model.runtime === 'codex'
+  const modelReady = usesCodex ? data.codex.installed : Boolean(data.model.model) && (!usesOllama || data.ollama.running)
+  const modelLabel = usesCodex ? (data.codex.installed ? `Codex Runtime${data.codex.version ? ` · ${data.codex.version}` : ''}` : 'Codex Runtime 未安装') : !data.model.model ? '未配置模型' : usesOllama && !data.ollama.running ? 'Ollama 未运行' : data.model.model
 
   return <div className="app-shell">
     <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />

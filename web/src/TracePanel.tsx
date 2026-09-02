@@ -17,8 +17,8 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
 }
 
 export function TraceRow({ event }: { event: TraceEvent }) {
-  const isModelResult = event.kind === 'model_end' || event.kind === 'compaction_end'
-  const title = event.kind === 'model_start' ? '模型请求开始' : event.kind === 'model_end' ? `模型响应 · ${event.name || '模型'}` : event.kind === 'compaction_start' ? '准备压缩上下文' : event.kind === 'compaction_end' ? `上下文检查点 · ${event.name || '模型'}` : event.kind === 'tool_start' ? `工具开始 · ${event.name}` : event.kind === 'tool_end' ? `工具结果 · ${event.name}` : `MCP · ${event.name}`
+  const isModelResult = event.kind === 'model_end' || event.kind === 'compaction_end' || event.kind === 'codex_end'
+  const title = event.kind === 'model_start' ? '模型请求开始' : event.kind === 'model_end' ? `模型响应 · ${event.name || '模型'}` : event.kind === 'compaction_start' ? '准备压缩上下文' : event.kind === 'compaction_end' ? `上下文检查点 · ${event.name || '模型'}` : event.kind === 'codex_start' ? 'Codex Runtime 开始' : event.kind === 'codex_end' ? `Codex Runtime 响应 · ${event.name || 'Codex'}` : event.kind === 'tool_start' ? `工具开始 · ${event.name}` : event.kind === 'tool_end' ? `工具结果 · ${event.name}` : event.kind === 'codex_item' ? `Codex 执行 · ${event.name}` : `MCP · ${event.name}`
   const cacheRate = event.cacheReported && event.inputTokens ? Math.round((event.cachedTokens || 0) / event.inputTokens * 100) : 0
   const tokenMissing = event.status === 'error' && !event.totalTokens && !event.inputTokens && !event.outputTokens
   const location = `${event.turn ? `第 ${event.turn} 轮 · ` : ''}${event.step ? `第 ${event.step} 步` : '独立阶段'}${event.attempt ? ` · 尝试 ${event.attempt}` : ''}`

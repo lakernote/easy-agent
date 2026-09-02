@@ -13,6 +13,7 @@ type sessionView struct {
 	Title             string            `json:"title"`
 	Status            string            `json:"status"`
 	Error             string            `json:"error,omitempty"`
+	Runtime           string            `json:"runtime"`
 	Model             string            `json:"model,omitempty"`
 	Workspace         string            `json:"workspace"`
 	CreatedAt         time.Time         `json:"createdAt"`
@@ -34,7 +35,7 @@ type sessionView struct {
 func publicSession(value store.Session) sessionView {
 	return sessionView{
 		ID: value.ID, Title: value.Title, Status: value.Status, Error: value.Error,
-		Model: value.Model, Workspace: value.Workspace, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		Runtime: value.Runtime, Model: value.Model, Workspace: value.Workspace, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		Messages: value.Messages, Events: value.Events, MessageCount: value.MessageCount, EventCount: value.EventCount,
 		UserTurnCount: value.UserTurnCount, MessagesTruncated: value.MessagesTruncated, EventsTruncated: value.EventsTruncated,
 		MessagesHasMore: value.MessagesHasMore, EventsHasMore: value.EventsHasMore, Usage: value.Usage,

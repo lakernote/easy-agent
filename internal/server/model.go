@@ -54,6 +54,15 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
+	if settings.Runtime == store.RuntimeCodex {
+		status := server.detectCodex(request.Context())
+		if !status.Installed {
+			writeError(response, http.StatusBadGateway, status.Message)
+			return
+		}
+		writeJSON(response, http.StatusOK, modelTestResult{OK: true, Model: "Codex Runtime", Answer: status.Version})
+		return
+	}
 	result, err := runModelTest(request, settings)
 	if err != nil {
 		writeError(response, http.StatusBadGateway, "模型能力测试失败："+err.Error())

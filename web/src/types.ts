@@ -89,6 +89,7 @@ export type Session = {
   title: string
   status: 'idle' | 'queued' | 'running' | 'failed' | 'canceled'
   error?: string
+  runtime: 'easyagent' | 'codex'
   model?: string
   workspace: string
   createdAt: string
@@ -117,6 +118,7 @@ export type SessionHistoryPage = {
 }
 
 export type ModelSettings = {
+  runtime: 'easyagent' | 'codex'
   provider: string
   protocol: 'chat_completions' | 'responses'
   baseUrl: string
@@ -199,6 +201,15 @@ export type OllamaStatus = {
   message: string
 }
 
+export type CodexRuntimeStatus = {
+  installed: boolean
+  path?: string
+  version?: string
+  message: string
+  installCommand: string
+  installUrl: string
+}
+
 export type Bootstrap = {
   sessions: Session[]
   sessionsHasMore?: boolean
@@ -210,5 +221,6 @@ export type Bootstrap = {
   mcps: MCPConfig[]
   systemPrompt: string
   ollama: OllamaStatus
+  codex: CodexRuntimeStatus
   runtime: { home: string; workspace: string; runtime: string }
 }

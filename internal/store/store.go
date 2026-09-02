@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   error TEXT NOT NULL,
+  runtime TEXT NOT NULL DEFAULT 'easyagent',
   model TEXT NOT NULL,
   workspace TEXT NOT NULL DEFAULT '',
   response_id TEXT NOT NULL,
@@ -171,6 +172,15 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 	if workspaceColumn == 0 {
 		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN workspace TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("迁移 ea_sessions.workspace: %w", err)
+		}
+	}
+	var runtimeColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name='runtime'`).Scan(&runtimeColumn); err != nil {
+		return err
+	}
+	if runtimeColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN runtime TEXT NOT NULL DEFAULT 'easyagent'`); err != nil {
+			return fmt.Errorf("迁移 ea_sessions.runtime: %w", err)
 		}
 	}
 	var count int
@@ -271,7 +281,14 @@ func (store *Store) DeleteMCP(id string) error {
 }
 
 func (store *Store) CreateSession(id, title, model, workspace string, now time.Time) (Session, error) {
-	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,status,error,model,workspace,response_id,provider_key,created_at,updated_at) VALUES(?,?,'idle','',?,?,'','',?,?)`, id, title, model, workspace, formatTime(now), formatTime(now))
+	return store.CreateSessionWithRuntime(id, title, RuntimeEasyAgent, model, workspace, now)
+}
+
+func (store *Store) CreateSessionWithRuntime(id, title, runtime, model, workspace string, now time.Time) (Session, error) {
+	if runtime != RuntimeCodex {
+		runtime = RuntimeEasyAgent
+	}
+	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,status,error,runtime,model,workspace,response_id,provider_key,created_at,updated_at) VALUES(?,?,'idle','',?,?,?,'','',?,?)`, id, title, runtime, model, workspace, formatTime(now), formatTime(now))
 	if err != nil {
 		return Session{}, err
 	}
@@ -287,7 +304,7 @@ func (store *Store) listSessionsPage(limit int, beforeUpdatedAt, beforeID string
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	query := `SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions`
+	query := `SELECT id,title,status,error,runtime,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions`
 	args := []any{}
 	if strings.TrimSpace(beforeUpdatedAt) != "" && strings.TrimSpace(beforeID) != "" {
 		query += ` WHERE updated_at < ? OR (updated_at = ? AND id < ?)`
@@ -325,7 +342,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanSession(row rowScanner) (Session, error) {
 	var value Session
 	var created, updated string
-	err := row.Scan(&value.ID, &value.Title, &value.Status, &value.Error, &value.Model, &value.Workspace, &value.ResponseID, &value.ProviderKey,
+	err := row.Scan(&value.ID, &value.Title, &value.Status, &value.Error, &value.Runtime, &value.Model, &value.Workspace, &value.ResponseID, &value.ProviderKey,
 		&value.Usage.InputTokens, &value.Usage.OutputTokens, &value.Usage.CachedTokens, &value.Usage.CacheWriteTokens, &value.Usage.TotalTokens,
 		&value.Usage.ModelDurationMS, &value.Usage.ToolDurationMS, &value.Usage.ModelCalls, &value.Usage.ToolCalls, &created, &updated)
 	if err != nil {
@@ -347,7 +364,7 @@ func (store *Store) LoadSessionWindow(id string, messageLimit, eventLimit int) (
 }
 
 func (store *Store) sessionWindowBefore(id string, messageLimit, eventLimit int, messageBefore, eventBefore int64) (Session, error) {
-	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
+	row := store.db.QueryRow(`SELECT id,title,status,error,runtime,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
 	if err != nil {
 		return Session{}, err

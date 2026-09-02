@@ -9,7 +9,7 @@ import (
 // 以及检查点之后的消息尾部。它不会把页面 Trace 或已经被检查点覆盖的原始消息
 // 读入内存；完整原文仍可通过 Session 和历史分页接口读取。
 func (store *Store) RuntimeSession(id string) (Session, error) {
-	row := store.db.QueryRow(`SELECT id,title,status,error,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
+	row := store.db.QueryRow(`SELECT id,title,status,error,runtime,model,workspace,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE id=?`, id)
 	value, err := scanSession(row)
 	if err != nil {
 		return Session{}, err

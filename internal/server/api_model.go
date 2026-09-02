@@ -41,6 +41,15 @@ func publicModel(value store.ModelSettings) store.ModelSettings {
 }
 
 func validateModel(value store.ModelSettings) error {
+	if value.Runtime == store.RuntimeCodex {
+		if value.MaxOutputTokens <= 0 {
+			return errors.New("最大输出 Token 必须大于 0")
+		}
+		if value.RequestTimeoutSeconds < store.MinRequestTimeoutSeconds || value.RequestTimeoutSeconds > store.MaxRequestTimeoutSeconds {
+			return errors.New("模型超时必须在 " + strconv.Itoa(store.MinRequestTimeoutSeconds) + " 到 " + strconv.Itoa(store.MaxRequestTimeoutSeconds) + " 秒之间")
+		}
+		return nil
+	}
 	if strings.TrimSpace(value.BaseURL) == "" || strings.TrimSpace(value.Model) == "" {
 		return errors.New("模型地址和名称不能为空")
 	}

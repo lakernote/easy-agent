@@ -114,7 +114,6 @@ func (server *Server) hasTask(id string) bool {
 }
 
 func (server *Server) runAgentTurn(ctx context.Context, id string, settings store.ModelSettings, usage *store.Usage) error {
-	settings = enrichOllamaContextWindow(ctx, settings)
 	session, err := server.store.RuntimeSession(id)
 	if err != nil {
 		return err
@@ -125,6 +124,10 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 	if err != nil {
 		return fmt.Errorf("打开会话工作区: %w", err)
 	}
+	if session.Runtime == store.RuntimeCodex {
+		return server.runCodexTurn(ctx, session, settings, runEnvironment.Workspace(), usage)
+	}
+	settings = enrichOllamaContextWindow(ctx, settings)
 	turn := session.UserTurnCount
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
