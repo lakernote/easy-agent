@@ -35,7 +35,7 @@ while IFS= read -r line; do
     *'"method":"initialize"'*) echo '{"id":1,"result":{"userAgent":"fake","codexHome":"/tmp","platformFamily":"unix","platformOs":"macos"}}' ;;
     *'"method":"thread/start"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
     *'"method":"thread/resume"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
-    *'"method":"turn/start"'*) echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'; echo '{"method":"item/agentMessage/delta","params":{"delta":"hello"}}'; echo '{"method":"turn/completed","params":{"turn":{"status":"completed","error":null}}}' ;;
+	    *'"method":"turn/start"'*) echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'; echo '{"method":"item/completed","params":{"item":{"type":"userMessage","content":[{"type":"text","text":"say hello"}]}}}'; echo '{"method":"item/agentMessage/delta","params":{"delta":"hello"}}'; echo '{"method":"turn/completed","params":{"turn":{"status":"completed","error":null}}}' ;;
   esac
 done
 `

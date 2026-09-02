@@ -307,7 +307,7 @@ func consumeNotification(message rpcMessage, config Config) {
 }
 
 func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder) {
-	if message.Method == "item/completed" && answer.Len() == 0 {
+	if message.Method == "item/completed" && answer.Len() == 0 && isAgentMessage(message.Params) {
 		answer.WriteString(extractCompletedAgentText(message.Params))
 	}
 	if config.OnEvent == nil || (message.Method != "item/started" && message.Method != "item/completed") {
@@ -325,6 +325,15 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 	}
 	name, _ := payload.Item["type"].(string)
 	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status})
+}
+
+func isAgentMessage(raw json.RawMessage) bool {
+	var payload struct {
+		Item struct {
+			Type string `json:"type"`
+		} `json:"item"`
+	}
+	return json.Unmarshal(raw, &payload) == nil && payload.Item.Type == "agentMessage"
 }
 
 func extractCompletedAgentText(raw json.RawMessage) string {
