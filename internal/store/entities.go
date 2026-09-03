@@ -142,6 +142,7 @@ type Session struct {
 	Status            string      `json:"status"`
 	Error             string      `json:"error,omitempty"`
 	Runtime           string      `json:"runtime"`
+	ProfileID         string      `json:"profileId,omitempty"`
 	Model             string      `json:"model,omitempty"`
 	Workspace         string      `json:"workspace"`
 	CreatedAt         time.Time   `json:"createdAt"`

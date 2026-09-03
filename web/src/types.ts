@@ -120,6 +120,8 @@ export type SessionHistoryPage = {
 }
 
 export type ModelSettings = {
+  profileId?: string
+  profileName?: string
   runtime: 'easyagent' | 'codex'
   provider: string
   protocol: 'chat_completions' | 'responses' | 'app_server'
@@ -133,6 +135,12 @@ export type ModelSettings = {
   contextWindowTokens: number
   compressionThresholdPercent: number
   secretConfigured?: boolean
+}
+
+export type ModelProfile = {
+  id: string
+  name: string
+  settings: ModelSettings
 }
 
 export type ModelRules = {
@@ -217,6 +225,8 @@ export type Bootstrap = {
   sessions: Session[]
   sessionsHasMore?: boolean
   model: ModelSettings
+  modelProfiles: ModelProfile[]
+  activeModelProfileId: string
   modelRules: ModelRules
   skills: Skill[]
   builtinTools: { name: string; description: string; source: string; category: string }[]

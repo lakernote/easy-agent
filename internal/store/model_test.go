@@ -1,6 +1,10 @@
 package store
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
 
 func TestDefaultModelDoesNotGuessInstalledModel(t *testing.T) {
 	value := DefaultModelSettings()
@@ -24,5 +28,82 @@ func TestModelCapabilityDetectionUsesEndpoint(t *testing.T) {
 	}
 	if (ModelSettings{Provider: "openai", BaseURL: "https://example.com/v1"}).IsOfficialOpenAI() {
 		t.Fatal("兼容服务不能因为 Provider 名称收到 OpenAI 厂商扩展字段")
+	}
+}
+
+func TestModelProfilesMigrateLegacyAndKeepActiveSelection(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	legacy, err := database.GetModelSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ProfileID != "default" {
+		t.Fatalf("legacy profile id = %q", legacy.ProfileID)
+	}
+	legacy.ProfileName = "本地 Ollama"
+	legacy.Model = "qwen2.5"
+	if err := database.SaveModelSettings(legacy); err != nil {
+		t.Fatal(err)
+	}
+	second := legacy
+	second.ProfileID = "openai-main"
+	second.ProfileName = "OpenAI 主模型"
+	second.Provider = "openai"
+	second.BaseURL = "https://api.openai.com/v1"
+	second.Model = "gpt-5"
+	if err := database.SaveModelSettings(second); err != nil {
+		t.Fatal(err)
+	}
+
+	profiles, activeID, err := database.ListModelProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 2 || activeID != "openai-main" {
+		t.Fatalf("profiles = %+v, active = %q", profiles, activeID)
+	}
+	active, err := database.GetModelSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ProfileID != "openai-main" || active.Model != "gpt-5" {
+		t.Fatalf("active = %+v", active)
+	}
+	if err := database.DeleteModelProfile("openai-main"); err != nil {
+		t.Fatal(err)
+	}
+	active, err = database.GetModelSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ProfileID != "default" || active.Model != "qwen2.5" {
+		t.Fatalf("fallback active = %+v", active)
+	}
+}
+
+func TestModelProfileCannotBeDeletedWhileSessionUsesIt(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	model := DefaultModelSettings()
+	model.ProfileID = "kept-for-session"
+	model.ProfileName = "被会话使用"
+	model.Model = "fixture"
+	if err := database.SaveModelSettings(model); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSessionWithProfile("session-1", "fixture", RuntimeEasyAgent, model.ProfileID, model.Model, t.TempDir(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteModelProfile(model.ProfileID); err == nil {
+		t.Fatal("仍被会话使用的 profile 不应删除")
 	}
 }

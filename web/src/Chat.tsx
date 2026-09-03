@@ -26,6 +26,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const [capabilityQuery, setCapabilityQuery] = useState('')
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
+  const [selectedProfileId, setSelectedProfileId] = useState(data.activeModelProfileId)
   const [workspace, setWorkspace] = useState(session?.workspace || data.runtime.workspace)
   const endRef = useRef<HTMLDivElement>(null)
   const conversationRef = useRef<HTMLDivElement>(null)
@@ -48,6 +49,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
   const enabledSkillCount = data.skills.filter((item) => item.enabled).length
   const enabledMCPCount = data.mcps.filter((item) => item.enabled).length
+  const profileOptions = useMemo(() => data.modelProfiles.filter((item) => item.settings.runtime === runtime), [data.modelProfiles, runtime])
   const workspaceOptions = useMemo(() => Array.from(new Set([
     data.runtime.workspace,
     ...data.sessions.map((item) => item.workspace).filter(Boolean),
@@ -110,6 +112,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
   useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
   useEffect(() => { setWorkspace(session?.workspace || data.runtime.workspace) }, [session?.id, session?.workspace, data.runtime.workspace])
+  useEffect(() => { if (!session) setSelectedProfileId(data.activeModelProfileId) }, [data.activeModelProfileId, session?.id])
   useEffect(() => {
     if (!capabilityOpen) return
     const close = (event: PointerEvent) => {
@@ -231,7 +234,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
     setSending(true); onError(''); setAttachmentError('')
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
-      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim())
+      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim(), selectedProfileId)
       onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
@@ -270,6 +273,13 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
     </div>
     <div className="composer-wrap"><div ref={composerRef} className={`composer ${dragging ? 'dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files) }}>
       {capabilityOpen && <CapabilityPicker items={visibleCapabilities} activeIndex={capabilityIndex} query={capabilityQuery} searchRef={capabilitySearchRef} onQuery={setCapabilityQuery} onKeyDown={handleCapabilityKey} onPick={insertCapability} onOpenSkills={onOpenSkills} onOpenCapabilities={onOpenCapabilities} />}
+      {!session && profileOptions.length > 0 && <label className="profile-control" title="新会话会使用所选模型配置；已创建会话不会被切换影响">
+        <span>模型</span>
+        <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={sending} aria-label="新会话模型配置">
+          {profileOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.settings.model ? ` · ${item.settings.model}` : ''}</option>)}
+        </select>
+        <em>新会话</em>
+      </label>}
       <label className={`workspace-control ${session ? 'locked' : ''}`} title={session ? '工作区在创建会话后固定；如需切换请新建会话' : '选择最近使用的工作区，或输入服务器上已经存在的目录'}>
         <span>工作区</span>
         <input list="easyagent-workspaces" value={workspace} readOnly={Boolean(session)} disabled={sending || isActive(session?.status)} onChange={(event) => setWorkspace(event.target.value)} placeholder={data.runtime.workspace} aria-label="会话工作区" />

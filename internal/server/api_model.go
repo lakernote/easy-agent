@@ -29,6 +29,14 @@ func (server *Server) saveModel(response http.ResponseWriter, request *http.Requ
 	writeJSON(response, http.StatusOK, publicModel(enrichOllamaContextWindow(request.Context(), input)))
 }
 
+func (server *Server) deleteModelProfile(response http.ResponseWriter, request *http.Request) {
+	if err := server.store.DeleteModelProfile(request.PathValue("id")); err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func sameModelEndpoint(left, right store.ModelSettings) bool {
 	return strings.EqualFold(strings.TrimSpace(left.Provider), strings.TrimSpace(right.Provider)) &&
 		strings.EqualFold(strings.TrimRight(strings.TrimSpace(left.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(right.BaseURL), "/"))

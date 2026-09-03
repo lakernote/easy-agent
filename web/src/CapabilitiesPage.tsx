@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
-import type { Bootstrap, MCPConfig, ModelSettings } from './types'
+import type { Bootstrap, MCPConfig, ModelProfile, ModelSettings } from './types'
 import { formatDuration, parseRecord, recordLines } from './format'
 import { ConfirmDialog } from './dialogs'
 
@@ -19,6 +19,7 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const [deletingMCP, setDeletingMCP] = useState(false)
   const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
+  const [deletingProfile, setDeletingProfile] = useState(false)
 
   useEffect(() => setModel({ ...data.model }), [data.model])
 
@@ -46,10 +47,36 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   }
 
   const selectRuntime = (runtime: ModelSettings['runtime']) => {
-    setModel((current) => runtime === 'codex'
-      ? { ...current, runtime, provider: 'codex', protocol: 'app_server', baseUrl: '', apiKey: '', apiKeyEnv: '', thinking: '', contextWindowTokens: 0, compressionThresholdPercent: 0, model: '' }
-      : { ...current, runtime, provider: data.ollama.running ? 'ollama' : current.provider === 'codex' ? 'ollama' : current.provider, protocol: current.protocol === 'app_server' ? 'chat_completions' : current.protocol, baseUrl: current.baseUrl || data.ollama.baseUrl })
+    const existing = data.modelProfiles.find((profile) => profile.settings.runtime === runtime)
+    setModel(existing ? { ...existing.settings, profileId: existing.id, profileName: existing.name } : (current) => runtime === 'codex'
+      ? { ...current, profileId: `codex-${Date.now()}`, profileName: 'Codex 新配置', runtime, provider: 'codex', protocol: 'app_server', baseUrl: '', apiKey: '', apiKeyEnv: '', thinking: '', contextWindowTokens: 0, compressionThresholdPercent: 0, model: '' }
+      : { ...current, profileId: `easyagent-${Date.now()}`, profileName: 'EasyAgent 新配置', runtime, provider: data.ollama.running ? 'ollama' : current.provider === 'codex' ? 'ollama' : current.provider, protocol: current.protocol === 'app_server' ? 'chat_completions' : current.protocol, baseUrl: current.baseUrl || data.ollama.baseUrl })
     setModelNotice(null); onError('')
+  }
+
+  const savedProfileOptions = data.modelProfiles.filter((profile) => profile.settings.runtime === model.runtime)
+  const currentProfileSaved = savedProfileOptions.some((profile) => profile.id === model.profileId)
+  const profileOptions = currentProfileSaved || !model.profileId
+    ? savedProfileOptions
+    : [...savedProfileOptions, { id: model.profileId, name: model.profileName || '新配置', settings: model }]
+  const selectProfile = (profile: ModelProfile) => {
+    setModel({ ...profile.settings, profileId: profile.id, profileName: profile.name })
+    setModelNotice(null); onError('')
+  }
+  const createProfile = () => {
+    const nextID = `${model.runtime}-${Date.now()}`
+    setModel({ ...model, profileId: nextID, profileName: `${model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} 新配置` })
+    setModelNotice(null); onError('')
+  }
+  const removeProfile = async () => {
+    if (!model.profileId || deletingProfile) return
+    if (!currentProfileSaved) { setModel({ ...data.model }); return }
+    if (savedProfileOptions.length <= 1) return
+    if (!window.confirm(`删除“${model.profileName || '当前配置'}”？已有会话不会受影响。`)) return
+    setDeletingProfile(true); onError('')
+    try { await api.deleteModelProfile(model.profileId); await onRefresh() }
+    catch (reason) { onError((reason as Error).message) }
+    finally { setDeletingProfile(false) }
   }
 
   const useOllama = async (name: string) => {
@@ -127,7 +154,8 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const editingPreset = mcp ? data.mcpPresets.find((candidate) => candidate.id === mcp.id) : undefined
   const codex = model.runtime === 'codex'
   const persistedCodex = data.model.runtime === 'codex'
-  const runtimeChanged = codex !== persistedCodex
+  const profileChanged = model.profileId !== data.model.profileId
+  const runtimeChanged = codex !== persistedCodex || profileChanged
   const activeRuntimeLabel = runtimeChanged ? '待启用' : '已启用'
 
   return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'}`}>
@@ -145,6 +173,7 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
       </nav>
       <div className="runtime-main">
         <div className="runtime-main-head"><div><p className="eyebrow">{runtimeChanged ? 'NEXT RUNTIME' : 'ACTIVE RUNTIME'}</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{runtimeChanged ? `保存后，${codex ? '新会话' : '下一次新会话'}将使用 ${codex ? 'Codex app-server' : 'EasyAgent Go'}；已有会话不变。` : codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><div className="runtime-main-head-actions"><span className={`runtime-state ${runtimeChanged ? 'pending' : 'active'}`}>{activeRuntimeLabel}</span>{runtimeChanged && <button className="primary-button runtime-enable-button" disabled={savingModel} onClick={saveModel}>{savingModel ? '启用中…' : `启用 ${codex ? 'Codex' : 'EasyAgent'} Runtime`}</button>}</div></div>
+        <div className="model-profile-switcher"><div><p className="eyebrow">MODEL PROFILE</p><input className="model-profile-name" aria-label="配置名称" value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="配置名称" /><small>新会话可在输入框中选择；已创建会话保持原配置。</small></div><select value={model.profileId || ''} onChange={(event) => { const profile = profileOptions.find((item) => item.id === event.target.value); if (profile) selectProfile(profile) }} aria-label="选择模型配置"><option value="" disabled>选择配置</option>{profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.settings.model ? ` · ${profile.settings.model}` : ''}</option>)}</select><div className="model-profile-actions"><button className="ghost-button" type="button" onClick={createProfile}>＋ 新建配置</button><button className="ghost-button danger" type="button" disabled={(currentProfileSaved && savedProfileOptions.length <= 1) || deletingProfile} onClick={removeProfile}>{deletingProfile ? '删除中…' : currentProfileSaved ? '删除' : '取消新建'}</button></div></div>
         {codex && <CodexStatus data={data} onDetect={detectCodex} />}
         {codex
           ? <CodexSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} />

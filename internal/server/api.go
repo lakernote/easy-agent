@@ -15,18 +15,20 @@ import (
 )
 
 type bootstrapPayload struct {
-	Sessions        []sessionView         `json:"sessions"`
-	SessionsHasMore bool                  `json:"sessionsHasMore,omitempty"`
-	Model           store.ModelSettings   `json:"model"`
-	Skills          []store.SkillOverride `json:"skills"`
-	BuiltinTools    []builtintools.Info   `json:"builtinTools"`
-	MCPPresets      []mcppresets.Preset   `json:"mcpPresets"`
-	ModelRules      modelRulesPayload     `json:"modelRules"`
-	MCPs            []store.MCPConfig     `json:"mcps"`
-	SystemPrompt    string                `json:"systemPrompt"`
-	Ollama          ollamaStatus          `json:"ollama"`
-	Codex           codexRuntimeStatus    `json:"codex"`
-	Runtime         runtimeInfoPayload    `json:"runtime"`
+	Sessions             []sessionView         `json:"sessions"`
+	SessionsHasMore      bool                  `json:"sessionsHasMore,omitempty"`
+	Model                store.ModelSettings   `json:"model"`
+	ModelProfiles        []store.ModelProfile  `json:"modelProfiles"`
+	ActiveModelProfileID string                `json:"activeModelProfileId"`
+	Skills               []store.SkillOverride `json:"skills"`
+	BuiltinTools         []builtintools.Info   `json:"builtinTools"`
+	MCPPresets           []mcppresets.Preset   `json:"mcpPresets"`
+	ModelRules           modelRulesPayload     `json:"modelRules"`
+	MCPs                 []store.MCPConfig     `json:"mcps"`
+	SystemPrompt         string                `json:"systemPrompt"`
+	Ollama               ollamaStatus          `json:"ollama"`
+	Codex                codexRuntimeStatus    `json:"codex"`
+	Runtime              runtimeInfoPayload    `json:"runtime"`
 }
 
 type runtimeInfoPayload struct {
@@ -75,6 +77,16 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
+	profiles, activeProfileID, err := server.store.ListModelProfiles()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	publicProfiles := make([]store.ModelProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		profile.Settings = publicModel(profile.Settings)
+		publicProfiles = append(publicProfiles, profile)
+	}
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
@@ -95,7 +107,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
-		Sessions: publicSessions(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), Skills: catalog.All(),
+		Sessions: publicSessions(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
@@ -144,7 +156,10 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	settings, _ := server.store.GetModelSettings()
+	settings, _ := server.store.GetModelSettingsByProfileID(value.ProfileID)
+	if settings.Runtime == "" {
+		settings, _ = server.store.GetModelSettings()
+	}
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
 	value.PartialOutput = server.taskPartial(value.ID)
@@ -204,6 +219,7 @@ func (server *Server) getSessionHistory(response http.ResponseWriter, request *h
 type messageRequest struct {
 	Message     string              `json:"message"`
 	Attachments []attachmentRequest `json:"attachments"`
+	ProfileID   string              `json:"profileId,omitempty"`
 	// Workspace 只在创建会话时使用；后续多轮对话始终沿用会话保存的工作区。
 	Workspace string `json:"workspace,omitempty"`
 }
@@ -228,13 +244,13 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
-	model, err := server.store.GetModelSettings()
+	model, err := server.store.GetModelSettingsByProfileID(input.ProfileID)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	id := newID()
-	if _, err := server.store.CreateSessionWithRuntime(id, attachmentTitle(input.Message, attachments), model.Runtime, model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
+	if _, err := server.store.CreateSessionWithProfile(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -269,19 +285,20 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 		writeError(response, http.StatusBadRequest, "工作区在创建会话时确定；请新建会话后选择其他工作区")
 		return
 	}
-	model, err := server.store.GetModelSettings()
-	if err != nil {
-		writeError(response, http.StatusInternalServerError, err.Error())
-		return
-	}
 	id := request.PathValue("id")
 	// 这里只验证会话存在，避免继续对话前把完整历史加载两次。
-	if _, err := server.store.LoadSessionWindow(id, 1, 1); err != nil {
+	loaded, err := server.store.LoadSessionWindow(id, 1, 1)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(response, http.StatusNotFound, "会话不存在")
 		} else {
 			writeError(response, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	model, err := server.store.GetModelSettingsByProfileID(loaded.ProfileID)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := server.enqueueTurn(id, input.Message, attachments, model); err != nil {
@@ -326,7 +343,10 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	settings, _ := server.store.GetModelSettings()
+	settings, _ := server.store.GetModelSettingsByProfileID(value.ProfileID)
+	if settings.Runtime == "" {
+		settings, _ = server.store.GetModelSettings()
+	}
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
 	value.RunProgress = server.taskProgress(id)

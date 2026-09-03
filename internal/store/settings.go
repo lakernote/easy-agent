@@ -23,6 +23,8 @@ const (
 
 // ModelSettings 是持久化的模型连接和上下文预算设置。
 type ModelSettings struct {
+	ProfileID                   string `json:"profileId,omitempty"`
+	ProfileName                 string `json:"profileName,omitempty"`
 	Runtime                     string `json:"runtime"`
 	Provider                    string `json:"provider"`
 	Protocol                    string `json:"protocol"`
@@ -36,6 +38,14 @@ type ModelSettings struct {
 	ContextWindowTokens         int    `json:"contextWindowTokens,omitempty"`
 	CompressionThresholdPercent int    `json:"compressionThresholdPercent,omitempty"`
 	SecretConfigured            bool   `json:"secretConfigured,omitempty"`
+}
+
+// ModelProfile 是一套可复用的 Runtime 配置。Codex profile 只保存 EasyAgent
+// 传给 app-server 的 override/超时等参数，认证和 Provider 仍由 Codex 自己管理。
+type ModelProfile struct {
+	ID       string        `json:"id"`
+	Name     string        `json:"name"`
+	Settings ModelSettings `json:"settings"`
 }
 
 // DefaultModelSettings 返回一个“尚未选择模型”的本地配置。
