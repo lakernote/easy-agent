@@ -126,6 +126,9 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const persistedMCP = Boolean(mcp && data.mcps.some((item) => item.id === mcp.id))
   const editingPreset = mcp ? data.mcpPresets.find((candidate) => candidate.id === mcp.id) : undefined
   const codex = model.runtime === 'codex'
+  const persistedCodex = data.model.runtime === 'codex'
+  const runtimeChanged = codex !== persistedCodex
+  const activeRuntimeLabel = runtimeChanged ? '待启用' : '已启用'
 
   return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'}`}>
     <div className="page-intro runtime-intro"><p className="eyebrow">运行时配置</p><h1>选择执行引擎</h1><p>新会话创建时固定 Runtime；已有会话不会被切换影响。每个 Runtime 只展示它真正负责的配置。</p></div>
@@ -133,15 +136,15 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
       <nav className="runtime-rail" aria-label="选择 Agent Runtime">
         <div className="runtime-rail-head"><p className="eyebrow">RUNTIME</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
-          <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? '当前' : data.ollama.running ? '就绪' : '配置'}</em>
+          <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? (persistedCodex ? '待启用' : '已启用') : data.ollama.running ? '就绪' : '配置'}</em>
         </button>
         <button className={`runtime-nav-item ${codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('codex')} aria-pressed={codex}>
-          <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{codex ? '当前' : data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
+          <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{codex ? (persistedCodex ? '已启用' : '待启用') : data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
         </button>
         <div className="runtime-rail-foot">切换只影响下一次新会话</div>
       </nav>
       <div className="runtime-main">
-        <div className="runtime-main-head"><div><p className="eyebrow">ACTIVE RUNTIME</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><span className="runtime-chip">{codex ? 'CODEX' : 'EASYAGENT'}</span></div>
+        <div className="runtime-main-head"><div><p className="eyebrow">{runtimeChanged ? 'NEXT RUNTIME' : 'ACTIVE RUNTIME'}</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{runtimeChanged ? `保存后，${codex ? '新会话' : '下一次新会话'}将使用 ${codex ? 'Codex app-server' : 'EasyAgent Go'}；已有会话不变。` : codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><div className="runtime-main-head-actions"><span className={`runtime-state ${runtimeChanged ? 'pending' : 'active'}`}>{activeRuntimeLabel}</span>{runtimeChanged && <button className="primary-button runtime-enable-button" disabled={savingModel} onClick={saveModel}>{savingModel ? '启用中…' : `启用 ${codex ? 'Codex' : 'EasyAgent'} Runtime`}</button>}</div></div>
         {codex && <CodexStatus data={data} onDetect={detectCodex} />}
         {codex
           ? <CodexSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} />
