@@ -92,9 +92,10 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
     <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>轻量 · 自托管 · 可扩展</small></div></div>
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
     <nav className="primary-nav">
-      <button className={page === 'chat' ? 'active' : ''} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
-      <button className={page === 'skills' ? 'active' : ''} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em title={`已启用 ${data.skills.filter((item) => item.enabled).length} / 共 ${data.skills.length} 个`}>{data.skills.filter((item) => item.enabled).length}/{data.skills.length}</em></button>
-      <button className={page === 'capabilities' ? 'active' : ''} onClick={() => onPage('capabilities')}><Icon name="plug" />模型与工具</button>
+      <button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
+      <button className={page === 'skills' ? 'active' : ''} aria-current={page === 'skills' ? 'page' : undefined} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em title={`已启用 ${data.skills.filter((item) => item.enabled).length} / 共 ${data.skills.length} 个`}>{data.skills.filter((item) => item.enabled).length}/{data.skills.length}</em></button>
+      <button className={page === 'tools' ? 'active' : ''} aria-current={page === 'tools' ? 'page' : undefined} onClick={() => onPage('tools')}><Icon name="plug" />扩展 <em title={`Tools ${data.builtinTools.length} · MCP ${data.mcps.length}`}>{data.builtinTools.length + data.mcps.length}</em></button>
+      <button className={page === 'runtime' ? 'active' : ''} aria-current={page === 'runtime' ? 'page' : undefined} onClick={() => onPage('runtime')}><Icon name="settings" />运行时</button>
     </nav>
     <div className="session-label"><span>会话 <small>{data.sessions.length}</small></span><div><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
     <div className="session-controls">

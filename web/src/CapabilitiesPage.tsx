@@ -6,8 +6,9 @@ import { ConfirmDialog } from './dialogs'
 
 type Notice = { ready: boolean; title: string; message: string }
 type SettingsSection = 'runtime' | 'models' | 'tools'
+type CapabilitiesSection = 'runtime' | 'tools'
 
-export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
+export function Capabilities({ section, data, onRefresh, onError }: { section: CapabilitiesSection; data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
   const [model, setModel] = useState<ModelSettings>({ ...data.model })
   const [mcp, setMCP] = useState<MCPConfig | null>(null)
   const [testingModel, setTestingModel] = useState(false)
@@ -21,7 +22,9 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
   const [deletingProfile, setDeletingProfile] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('runtime')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(section === 'tools' ? 'tools' : 'runtime')
+
+  useEffect(() => setSettingsSection(section === 'tools' ? 'tools' : 'runtime'), [section])
 
   useEffect(() => setModel({ ...data.model }), [data.model])
 
@@ -188,15 +191,14 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const runtimeChanged = codex !== persistedCodex || profileChanged
   const activeRuntimeLabel = runtimeChanged ? '待启用' : '已启用'
 
-  return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'}`}>
-    <div className="page-intro runtime-intro"><p className="eyebrow">运行时配置</p><h1>运行时与模型</h1><p>把执行引擎、模型连接和工具能力分开管理；新会话创建时选择，已创建会话保持不变。</p></div>
-    <nav className="settings-section-nav" aria-label="设置分区" role="tablist">
-      <button className={settingsSection === 'runtime' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'runtime'} onClick={() => setSettingsSection('runtime')}><span>01</span><strong>运行时</strong><small>EasyAgent / Codex</small></button>
+  return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'} ${section === 'tools' ? 'extensions-page' : 'runtime-page'}`}>
+    <div className="page-intro runtime-intro"><p className="eyebrow">{section === 'tools' ? '扩展管理' : '运行时配置'}</p><h1>{section === 'tools' ? '工具与连接' : '运行时与模型'}</h1><p>{section === 'tools' ? '管理 EasyAgent 的内置工具和外部 MCP 连接；Codex 的工具能力由 app-server 自己管理。' : '选择执行引擎，再为新会话指定模型配置；已创建会话保持不变。'}</p></div>
+    {section === 'runtime' && <nav className="settings-section-nav" aria-label="运行时设置分区" role="tablist">
+      <button className={settingsSection === 'runtime' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'runtime'} onClick={() => setSettingsSection('runtime')}><span>01</span><strong>执行引擎</strong><small>EasyAgent / Codex</small></button>
       <button className={settingsSection === 'models' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'models'} onClick={() => setSettingsSection('models')}><span>02</span><strong>模型配置</strong><small>{data.modelProfiles.length} 套可选配置</small></button>
-      <button className={settingsSection === 'tools' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'tools'} onClick={() => setSettingsSection('tools')}><span>03</span><strong>工具与 MCP</strong><small>{codex ? '由 Codex 管理' : `${data.builtinTools.length + data.mcps.length} 项能力`}</small></button>
-    </nav>
+    </nav>}
     <div className={`runtime-workbench settings-view-${settingsSection}`}>
-      <nav className="runtime-rail" aria-label="选择 Agent Runtime">
+      {section === 'runtime' && <nav className="runtime-rail" aria-label="选择 Agent Runtime">
         <div className="runtime-rail-head"><p className="eyebrow">RUNTIME</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
           <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? (persistedCodex ? '待启用' : '已启用') : data.ollama.running ? '就绪' : '配置'}</em>
@@ -205,7 +207,7 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
           <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{codex ? (persistedCodex ? '已启用' : '待启用') : data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
         </button>
         <div className="runtime-rail-foot">切换只影响下一次新会话</div>
-      </nav>
+      </nav>}
       <div className="runtime-main">
         {settingsSection === 'runtime' && <>
         <div className="runtime-main-head"><div><p className="eyebrow">{runtimeChanged ? 'NEXT RUNTIME' : 'ACTIVE RUNTIME'}</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{runtimeChanged ? `保存后，${codex ? '新会话' : '下一次新会话'}将使用 ${codex ? 'Codex app-server' : 'EasyAgent Go'}；已有会话不变。` : codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><div className="runtime-main-head-actions"><span className={`runtime-state ${runtimeChanged ? 'pending' : 'active'}`}>{activeRuntimeLabel}</span>{runtimeChanged && <button className="primary-button runtime-enable-button" disabled={savingModel} onClick={saveModel}>{savingModel ? '启用中…' : `启用 ${codex ? 'Codex' : 'EasyAgent'} Runtime`}</button>}</div></div>
