@@ -106,6 +106,18 @@ type Config struct {
 	Env       []string
 	OnDelta   func(string)
 	OnEvent   func(Event)
+	OnUsage   func(Usage)
+}
+
+type Usage struct {
+	Reported              bool
+	InputTokens           int
+	OutputTokens          int
+	CachedInputTokens     int
+	CacheWriteInputTokens int
+	ReasoningOutputTokens int
+	TotalTokens           int
+	ModelContextWindow    int
 }
 
 type Event struct {
@@ -126,6 +138,7 @@ type eventTimers struct {
 type Result struct {
 	ThreadID     string
 	Answer       string
+	Usage        Usage
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
@@ -214,6 +227,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		return message, nil
 	}
 	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
+	var latestUsage Usage
 	request := func(method string, id int, params any) (json.RawMessage, error) {
 		if err := send(method, id, params); err != nil {
 			return nil, err
@@ -227,7 +241,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				return nil, fmt.Errorf("Codex Runtime 请求了 EasyAgent 尚未支持的交互: %s", message.Method)
 			}
 			if len(message.ID) == 0 {
-				consumeNotificationWithAnswer(message, config, &strings.Builder{}, timers)
+				consumeNotificationWithAnswer(message, config, &strings.Builder{}, timers, &latestUsage)
 				continue
 			}
 			if string(message.ID) != fmt.Sprintf("%d", id) {
@@ -308,7 +322,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				} `json:"turn"`
 			}
 			_ = json.Unmarshal(message.Params, &params)
-			consumeNotificationWithAnswer(message, config, &answer, timers)
+			consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
 			if params.Turn.Status == "failed" || params.Turn.Status == "interrupted" {
 				return Result{}, rpcError(params.Turn.Error)
 			}
@@ -318,15 +332,27 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			if strings.TrimSpace(answer.String()) == "" {
 				return Result{}, errors.New("Codex Runtime 未返回可用回答")
 			}
-			return Result{ThreadID: threadID, Answer: strings.TrimSpace(answer.String()), Duration: time.Since(startedAt)}, nil
+			return Result{ThreadID: threadID, Answer: strings.TrimSpace(answer.String()), Usage: latestUsage, Duration: time.Since(startedAt)}, nil
 		}
-		consumeNotificationWithAnswer(message, config, &answer, timers)
+		consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
 	}
 }
 
-func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder, timers *eventTimers) {
+func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder, timers *eventTimers, latestUsage *Usage) {
 	if message.Method == "item/completed" && answer.Len() == 0 && isAgentMessage(message.Params) {
 		answer.WriteString(extractCompletedAgentText(message.Params))
+	}
+	if message.Method == "thread/tokenUsage/updated" {
+		usage, ok := parseTokenUsage(message.Params)
+		if ok {
+			if latestUsage != nil {
+				*latestUsage = usage
+			}
+			if config.OnUsage != nil {
+				config.OnUsage(usage)
+			}
+		}
+		return
 	}
 	if config.OnEvent == nil {
 		return
@@ -391,6 +417,47 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		duration = reported
 	}
 	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), Duration: duration})
+}
+
+func parseTokenUsage(raw json.RawMessage) (Usage, bool) {
+	var payload struct {
+		TokenUsage struct {
+			Last struct {
+				InputTokens           int `json:"inputTokens"`
+				OutputTokens          int `json:"outputTokens"`
+				CachedInputTokens     int `json:"cachedInputTokens"`
+				CacheWriteInputTokens int `json:"cacheWriteInputTokens"`
+				ReasoningOutputTokens int `json:"reasoningOutputTokens"`
+				TotalTokens           int `json:"totalTokens"`
+			} `json:"last"`
+			Total struct {
+				InputTokens           int `json:"inputTokens"`
+				OutputTokens          int `json:"outputTokens"`
+				CachedInputTokens     int `json:"cachedInputTokens"`
+				CacheWriteInputTokens int `json:"cacheWriteInputTokens"`
+				ReasoningOutputTokens int `json:"reasoningOutputTokens"`
+				TotalTokens           int `json:"totalTokens"`
+			} `json:"total"`
+			ModelContextWindow *int `json:"modelContextWindow"`
+		} `json:"tokenUsage"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return Usage{}, false
+	}
+	last := payload.TokenUsage.Last
+	usage := Usage{
+		Reported:              true,
+		InputTokens:           last.InputTokens,
+		OutputTokens:          last.OutputTokens,
+		CachedInputTokens:     last.CachedInputTokens,
+		CacheWriteInputTokens: last.CacheWriteInputTokens,
+		ReasoningOutputTokens: last.ReasoningOutputTokens,
+		TotalTokens:           last.TotalTokens,
+	}
+	if payload.TokenUsage.ModelContextWindow != nil {
+		usage.ModelContextWindow = *payload.TokenUsage.ModelContextWindow
+	}
+	return usage, true
 }
 
 func codexStatus(value string) string {

@@ -68,9 +68,9 @@ func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
 	config := Config{OnEvent: func(event Event) { events = append(events, event) }}
 	started := rpcMessage{Method: "item/started", Params: json.RawMessage(`{"item":{"id":"item-1","type":"webSearch","query":"合肥明天天气"}}`)}
 	completed := rpcMessage{Method: "item/completed", Params: json.RawMessage(`{"item":{"id":"item-1","type":"webSearch","status":"completed","query":"合肥明天天气","action":{"type":"search"}}}`)}
-	consumeNotificationWithAnswer(started, config, &strings.Builder{}, timers)
+	consumeNotificationWithAnswer(started, config, &strings.Builder{}, timers, nil)
 	time.Sleep(2 * time.Millisecond)
-	consumeNotificationWithAnswer(completed, config, &strings.Builder{}, timers)
+	consumeNotificationWithAnswer(completed, config, &strings.Builder{}, timers, nil)
 	if len(events) != 2 {
 		t.Fatalf("expected start and completed events, got %d", len(events))
 	}
@@ -81,9 +81,9 @@ func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
 		t.Fatalf("expected completed event with duration: %+v", events[1])
 	}
 
-	consumeNotificationWithAnswer(rpcMessage{Method: "turn/started", Params: json.RawMessage(`{"turn":{"status":"inProgress"}}`)}, config, &strings.Builder{}, timers)
+	consumeNotificationWithAnswer(rpcMessage{Method: "turn/started", Params: json.RawMessage(`{"turn":{"status":"inProgress"}}`)}, config, &strings.Builder{}, timers, nil)
 	time.Sleep(2 * time.Millisecond)
-	consumeNotificationWithAnswer(rpcMessage{Method: "turn/completed", Params: json.RawMessage(`{"turn":{"status":"completed","error":null}}`)}, config, &strings.Builder{}, timers)
+	consumeNotificationWithAnswer(rpcMessage{Method: "turn/completed", Params: json.RawMessage(`{"turn":{"status":"completed","error":null}}`)}, config, &strings.Builder{}, timers, nil)
 	if events[len(events)-1].Kind != "codex_turn" || events[len(events)-1].Duration <= 0 {
 		t.Fatalf("expected completed turn with duration: %+v", events[len(events)-1])
 	}
@@ -95,5 +95,12 @@ func TestCodexStatusAndItemDuration(t *testing.T) {
 	}
 	if got := itemDuration(map[string]any{"durationMs": float64(42)}); got != 42*time.Millisecond {
 		t.Fatalf("unexpected item duration: %s", got)
+	}
+}
+
+func TestParseTokenUsage(t *testing.T) {
+	usage, ok := parseTokenUsage(json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":1200,"outputTokens":300,"cachedInputTokens":900,"cacheWriteInputTokens":50,"reasoningOutputTokens":100,"totalTokens":1500},"total":{"inputTokens":1200,"outputTokens":300,"cachedInputTokens":900,"cacheWriteInputTokens":50,"reasoningOutputTokens":100,"totalTokens":1500},"modelContextWindow":32768}}`))
+	if !ok || !usage.Reported || usage.InputTokens != 1200 || usage.CachedInputTokens != 900 || usage.CacheWriteInputTokens != 50 || usage.ModelContextWindow != 32768 {
+		t.Fatalf("unexpected token usage: %+v", usage)
 	}
 }

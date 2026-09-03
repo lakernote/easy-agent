@@ -383,7 +383,7 @@ func (store *Store) sessionWindowBefore(id string, messageLimit, eventLimit int,
 	}
 	for _, event := range value.Events {
 		value.Usage.CacheReported = value.Usage.CacheReported || event.CacheReported
-		if event.CacheReported && (event.Kind == "model_end" || event.Kind == "compaction_end") {
+		if event.CacheReported && (event.Kind == "model_end" || event.Kind == "compaction_end" || event.Kind == "codex_usage") {
 			value.Usage.CacheInputTokens += event.InputTokens
 		}
 	}

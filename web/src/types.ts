@@ -38,6 +38,7 @@ export type Usage = {
   toolCalls: number
   cacheReported: boolean
   cacheInputTokens: number
+  contextWindowTokens?: number
 }
 
 export type TraceEvent = {

@@ -90,6 +90,23 @@ func (server *Server) taskPartial(id string) string {
 	return server.tasks[id].partial
 }
 
+func (server *Server) setTaskUsage(id string, usage store.Usage) {
+	server.taskMu.Lock()
+	defer server.taskMu.Unlock()
+	current, ok := server.tasks[id]
+	if !ok {
+		return
+	}
+	current.usage = usage
+	server.tasks[id] = current
+}
+
+func (server *Server) taskUsage(id string) store.Usage {
+	server.taskMu.Lock()
+	defer server.taskMu.Unlock()
+	return server.tasks[id].usage
+}
+
 func (server *Server) setTaskProgress(id, progress string) {
 	if strings.TrimSpace(progress) == "" {
 		return
@@ -522,13 +539,21 @@ func decorateContext(session *store.Session, settings store.ModelSettings) {
 	info.UserTurns = userTurns
 	for index := len(session.Events) - 1; index >= 0; index-- {
 		event := session.Events[index]
-		if event.Kind != string(agent.EventModelEnd) {
+		// Codex 的最终响应事件不重复携带 token usage；真实账本以紧邻的
+		// thread/tokenUsage/updated 事件为准，避免把一轮用量算两次。
+		if session.Runtime == "codex" && event.Kind == "codex_end" {
+			continue
+		}
+		if event.Kind != string(agent.EventModelEnd) && event.Kind != "codex_usage" {
 			continue
 		}
 		info.LastInputTokens = event.InputTokens
 		info.LastCachedTokens = event.CachedTokens
 		info.LastCacheWriteTokens = event.CacheWriteTokens
 		info.CacheReported = event.CacheReported
+		if event.ContextWindowTokens > 0 {
+			info.ContextWindowTokens = event.ContextWindowTokens
+		}
 		if event.HistoryMode != "" {
 			info.HistoryMode = event.HistoryMode
 		}

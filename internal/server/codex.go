@@ -52,6 +52,14 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
 		Env:     server.env.Environ(nil),
 		OnDelta: func(delta string) { server.appendTaskPartial(session.ID, delta) },
+		OnUsage: func(value codexruntime.Usage) {
+			server.setTaskUsage(session.ID, store.Usage{
+				InputTokens: value.InputTokens, OutputTokens: value.OutputTokens,
+				CachedTokens: value.CachedInputTokens, CacheWriteTokens: value.CacheWriteInputTokens,
+				TotalTokens: value.TotalTokens, ModelCalls: 1, CacheReported: value.Reported,
+				ContextWindowTokens: value.ModelContextWindow,
+			})
+		},
 		OnEvent: func(event codexruntime.Event) {
 			server.setTaskProgress(session.ID, codexProgress(event))
 			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
@@ -63,13 +71,27 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	usage.ModelCalls++
 	usage.ModelDurationMS += result.Duration.Milliseconds()
-	usage.InputTokens += result.InputTokens
-	usage.OutputTokens += result.OutputTokens
-	usage.TotalTokens += result.TotalTokens
+	usage.InputTokens += result.Usage.InputTokens
+	usage.OutputTokens += result.Usage.OutputTokens
+	usage.CachedTokens += result.Usage.CachedInputTokens
+	usage.CacheWriteTokens += result.Usage.CacheWriteInputTokens
+	usage.TotalTokens += result.Usage.TotalTokens
+	usage.CacheReported = usage.CacheReported || result.Usage.Reported
+	usage.ContextWindowTokens = result.Usage.ModelContextWindow
+	if result.Usage.Reported {
+		_ = server.store.AppendEvent(session.ID, store.Event{
+			Kind: "codex_usage", Turn: session.UserTurnCount, Status: "success", Name: settings.Model,
+			Detail: "thread/tokenUsage/updated · 本轮用量", InputTokens: result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens, CachedTokens: result.Usage.CachedInputTokens,
+			CacheWriteTokens: result.Usage.CacheWriteInputTokens, CacheReported: true,
+			TotalTokens: result.Usage.TotalTokens, ContextWindowTokens: result.Usage.ModelContextWindow,
+			Protocol: "codex_app_server", CreatedAt: time.Now(),
+		})
+	}
 	if err := server.store.AppendMessage(session.ID, store.Message{Role: "assistant", Content: result.Answer, ToolCalls: []store.ToolCall{}, Attachments: []store.Attachment{}, CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex 回答: %w", err)
 	}
-	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", Name: settings.Model, Output: result.Answer, InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, TotalTokens: result.TotalTokens, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
+	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", Name: settings.Model, Output: result.Answer, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
 	}
 	providerKey := strings.Join([]string{"codex", settings.Model, status.Path}, "|")

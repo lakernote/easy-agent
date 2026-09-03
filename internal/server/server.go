@@ -40,6 +40,7 @@ type taskHandle struct {
 	cancel   context.CancelFunc
 	partial  string
 	progress string
+	usage    store.Usage
 }
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {

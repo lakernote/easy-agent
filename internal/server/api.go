@@ -149,6 +149,20 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 	decorateContext(&value, settings)
 	value.PartialOutput = server.taskPartial(value.ID)
 	value.RunProgress = server.taskProgress(value.ID)
+	if live := server.taskUsage(value.ID); live.ModelCalls > 0 || live.InputTokens > 0 || live.OutputTokens > 0 || live.TotalTokens > 0 {
+		value.Usage.InputTokens += live.InputTokens
+		value.Usage.OutputTokens += live.OutputTokens
+		value.Usage.CachedTokens += live.CachedTokens
+		value.Usage.CacheWriteTokens += live.CacheWriteTokens
+		value.Usage.TotalTokens += live.TotalTokens
+		value.Usage.ModelCalls += live.ModelCalls
+		value.Usage.CacheReported = value.Usage.CacheReported || live.CacheReported
+		value.Usage.CacheInputTokens += live.InputTokens
+		if live.ContextWindowTokens > 0 {
+			value.Usage.ContextWindowTokens = live.ContextWindowTokens
+			value.Context.ContextWindowTokens = live.ContextWindowTokens
+		}
+	}
 	writeJSON(response, http.StatusOK, publicSession(value))
 }
 
