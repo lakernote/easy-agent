@@ -1,12 +1,9 @@
-<img src="web/public/logo.svg" alt="EasyAgent Logo" width="80" />
-
-# EasyAgent
-
-一个可部署在个人电脑或 Linux 服务器上的轻量通用 Agent：一个 Go 二进制、一个 SQLite 数据库、一个 Web 页面。
-
-```text
-用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答
-```
+<div align="center">
+  <img src="web/public/logo.svg" alt="EasyAgent Logo" width="96" />
+  <h1>EasyAgent</h1>
+  <p>一个可部署在个人电脑或 Linux 服务器上的轻量通用 Agent</p>
+  <p><code>用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答</code></p>
+</div>
 
 打开页面即可直接对话；需要更多能力时，再按需添加上下文、Skill 或 MCP。系统不引入 Graph、多 Agent 编排或工作流 DSL，模型通过原生 Function Calling 自己决定是否调用工具，Go 代码不根据用户关键词做业务路由。
 
@@ -19,20 +16,7 @@
 - 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
 - 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
 
-## 免费 OpenAI-compatible LLM Provider
-
-下面 4 个 Provider 都可以接入 EasyAgent，但“免费”不等于无限量，也不代表免费政策永久不变。模型名单、速率限制和账号资格应以各平台当前控制台为准。
-
-| Provider | 地区与定位 | 当前可用的免费模型示例 | 免费额度 / 限制 | OpenAI-compatible 接入 | Agent / Tool Calling 备注 |
-| --- | --- | --- | --- | --- | --- |
-| [智谱 BigModel](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash) | 中国大陆；智谱 GLM 官方模型平台 | `glm-4.7-flash` | 官方价格页当前标记输入、输出均免费；具体并发和速率以账号权益为准 | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7-flash` 官方支持 Function Calling、MCP、结构化输出，适合作为国内主力 |
-| [SiliconFlow 硅基流动](https://siliconflow.cn/pricing) | 中国大陆；开源模型托管与聚合平台 | 当前价格页中标记为 ¥0 的模型，例如 `THUDM/GLM-Z1-9B-0414`、`tencent/Hunyuan-MT-7B` | 免费模型名单动态调整；按账号和模型限流，Qwen / DeepSeek 等大模型通常不是免费模型 | `https://api.siliconflow.cn/v1` | 支持 OpenAI SDK 和 Function Calling；具体免费模型是否支持 tools 要以模型详情页为准 |
-| [Groq](https://console.groq.com/docs/rate-limits) | 海外；使用 LPU 提供高速推理 | `openai/gpt-oss-120b`、`openai/gpt-oss-20b` | Free Plan 当前对 `gpt-oss-120b` 约为 30 RPM、1,000 RPD、8K TPM、200K TPD | `https://api.groq.com/openai/v1` | 官方支持 Function Calling、并行工具调用和结构化输出；适合作为高速 Agent Provider |
-| [Cerebras Inference](https://inference-docs.cerebras.ai/resources/openai) | 海外；使用 Cerebras 芯片提供高速推理 | `gpt-oss-120b` | Free 层当前约为 5 RPM、30K TPM、1M TPH、1M TPD；具体限制以账号页面为准 | `https://api.cerebras.ai/v1` | 兼容 OpenAI SDK，适合作为 Groq 的高速备用；Provider 特有参数不要写死到通用 Agent 逻辑 |
-
-推荐的 fallback 顺序：智谱 `glm-4.7-flash` → SiliconFlow 当前 ¥0 模型 → Groq `openai/gpt-oss-120b` → Cerebras `gpt-oss-120b`。生产代码应对 429、超时、模型下线和网络不可达做重试、熔断和降级。
-
-![EasyAgent 对话界面](docs/images/conversation.png)
+<p align="center"><img src="docs/images/conversation.png" alt="EasyAgent 对话界面" width="920" /></p>
 
 ## 快速开始
 
@@ -104,6 +88,22 @@ profile，之后修改或删除其他 profile 不会改变已有会话；仍被�
 | Tool | 高频、确定性的本机操作 | 首轮常驻少量核心工具，其余按需加载并调用 |
 | Skill | 任务方法、团队规范和领域经验 | 页面编辑，模型按需读取 |
 | MCP | GitHub、浏览器、数据库等外部系统 | 页面配置，模型按需连接 |
+
+<details>
+<summary>免费 OpenAI-compatible LLM Provider</summary>
+
+下面 4 个 Provider 都可以接入 EasyAgent，但“免费”不等于无限量，也不代表免费政策永久不变。模型名单、速率限制和账号资格应以各平台当前控制台为准。
+
+| Provider | 地区与定位 | 当前可用的免费模型示例 | 免费额度 / 限制 | OpenAI-compatible 接入 | Agent / Tool Calling 备注 |
+| --- | --- | --- | --- | --- | --- |
+| [智谱 BigModel](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash) | 中国大陆；智谱 GLM 官方模型平台 | `glm-4.7-flash` | 官方价格页当前标记输入、输出均免费；具体并发和速率以账号权益为准 | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7-flash` 官方支持 Function Calling、MCP、结构化输出，适合作为国内主力 |
+| [SiliconFlow 硅基流动](https://siliconflow.cn/pricing) | 中国大陆；开源模型托管与聚合平台 | 当前价格页中标记为 ¥0 的模型，例如 `THUDM/GLM-Z1-9B-0414`、`tencent/Hunyuan-MT-7B` | 免费模型名单动态调整；按账号和模型限流，Qwen / DeepSeek 等大模型通常不是免费模型 | `https://api.siliconflow.cn/v1` | 支持 OpenAI SDK 和 Function Calling；具体免费模型是否支持 tools 要以模型详情页为准 |
+| [Groq](https://console.groq.com/docs/rate-limits) | 海外；使用 LPU 提供高速推理 | `openai/gpt-oss-120b`、`openai/gpt-oss-20b` | Free Plan 当前对 `gpt-oss-120b` 约为 30 RPM、1,000 RPD、8K TPM、200K TPD | `https://api.groq.com/openai/v1` | 官方支持 Function Calling、并行工具调用和结构化输出；适合作为高速 Agent Provider |
+| [Cerebras Inference](https://inference-docs.cerebras.ai/resources/openai) | 海外；使用 Cerebras 芯片提供高速推理 | `gpt-oss-120b` | Free 层当前约为 5 RPM、30K TPM、1M TPH、1M TPD；具体限制以账号页面为准 | `https://api.cerebras.ai/v1` | 兼容 OpenAI SDK，适合作为 Groq 的高速备用；Provider 特有参数不要写死到通用 Agent 逻辑 |
+
+推荐的 fallback 顺序：智谱 `glm-4.7-flash` → SiliconFlow 当前 ¥0 模型 → Groq `openai/gpt-oss-120b` → Cerebras `gpt-oss-120b`。生产代码应对 429、超时、模型下线和网络不可达做重试、熔断和降级。
+
+</details>
 
 ## 文档
 
