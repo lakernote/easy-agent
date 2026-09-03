@@ -6,15 +6,9 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"io/fs"
-	"mime"
 	"net/http"
-	"path"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/codexruntime"
@@ -32,24 +26,17 @@ type Server struct {
 	wait    sync.WaitGroup
 	// 单机版默认只同时运行一个模型任务，避免本地模型争抢内存。
 	semaphore  chan struct{}
-	taskMu     sync.Mutex
-	tasks      map[string]taskHandle
+	tasks      *taskManager
+	runtimes   *runtimeRegistry
 	codexEnvMu sync.RWMutex
 	codexEnv   map[string]string
-}
-
-type taskHandle struct {
-	token    string
-	cancel   context.CancelFunc
-	partial  string
-	progress string
-	usage    store.Usage
 }
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	codexEnv, _ := codexruntime.LoadManagedEnvironment()
-	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: make(map[string]taskHandle), codexEnv: codexEnv}
+	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: newTaskManager(), codexEnv: codexEnv}
+	server.runtimes = newRuntimeRegistry(server)
 	server.routes()
 	return server
 }
@@ -95,101 +82,4 @@ func (server *Server) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (server *Server) routes() {
-	server.mux.HandleFunc("GET /api/v1/health", server.health)
-	server.mux.HandleFunc("GET /api/v1/bootstrap", server.bootstrap)
-	server.mux.HandleFunc("GET /api/v1/usage", server.usage)
-	server.mux.HandleFunc("GET /api/v1/sessions/history", server.getOlderSessions)
-	server.mux.HandleFunc("GET /api/v1/sessions/{id}", server.getSession)
-	server.mux.HandleFunc("GET /api/v1/sessions/{id}/history", server.getSessionHistory)
-	server.mux.HandleFunc("GET /api/v1/attachments/{id}", server.getAttachment)
-	server.mux.HandleFunc("POST /api/v1/sessions", server.createSession)
-	server.mux.HandleFunc("POST /api/v1/sessions/{id}/messages", server.continueSession)
-	server.mux.HandleFunc("POST /api/v1/sessions/{id}/cancel", server.cancelSession)
-	server.mux.HandleFunc("DELETE /api/v1/sessions/{id}", server.deleteSession)
-	server.mux.HandleFunc("PUT /api/v1/model", server.saveModel)
-	server.mux.HandleFunc("DELETE /api/v1/model/{id}", server.deleteModelProfile)
-	server.mux.HandleFunc("POST /api/v1/model/test", server.testModel)
-	server.mux.HandleFunc("GET /api/v1/ollama", server.getOllama)
-	server.mux.HandleFunc("GET /api/v1/codex", server.getCodex)
-	server.mux.HandleFunc("GET /api/v1/codex/config", server.getCodexConfig)
-	server.mux.HandleFunc("PUT /api/v1/codex/config", server.saveCodexConfig)
-	server.mux.HandleFunc("POST /api/v1/codex/install", server.installCodex)
-	server.mux.HandleFunc("POST /api/v1/ollama/use", server.useOllama)
-	server.mux.HandleFunc("PUT /api/v1/skills/{name}", server.saveSkill)
-	server.mux.HandleFunc("DELETE /api/v1/skills/{name}", server.resetSkill)
-	server.mux.HandleFunc("PUT /api/v1/mcp/{id}", server.saveMCP)
-	server.mux.HandleFunc("DELETE /api/v1/mcp/{id}", server.deleteMCP)
-	server.mux.HandleFunc("POST /api/v1/mcp/{id}/test", server.testMCP)
-	server.mux.HandleFunc("POST /api/v1/mcp/presets/{id}/check", server.checkMCPPreset)
-	server.mux.HandleFunc("POST /api/v1/mcp/presets/{id}/install", server.installMCPPreset)
-	server.mux.HandleFunc("DELETE /api/v1/mcp/presets/{id}/install", server.uninstallMCPPreset)
-	// API 拼错时必须返回 JSON 404，不能落到单页应用入口并伪装成 200 成功。
-	server.mux.HandleFunc("GET /api/", func(response http.ResponseWriter, request *http.Request) {
-		writeError(response, http.StatusNotFound, "API 不存在")
-	})
-	server.mux.HandleFunc("GET /", server.static)
-}
-
-func (server *Server) static(response http.ResponseWriter, request *http.Request) {
-	name := strings.TrimPrefix(path.Clean(request.URL.Path), "/")
-	if name == "." || name == "" {
-		name = "index.html"
-	}
-	data, err := fs.ReadFile(server.assets, name)
-	if err != nil {
-		// 前端使用 history API 时，未知路径回退到入口页面。
-		data, err = fs.ReadFile(server.assets, "index.html")
-		name = "index.html"
-	}
-	if err != nil {
-		http.Error(response, "frontend not built", http.StatusNotFound)
-		return
-	}
-	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
-		response.Header().Set("Content-Type", contentType)
-	}
-	response.Header().Set("Cache-Control", "no-store")
-	_, _ = response.Write(data)
-}
-
-func (server *Server) health(response http.ResponseWriter, request *http.Request) {
-	if err := server.store.Ping(request.Context()); err != nil {
-		writeError(response, http.StatusServiceUnavailable, "SQLite 不可用")
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"ok": true, "name": "EasyAgent", "time": time.Now()})
-}
-
-func decodeJSON(response http.ResponseWriter, request *http.Request, value any) bool {
-	// 附件使用 JSON Base64 传输；10 MiB 原始数据编码后约为 13.4 MiB。
-	request.Body = http.MaxBytesReader(response, request.Body, 16*1024*1024)
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		writeError(response, http.StatusBadRequest, "请求格式不正确: "+err.Error())
-		return false
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			writeError(response, http.StatusBadRequest, "请求只能包含一个 JSON 对象")
-		} else {
-			writeError(response, http.StatusBadRequest, "请求格式不正确: "+err.Error())
-		}
-		return false
-	}
-	return true
-}
-
-func writeJSON(response http.ResponseWriter, status int, value any) {
-	response.Header().Set("Content-Type", "application/json; charset=utf-8")
-	response.WriteHeader(status)
-	_ = json.NewEncoder(response).Encode(value)
-}
-
-func writeError(response http.ResponseWriter, status int, message string) {
-	writeJSON(response, status, map[string]string{"error": message})
 }

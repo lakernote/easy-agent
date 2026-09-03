@@ -19,6 +19,19 @@
 - 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
 - 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
 
+## 免费 OpenAI-compatible LLM Provider
+
+下面 4 个 Provider 都可以接入 EasyAgent，但“免费”不等于无限量，也不代表免费政策永久不变。模型名单、速率限制和账号资格应以各平台当前控制台为准。
+
+| Provider | 地区与定位 | 当前可用的免费模型示例 | 免费额度 / 限制 | OpenAI-compatible 接入 | Agent / Tool Calling 备注 |
+| --- | --- | --- | --- | --- | --- |
+| [智谱 BigModel](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash) | 中国大陆；智谱 GLM 官方模型平台 | `glm-4.7-flash` | 官方价格页当前标记输入、输出均免费；具体并发和速率以账号权益为准 | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7-flash` 官方支持 Function Calling、MCP、结构化输出，适合作为国内主力 |
+| [SiliconFlow 硅基流动](https://siliconflow.cn/pricing) | 中国大陆；开源模型托管与聚合平台 | 当前价格页中标记为 ¥0 的模型，例如 `THUDM/GLM-Z1-9B-0414`、`tencent/Hunyuan-MT-7B` | 免费模型名单动态调整；按账号和模型限流，Qwen / DeepSeek 等大模型通常不是免费模型 | `https://api.siliconflow.cn/v1` | 支持 OpenAI SDK 和 Function Calling；具体免费模型是否支持 tools 要以模型详情页为准 |
+| [Groq](https://console.groq.com/docs/rate-limits) | 海外；使用 LPU 提供高速推理 | `openai/gpt-oss-120b`、`openai/gpt-oss-20b` | Free Plan 当前对 `gpt-oss-120b` 约为 30 RPM、1,000 RPD、8K TPM、200K TPD | `https://api.groq.com/openai/v1` | 官方支持 Function Calling、并行工具调用和结构化输出；适合作为高速 Agent Provider |
+| [Cerebras Inference](https://inference-docs.cerebras.ai/resources/openai) | 海外；使用 Cerebras 芯片提供高速推理 | `gpt-oss-120b` | Free 层当前约为 5 RPM、30K TPM、1M TPH、1M TPD；具体限制以账号页面为准 | `https://api.cerebras.ai/v1` | 兼容 OpenAI SDK，适合作为 Groq 的高速备用；Provider 特有参数不要写死到通用 Agent 逻辑 |
+
+推荐的 fallback 顺序：智谱 `glm-4.7-flash` → SiliconFlow 当前 ¥0 模型 → Groq `openai/gpt-oss-120b` → Cerebras `gpt-oss-120b`。生产代码应对 429、超时、模型下线和网络不可达做重试、熔断和降级。
+
 ![EasyAgent 对话界面](docs/images/conversation.png)
 
 ## 快速开始
@@ -70,12 +83,14 @@ codex --version
 codex app-server --help
 ```
 
-然后在同一个服务器运行用户的环境中完成 Codex 登录和配置，再回到 EasyAgent
-「模型与工具 → 运行时配置」点击「重新检测」并启用 Codex Runtime。EasyAgent
-不会把本机 ChatGPT Desktop 的登录状态复制到远程服务器，也不会代替服务器上的
-Codex 凭据管理。若服务器是多人共享部署，需要明确使用一个服务账号，或为每个
-用户隔离 Unix 用户、HOME 和 Codex 配置；不要把某个用户的 `~/.codex` 凭据复制
-给所有用户。
+安装完成后进入 EasyAgent「设置 → 执行引擎」，页面会自动检测；也可以直接点击
+「在服务器安装 Codex CLI」。进入「模型配置」编辑 Codex 配置，即可填写 Provider、
+Base URL、默认模型、推理强度和 API Key。API Key 不要写入 `env_key`：`env_key`
+只填写变量名，例如 `GROQ_API_KEY`；EasyAgent 会把密钥保存到当前服务用户的
+私有文件，并在启动 app-server 时注入。EasyAgent 不会把本机 ChatGPT Desktop
+的登录状态复制到远程服务器。若服务器是多人共享部署，需要明确使用一个服务账号，
+或为每个用户隔离 Unix 用户、HOME 和 Codex 配置；不要把某个用户的 `~/.codex`
+凭据复制给所有用户。
 
 「模型与工具」支持为 EasyAgent 和 Codex 分别保存多套配置。设置页保存的是当前
 profile；首页新会话可以选择同一 Runtime 下的 profile。会话创建后会固定它的

@@ -1,6 +1,21 @@
-import type { Session, SessionHistoryPage } from './types'
-export type Page = 'chat' | 'skills' | 'runtime' | 'tools' | 'settings'
+import type { Bootstrap, Session, SessionHistoryPage } from './types'
+export type Page = 'chat' | 'runtime' | 'models' | 'skills' | 'tools' | 'usage' | 'settings'
 export const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
+
+export function updateSessionSummary(data: Bootstrap, session: Session): Bootstrap {
+  return {
+    ...data,
+    sessions: data.sessions.map((item) => item.id === session.id ? {
+      ...item,
+      status: session.status,
+      error: session.error,
+      updatedAt: session.updatedAt,
+      runProgress: session.runProgress,
+      partialOutput: session.partialOutput,
+    } : item),
+  }
+}
+
 export function mergeSessionHistory(current: Session, page: SessionHistoryPage, kind: 'messages' | 'events'): Session {
   if (kind === 'messages') {
     const messages = Array.from(new Map([...page.messages || [], ...current.messages].map((item) => [item.id, item])).values()).sort((left, right) => left.id - right.id)

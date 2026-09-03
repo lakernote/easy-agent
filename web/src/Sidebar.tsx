@@ -91,10 +91,8 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>轻量 · 自托管 · 可扩展</small></div></div>
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
-    <nav className="primary-nav">
+    <nav className="primary-nav" aria-label="主导航">
       <button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
-      <button className={page === 'skills' ? 'active' : ''} aria-current={page === 'skills' ? 'page' : undefined} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em title={`已启用 ${data.skills.filter((item) => item.enabled).length} / 共 ${data.skills.length} 个`}>{data.skills.filter((item) => item.enabled).length}/{data.skills.length}</em></button>
-      <button className={page === 'tools' ? 'active' : ''} aria-current={page === 'tools' ? 'page' : undefined} onClick={() => onPage('tools')}><Icon name="plug" />扩展 <em title={`Tools ${data.builtinTools.length} · MCP ${data.mcps.length}`}>{data.builtinTools.length + data.mcps.length}</em></button>
     </nav>
     <div className="session-label"><span>会话 <small>{data.sessions.length}</small></span><div><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
     <div className="session-controls">
@@ -111,9 +109,9 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
         {!managing && !isActive(item.status) && <button className="session-delete" aria-label={`删除会话 ${item.title}`} title="删除会话" onClick={() => requestRemove(item)}><TrashIcon /></button>}
       </div>)}
     </div>
-    <button className={`sidebar-settings ${page === 'settings' || page === 'runtime' ? 'active' : ''}`} type="button" aria-current={page === 'settings' || page === 'runtime' ? 'page' : undefined} onClick={() => onPage('settings')}><Icon name="settings" /><span>设置</span><small>运行时 · 模型 · 用量</small></button>
+    <button className={`sidebar-settings ${page !== 'chat' ? 'active' : ''}`} type="button" aria-label="设置" aria-current={page !== 'chat' ? 'page' : undefined} onClick={() => onPage('settings')}><Icon name="settings" /><span>设置</span></button>
     <div className="sidebar-feedback" aria-live="polite">{feedback}</div>
-    <div className="sidebar-foot"><span className="service-dot" />本地服务正常 <small>v0.1</small></div>
+    <div className="sidebar-foot"><strong>EasyAgent</strong><small>v0.1</small></div>
     {pendingDelete.length > 0 && <ConfirmDialog
       title={pendingDelete.length === 1 ? '删除这个会话？' : `删除选中的 ${pendingDelete.length} 个会话？`}
       description="会话消息和对应的 Agent Trace 将一起删除，删除后无法恢复。"

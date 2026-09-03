@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { Session, TraceEvent } from './types'
 import { formatDuration, formatTokens, historyModeLabel } from './format'
-import { Metric, Payload } from './ui'
+import { Payload } from './chat/Payload'
+import { Metric } from './chat/Metrics'
 export function TracePanel({ session, onLoadOlder, onError, onClose }: { session: Session; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onError: (value: string) => void; onClose: () => void }) {
   const [loadingOlder, setLoadingOlder] = useState(false)
   const cacheRate = session.usage.cacheReported && session.usage.cacheInputTokens ? Math.round(session.usage.cachedTokens / session.usage.cacheInputTokens * 100) : 0

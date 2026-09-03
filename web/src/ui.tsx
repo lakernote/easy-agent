@@ -6,6 +6,3 @@ export function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true">
 export function CloseIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg> }
 export function FileIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h5M9 13h6m-6 4h5" /></svg> }
 export function Avatar() { return <div className="avatar"><Logo /></div> }
-export function Metric({ label, value, sub }: { label: string; value: string; sub: string }) { return <div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div> }
-import { useMemo } from 'react'
-export function Payload({ value }: { value: string }) { const formatted = useMemo(() => { try { return JSON.stringify(JSON.parse(value), null, 2) } catch { return value } }, [value]); return <pre>{formatted}</pre> }

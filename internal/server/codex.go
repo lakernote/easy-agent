@@ -43,7 +43,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		return errors.New("Codex Runtime 没有找到本轮用户消息")
 	}
 	startedAt := time.Now()
-	server.setTaskProgress(session.ID, "Codex · 启动 app-server")
+	server.tasks.setProgress(session.ID, "Codex · 启动 app-server")
 	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_start", Turn: session.UserTurnCount, Status: "started", Name: settings.Model, Detail: "由 Codex app-server 接管工具、Skill、沙箱和会话历史", CreatedAt: startedAt}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
 	}
@@ -51,9 +51,9 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		Path: status.Path, Workspace: workspace, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
 		Env:     server.codexEnvironment(),
-		OnDelta: func(delta string) { server.appendTaskPartial(session.ID, delta) },
+		OnDelta: func(delta string) { server.tasks.appendPartial(session.ID, delta) },
 		OnUsage: func(value codexruntime.Usage) {
-			server.setTaskUsage(session.ID, store.Usage{
+			server.tasks.setUsage(session.ID, store.Usage{
 				InputTokens: value.InputTokens, OutputTokens: value.OutputTokens,
 				CachedTokens: value.CachedInputTokens, CacheWriteTokens: value.CacheWriteInputTokens,
 				TotalTokens: value.TotalTokens, ModelCalls: 1, CacheReported: value.Reported,
@@ -61,7 +61,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 			})
 		},
 		OnEvent: func(event codexruntime.Event) {
-			server.setTaskProgress(session.ID, codexProgress(event))
+			server.tasks.setProgress(session.ID, codexProgress(event))
 			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
 		},
 	}, message)

@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
   <title id="title">EasyAgent</title>
-  <desc id="description">一条持续前进的路径组成小写字母 e，代表简单而持续行动的 Agent</desc>
+  <desc id="description">由四向核心光标和中心节点组成的 EasyAgent 标识，代表 Agent 的思考与行动</desc>
   <rect x="2" y="2" width="60" height="60" rx="18" fill="#173f2e"/>
-  <path d="M46 42c-3.3 5-8.4 8-14.5 8C21.3 50 13 42 13 32s8.3-18 18.5-18S50 22 50 32H18"
-        fill="none" stroke="#eef7f1" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M42.5 42h3.5" fill="none" stroke="#76d29b" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M32 8c2 13.2 10.8 22 24 24-13.2 2-22 10.8-24 24-2-13.2-10.8-22-24-24 13.2-2 22-10.8 24-24Z" fill="#eef7f1"/>
+  <circle cx="32" cy="32" r="8" fill="#173f2e"/>
+  <circle cx="32" cy="32" r="3.75" fill="#76d29b"/>
 </svg>
