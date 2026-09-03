@@ -95,7 +95,6 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
       <button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
       <button className={page === 'skills' ? 'active' : ''} aria-current={page === 'skills' ? 'page' : undefined} onClick={() => onPage('skills')}><Icon name="skill" />Skills <em title={`已启用 ${data.skills.filter((item) => item.enabled).length} / 共 ${data.skills.length} 个`}>{data.skills.filter((item) => item.enabled).length}/{data.skills.length}</em></button>
       <button className={page === 'tools' ? 'active' : ''} aria-current={page === 'tools' ? 'page' : undefined} onClick={() => onPage('tools')}><Icon name="plug" />扩展 <em title={`Tools ${data.builtinTools.length} · MCP ${data.mcps.length}`}>{data.builtinTools.length + data.mcps.length}</em></button>
-      <button className={page === 'runtime' ? 'active' : ''} aria-current={page === 'runtime' ? 'page' : undefined} onClick={() => onPage('runtime')}><Icon name="settings" />运行时</button>
     </nav>
     <div className="session-label"><span>会话 <small>{data.sessions.length}</small></span><div><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
     <div className="session-controls">
@@ -112,6 +111,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
         {!managing && !isActive(item.status) && <button className="session-delete" aria-label={`删除会话 ${item.title}`} title="删除会话" onClick={() => requestRemove(item)}><TrashIcon /></button>}
       </div>)}
     </div>
+    <button className={`sidebar-settings ${page === 'settings' || page === 'runtime' ? 'active' : ''}`} type="button" aria-current={page === 'settings' || page === 'runtime' ? 'page' : undefined} onClick={() => onPage('settings')}><Icon name="settings" /><span>设置</span><small>运行时 · 模型 · 用量</small></button>
     <div className="sidebar-feedback" aria-live="polite">{feedback}</div>
     <div className="sidebar-foot"><span className="service-dot" />本地服务正常 <small>v0.1</small></div>
     {pendingDelete.length > 0 && <ConfirmDialog

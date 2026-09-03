@@ -3,10 +3,12 @@ import { api } from './api'
 import type { Bootstrap, MCPConfig, ModelProfile, ModelSettings } from './types'
 import { formatDuration, parseRecord, recordLines } from './format'
 import { ConfirmDialog } from './dialogs'
+import { Skills } from './Skills'
+import { UsagePage } from './UsagePage'
 
 type Notice = { ready: boolean; title: string; message: string }
-type SettingsSection = 'runtime' | 'models' | 'tools'
-type CapabilitiesSection = 'runtime' | 'tools'
+type SettingsSection = 'runtime' | 'models' | 'skills' | 'tools' | 'usage'
+type CapabilitiesSection = 'runtime' | 'tools' | 'settings'
 
 export function Capabilities({ section, data, onRefresh, onError }: { section: CapabilitiesSection; data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
   const [model, setModel] = useState<ModelSettings>({ ...data.model })
@@ -214,13 +216,17 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
   const activeRuntimeLabel = runtimeChanged ? '待启用' : '已启用'
 
   return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'} ${section === 'tools' ? 'extensions-page' : 'runtime-page'}`}>
-    <div className="page-intro runtime-intro"><p className="eyebrow">{section === 'tools' ? '扩展管理' : '运行时配置'}</p><h1>{section === 'tools' ? '工具与连接' : '运行时与模型'}</h1><p>{section === 'tools' ? '管理 EasyAgent 的内置工具和外部 MCP 连接；Codex 的工具能力由 app-server 自己管理。' : '选择执行引擎，再为新会话指定模型配置；已创建会话保持不变。'}</p></div>
-    {section === 'runtime' && <nav className="settings-section-nav" aria-label="运行时设置分区" role="tablist">
+    <div className="page-intro runtime-intro"><p className="eyebrow">{section === 'tools' ? '扩展管理' : '设置中心'}</p><h1>{section === 'tools' ? '工具与连接' : '运行时与模型'}</h1><p>{section === 'tools' ? '管理 EasyAgent 的内置工具和外部 MCP 连接；Codex 的工具能力由 app-server 自己管理。' : '把执行引擎、模型、Skills、工具和用量分开管理；新会话创建时才会读取默认配置。'}</p></div>
+    {(section === 'runtime' || section === 'settings') && <nav className="settings-section-nav" aria-label="设置分区" role="tablist">
       <button className={settingsSection === 'runtime' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'runtime'} onClick={() => setSettingsSection('runtime')}><span>01</span><strong>执行引擎</strong><small>EasyAgent / Codex</small></button>
       <button className={settingsSection === 'models' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'models'} onClick={() => setSettingsSection('models')}><span>02</span><strong>模型配置</strong><small>{data.modelProfiles.length} 套可选配置</small></button>
+      <button className={settingsSection === 'skills' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'skills'} onClick={() => setSettingsSection('skills')}><span>03</span><strong>Skills</strong><small>{data.skills.filter((item) => item.enabled).length}/{data.skills.length} 已启用</small></button>
+      <button className={settingsSection === 'tools' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'tools'} onClick={() => setSettingsSection('tools')}><span>04</span><strong>工具与 MCP</strong><small>{data.builtinTools.length + data.mcps.length} 项能力</small></button>
+      <button className={settingsSection === 'usage' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'usage'} onClick={() => setSettingsSection('usage')}><span>05</span><strong>用量</strong><small>按时间和模型</small></button>
     </nav>}
+    {section === 'settings' && <div className="settings-scope-note"><span>共享目录</span><strong>Skills 内容</strong><small>统一编辑，是否参与当前任务由 Runtime 决定</small><span>Runtime 绑定</span><strong>模型 · Tools / MCP</strong><small>模型配置按 Runtime 隔离；Codex 能力由 app-server 管理</small></div>}
     <div className={`runtime-workbench settings-view-${settingsSection}`}>
-      {section === 'runtime' && <nav className="runtime-rail" aria-label="选择 Agent Runtime">
+      {(section === 'runtime' || section === 'settings') && settingsSection === 'runtime' && <nav className="runtime-rail" aria-label="选择 Agent Runtime">
         <div className="runtime-rail-head"><p className="eyebrow">运行引擎</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
           <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? (persistedCodex ? '待启用' : '已启用') : data.ollama.running ? '就绪' : '配置'}</em>
@@ -239,6 +245,8 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
         {settingsSection === 'models' && <>
         <div className="model-catalog"><div className="model-catalog-head"><div><p className="eyebrow">配置列表</p><h2>模型配置</h2><p>不同 Runtime 的配置分开保存。点击配置名称或“编辑”修改，新增配置也会在抽屉中完成。</p></div><div className="catalog-actions"><span className="settings-count">{data.modelProfiles.length} 套</span><button className="primary-button" type="button" onClick={() => openProfileEditor()}>＋ 新建配置</button></div></div><div className="model-profile-directory" aria-label="模型配置列表">{data.modelProfiles.map((profile) => { const profileCodex = profile.settings.runtime === 'codex'; return <div className="model-profile-row" key={profile.id}><button className="model-profile-select" type="button" onClick={() => openProfileEditor(profile)} aria-label={`编辑 ${profile.name}`}><span className={`runtime-nav-dot ${profileCodex ? (data.codex.installed && data.codex.appServerAvailable ? 'ready' : '') : 'easyagent-dot'}`} /><span><strong>{profile.name}</strong><small>{profileCodex ? 'Codex Runtime' : 'EasyAgent Runtime'} · {profile.settings.model || (profileCodex ? '使用 config.toml' : '未填写模型')}</small></span></button><div className="model-profile-row-actions"><span className={`profile-runtime-tag ${profileCodex ? 'codex' : 'easyagent'}`}>{profileCodex ? 'Codex' : 'EasyAgent'}</span><button className={`profile-activate ${profile.id === data.activeModelProfileId ? 'active' : ''}`} type="button" disabled={profile.id === data.activeModelProfileId || savingModel} onClick={() => activateProfile(profile)}>{profile.id === data.activeModelProfileId ? '当前默认' : '设为默认'}</button><button className="profile-edit" type="button" onClick={() => openProfileEditor(profile)}>编辑</button></div></div>})}{!currentProfileSaved && model.profileId && <div className="model-profile-row draft"><button className="model-profile-select" type="button" onClick={() => setModelEditorOpen(true)} aria-label="编辑未保存配置"><span className="runtime-nav-dot" /><span><strong>{model.profileName || '新配置'}</strong><small>{model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'} · 未保存</small></span></button><div className="model-profile-row-actions"><span className="profile-runtime-tag draft">草稿</span><button className="profile-edit" type="button" onClick={() => setModelEditorOpen(true)}>继续编辑</button></div></div>}<div className="directory-foot">默认配置会出现在首页输入框；已有会话不会因修改配置而改变。</div></div></div>
         </>}
+        {settingsSection === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
+        {settingsSection === 'usage' && <UsagePage data={data} />}
         {settingsSection === 'tools' && (codex ? <div className="section-block codex-tools-note"><div className="runtime-boundary-note"><strong>Codex 能力边界</strong><span>工具、Skill、沙箱和审批由 Codex app-server 管理；EasyAgent 的内置 Tools 和 MCP 不会注入 Codex。</span></div></div> : <>
           <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>首轮只发送少量核心 Schema；文件、Shell、网页和 Skill 需要时再加载。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="capability-note"><strong>工作区</strong><span><code>{data.runtime.workspace}</code></span><strong>私有 Runtime</strong><span><code>{data.runtime.runtime}</code></span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
           <MCPSettings data={data} mcp={mcp} mcpNotice={mcpNotice} installingPreset={installingPreset} checkingPreset={checkingPreset} togglingMCP={togglingMCP} onInstall={installPreset} onCheck={checkPreset} onTest={testMCP} onToggle={toggleMCP} onCreate={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })} onEdit={(item, preset) => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })} dataPresets={data.mcpPresets} onCloseNotice={() => setMCPNotice(null)} />

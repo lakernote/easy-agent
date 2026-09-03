@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
 	CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
 	CREATE INDEX IF NOT EXISTS idx_ea_events_session ON ea_events(session_id, seq);
 	CREATE INDEX IF NOT EXISTS idx_ea_events_session_id ON ea_events(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_ea_events_created ON ea_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_id, seq);
 `
 	_, err := store.db.Exec(schema)

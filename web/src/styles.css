@@ -418,3 +418,48 @@ html, body, #root { height: 100%; }
 .session-open:focus-visible { outline: none; }
 .session-row:focus-within { box-shadow: inset 0 -2px #8bbda0; }
 .session-row.active:focus-within { box-shadow: inset 0 -2px #8bbda0; }
+
+.settings-scope-note { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; margin: -8px 0 19px; padding: 10px 12px; border-left: 2px solid #a7c8b3; color: #738178; background: #f4f8f5; font-size: 9px; line-height: 1.45; }
+.settings-scope-note span { color: #3c7354; font-family: var(--mono); font-size: 8px; }.settings-scope-note strong { color: #52675a; font-size: 9px; }.settings-scope-note small { color: #8c9890; }
+
+/* 设置入口固定在侧栏底部；移动端保留为底部导航的独立第四个入口。 */
+.sidebar-settings { display: flex; align-items: center; gap: 9px; min-height: 48px; margin: 0 10px; padding: 0 11px; border: 0; border-top: 1px solid var(--line); color: #68766e; background: transparent; cursor: pointer; text-align: left; }
+.sidebar-settings svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar-settings span { font-size: 11px; font-weight: 600; }
+.sidebar-settings small { margin-left: auto; color: #94a098; font-size: 8px; }
+.sidebar-settings:hover { color: #2f6949; }
+.sidebar-settings.active { color: #1f6542; }
+.sidebar-settings.active svg { color: var(--green); }
+
+/* 设置中心的分区内容共享同一条主滚动轴，嵌入的 Skills 页面不再制造第二层页面滚动。 */
+.settings-view-skills, .settings-view-usage { display: block; grid-template-columns: minmax(0, 1fr); }
+.settings-view-skills .runtime-rail, .settings-view-usage .runtime-rail { display: none; }
+.settings-view-skills .runtime-main, .settings-view-usage .runtime-main { width: 100%; }
+.runtime-main > .settings-page { width: 100%; max-width: none; min-height: 0; margin: 0; padding: 0; }
+.runtime-main > .settings-page > .page-intro { display: none; }
+.settings-section-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+.usage-page { min-width: 0; }
+.usage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 0 15px; padding-bottom: 1px; border-bottom: 1px solid #dfe7e1; }
+.usage-period-tabs { display: flex; min-width: 0; gap: 2px; }
+.usage-period-tabs button { display: grid; min-width: 96px; gap: 3px; padding: 10px 12px 11px; border: 0; border-bottom: 2px solid transparent; color: #7a887f; background: transparent; cursor: pointer; text-align: left; }
+.usage-period-tabs button:hover { color: #326b4b; background: #f4f8f5; }
+.usage-period-tabs button.active { color: #23623f; border-bottom-color: var(--green); background: #f1f7f3; }
+.usage-period-tabs strong { font-size: 10px; }.usage-period-tabs small { color: #96a099; font-size: 8px; }.usage-updated { flex: 0 0 auto; color: #8b978f; font-family: var(--mono); font-size: 8px; }
+.usage-error { margin-bottom: 14px; padding: 11px 13px; border-left: 3px solid #b55e51; color: #7b463f; background: #fff1ee; font-size: 10px; }
+.usage-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; border: 1px solid #dfe7e1; border-radius: 11px; background: #f5f9f6; overflow: hidden; }
+.usage-kpis > div { min-width: 0; padding: 15px 16px; border-right: 1px solid #dfe7e1; }.usage-kpis > div:last-child { border-right: 0; }.usage-kpis span, .usage-kpis small { display: block; color: #7f8c84; font-size: 9px; }.usage-kpis strong { display: block; margin: 6px 0 4px; color: #224d35; font-family: var(--mono); font-size: 18px; letter-spacing: -.04em; }.usage-kpis small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }.usage-panel { min-width: 0; padding: 19px 20px; border: 1px solid #dfe7e1; border-radius: 11px; background: #fff; }.usage-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }.usage-panel-head h2 { margin: 0; font-size: 15px; }.usage-panel-head .eyebrow { margin-bottom: 6px; }.usage-panel-head > span { flex: 0 0 auto; color: #8b978f; font-size: 8px; }
+.usage-period-list, .usage-model-list { border-top: 1px solid #e6ece7; }.usage-period-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 42px; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid #edf1ee; }.usage-period-label { min-width: 0; }.usage-period-label strong, .usage-period-label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.usage-period-label strong { color: #40564a; font-size: 10px; }.usage-period-label small { margin-top: 4px; color: #909b94; font-size: 8px; }.usage-period-track { height: 6px; border-radius: 999px; background: #edf3ef; overflow: hidden; }.usage-period-track span { display: block; height: 100%; min-width: 3px; border-radius: inherit; background: #62a982; }.usage-period-value { color: #315d43; font-family: var(--mono); font-size: 9px; text-align: right; }
+.usage-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; padding: 12px 0; border-bottom: 1px solid #edf1ee; }.usage-model-title { display: flex; min-width: 0; align-items: center; gap: 8px; }.usage-runtime-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #61a783; box-shadow: 0 0 0 3px #e5f1e9; }.usage-runtime-dot.codex { background: #b29b55; box-shadow: 0 0 0 3px #f5efd9; }.usage-model-title > div { min-width: 0; }.usage-model-title strong, .usage-model-title small, .usage-model-meta span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.usage-model-title strong { color: #355540; font-size: 10px; }.usage-model-title small { margin-top: 4px; color: #8a978f; font-family: var(--mono); font-size: 8px; }.usage-model-numbers { text-align: right; }.usage-model-numbers strong { display: block; color: #315d43; font-family: var(--mono); font-size: 11px; }.usage-model-numbers span { display: block; margin-top: 4px; color: #8b978f; font-size: 8px; }.usage-model-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px 13px; color: #8b978f; font-size: 8px; }.usage-empty { display: grid; min-height: 130px; align-content: center; gap: 6px; color: #87938b; font-size: 10px; }.usage-empty strong { color: #506158; font-size: 12px; }.usage-footnote { margin: 12px 2px 0; color: #909a93; font-size: 8px; line-height: 1.5; }
+
+@media (max-width: 860px) {
+  .primary-nav { width: 75%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sidebar-settings { width: 25%; height: 62px; min-height: 62px; margin: 0; justify-content: center; flex-direction: column; gap: 2px; padding: 3px; border-top: 0; border-left: 1px solid var(--line); font-size: 9px; }
+  .sidebar-settings small { display: none; }
+  .settings-section-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .settings-section-nav button { min-height: 54px; }
+  .usage-toolbar { align-items: stretch; flex-direction: column; gap: 7px; }.usage-period-tabs { width: 100%; }.usage-period-tabs button { flex: 1; min-width: 0; }.usage-updated { text-align: right; }
+  .usage-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }.usage-kpis > div:nth-child(2) { border-right: 0; }.usage-kpis > div:nth-child(-n+2) { border-bottom: 1px solid #dfe7e1; }
+  .usage-grid { grid-template-columns: 1fr; }.usage-panel { padding: 17px 15px; }.usage-period-row { grid-template-columns: 105px minmax(0, 1fr) 38px; gap: 7px; }
+}

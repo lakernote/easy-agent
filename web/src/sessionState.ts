@@ -1,5 +1,5 @@
 import type { Session, SessionHistoryPage } from './types'
-export type Page = 'chat' | 'skills' | 'runtime' | 'tools'
+export type Page = 'chat' | 'skills' | 'runtime' | 'tools' | 'settings'
 export const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
 export function mergeSessionHistory(current: Session, page: SessionHistoryPage, kind: 'messages' | 'events'): Session {
   if (kind === 'messages') {

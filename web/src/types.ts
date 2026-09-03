@@ -41,6 +41,32 @@ export type Usage = {
   contextWindowTokens?: number
 }
 
+export type UsageAggregate = {
+  periodStart: string
+  runtime: 'easyagent' | 'codex'
+  model: string
+  profileId?: string
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  cacheWriteTokens: number
+  totalTokens: number
+  modelCalls: number
+  toolCalls: number
+  modelDurationMs: number
+  toolDurationMs: number
+  cacheReported: boolean
+}
+
+export type UsageReport = {
+  period: 'day' | 'week' | 'month'
+  from: string
+  to: string
+  generatedAt: string
+  items: UsageAggregate[]
+}
+
 export type TraceEvent = {
   id: number
   kind: string
