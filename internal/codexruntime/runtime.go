@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
@@ -153,6 +154,23 @@ type rpcMessage struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+type synchronizedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(value []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(value)
+}
+
+func (b *synchronizedBuffer) Snapshot() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // RunMessage 启动一个短生命周期 app-server 连接，并通过 thread/resume 保持会话。
 // app-server 本身把 thread 持久化到 Codex Home，因此 EasyAgent 只需保存 thread id。
 func RunMessage(ctx context.Context, config Config, userMessage string) (Result, error) {
@@ -188,7 +206,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if err != nil {
 		return Result{}, err
 	}
-	var stderrTail bytes.Buffer
+	var stderrTail synchronizedBuffer
 	go func() { _, _ = io.CopyN(&stderrTail, stderr, 32*1024) }()
 	if err := command.Start(); err != nil {
 		return Result{}, fmt.Errorf("启动 Codex app-server: %w", err)
@@ -215,8 +233,8 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			if err := scanner.Err(); err != nil {
 				return rpcMessage{}, err
 			}
-			if stderrTail.Len() > 0 {
-				return rpcMessage{}, fmt.Errorf("Codex app-server 已退出: %s", strings.TrimSpace(stderrTail.String()))
+			if stderr := strings.TrimSpace(stderrTail.Snapshot()); stderr != "" {
+				return rpcMessage{}, fmt.Errorf("Codex app-server 已退出: %s", stderr)
 			}
 			return rpcMessage{}, io.EOF
 		}

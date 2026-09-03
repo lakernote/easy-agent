@@ -22,6 +22,9 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
   const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
   const [deletingProfile, setDeletingProfile] = useState(false)
+  const [modelEditorOpen, setModelEditorOpen] = useState(false)
+  const [modelEditorMode, setModelEditorMode] = useState<'new' | 'edit'>('edit')
+  const [modelEditorSnapshot, setModelEditorSnapshot] = useState<ModelSettings | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(section === 'tools' ? 'tools' : 'runtime')
 
   useEffect(() => setSettingsSection(section === 'tools' ? 'tools' : 'runtime'), [section])
@@ -31,7 +34,7 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
   const saveModel = async () => {
     if (savingModel) return
     setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel(model); await onRefresh(); onError('') }
+    try { await api.saveModel(model); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false); onError('') }
     catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
@@ -60,10 +63,6 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
   }
 
   const currentProfileSaved = data.modelProfiles.some((profile) => profile.id === model.profileId)
-  const savedProfileOptions = data.modelProfiles.filter((profile) => profile.settings.runtime === model.runtime)
-  const profileOptions = currentProfileSaved || !model.profileId
-    ? savedProfileOptions
-    : [...savedProfileOptions, { id: model.profileId, name: model.profileName || '新配置', settings: model }]
   const selectProfile = (profile: ModelProfile) => {
     setModel({ ...profile.settings, profileId: profile.id, profileName: profile.name })
     setModelNotice(null); onError('')
@@ -73,13 +72,36 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
     setModel({ ...model, profileId: nextID, profileName: `${model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} 新配置` })
     setModelNotice(null); onError('')
   }
+  const openProfileEditor = (profile?: ModelProfile) => {
+    if (profile) {
+      setModelEditorSnapshot({ ...model })
+      selectProfile(profile)
+      setModelEditorMode('edit')
+    } else {
+      setModelEditorSnapshot({ ...data.model })
+      createProfile()
+      setModelEditorMode('new')
+    }
+    setModelEditorOpen(true)
+    setModelNotice(null)
+    onError('')
+  }
+  const closeModelEditor = () => {
+    if (savingModel) return
+    if (modelEditorSnapshot) setModel({ ...modelEditorSnapshot })
+    else if (!currentProfileSaved) setModel({ ...data.model })
+    setModelEditorSnapshot(null)
+    setModelEditorOpen(false)
+    setModelNotice(null)
+    onError('')
+  }
   const removeProfile = async () => {
     if (!model.profileId || deletingProfile) return
     if (!currentProfileSaved) { setModel({ ...data.model }); return }
     if (data.modelProfiles.length <= 1) return
     if (!window.confirm(`删除“${model.profileName || '当前配置'}”？已有会话不会受影响。`)) return
     setDeletingProfile(true); onError('')
-    try { await api.deleteModelProfile(model.profileId); await onRefresh() }
+    try { await api.deleteModelProfile(model.profileId); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false) }
     catch (reason) { onError((reason as Error).message) }
     finally { setDeletingProfile(false) }
   }
@@ -215,11 +237,7 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
         <div className="runtime-summary"><div><p className="eyebrow">NEW SESSION DEFAULT</p><strong>{data.model.profileName || '未命名模型配置'}</strong><span>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'} · {data.model.model || (data.model.runtime === 'codex' ? '使用 ~/.codex/config.toml' : '未填写模型')}</span></div><div><p className="eyebrow">AVAILABLE PROFILES</p><strong>{data.modelProfiles.length} 套</strong><span>可在模型配置中分别保存并切换</span></div><button className="ghost-button" type="button" onClick={() => setSettingsSection('models')}>管理模型配置 <span aria-hidden="true">→</span></button></div>
         </>}
         {settingsSection === 'models' && <>
-        <div className="model-catalog"><div className="model-catalog-head"><div><p className="eyebrow">MODEL CATALOG</p><h2>模型配置</h2><p>每套配置独立保存 Provider、模型、上下文和超时；保存后可用于下一次新会话。</p></div><span className="settings-count">{data.modelProfiles.length} 套</span></div><div className="model-profile-directory" aria-label="模型配置列表">{data.modelProfiles.map((profile) => <div className={`model-profile-row ${profile.id === model.profileId ? 'selected' : ''}`} key={profile.id}><button className="model-profile-select" type="button" onClick={() => selectProfile(profile)}><span className={`runtime-nav-dot ${profile.settings.runtime === 'codex' ? (data.codex.installed && data.codex.appServerAvailable ? 'ready' : '') : 'easyagent-dot'}`} /><span><strong>{profile.name}</strong><small>{profile.settings.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · {profile.settings.model || (profile.settings.runtime === 'codex' ? 'config.toml' : '未填写模型')}</small></span></button><button className={`profile-activate ${profile.id === data.activeModelProfileId ? 'active' : ''}`} type="button" disabled={profile.id === data.activeModelProfileId || savingModel} onClick={() => activateProfile(profile)}>{profile.id === data.activeModelProfileId ? '当前新会话默认' : '设为默认'}</button></div>)}{!currentProfileSaved && model.profileId && <div className="model-profile-row draft selected"><div className="model-profile-select"><span className="runtime-nav-dot" /><span><strong>{model.profileName || '新配置'}</strong><small>{model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · 未保存</small></span></div><em>编辑中</em></div>}<div className="directory-foot">默认配置会出现在首页输入框；删除前会检查是否仍被历史会话使用。</div></div></div>
-        <div className="model-profile-switcher"><div><p className="eyebrow">CURRENT PROFILE</p><input className="model-profile-name" aria-label="配置名称" value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="配置名称" /><small>当前编辑的配置；切换后请保存。</small></div><select value={model.profileId || ''} onChange={(event) => { const profile = profileOptions.find((item) => item.id === event.target.value); if (profile) selectProfile(profile) }} aria-label="选择当前模型配置"><option value="" disabled>选择配置</option>{profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.settings.model ? ` · ${profile.settings.model}` : ''}</option>)}</select><div className="model-profile-actions"><button className="ghost-button" type="button" onClick={createProfile}>＋ 新建配置</button><button className="ghost-button danger" type="button" disabled={(currentProfileSaved && data.modelProfiles.length <= 1) || deletingProfile} onClick={removeProfile}>{deletingProfile ? '删除中…' : currentProfileSaved ? '删除' : '取消新建'}</button></div></div>
-        {codex
-          ? <CodexSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} />
-          : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onActivateOllama={activateOllamaModel} />}
+        <div className="model-catalog"><div className="model-catalog-head"><div><p className="eyebrow">MODEL CATALOG</p><h2>模型配置</h2><p>不同 Runtime 的配置分开保存。点击一行编辑，新增配置也会在抽屉中完成。</p></div><div className="catalog-actions"><span className="settings-count">{data.modelProfiles.length} 套</span><button className="primary-button" type="button" onClick={() => openProfileEditor()}>＋ 新建配置</button></div></div><div className="model-profile-directory" aria-label="模型配置列表">{data.modelProfiles.map((profile) => { const profileCodex = profile.settings.runtime === 'codex'; return <div className={`model-profile-row ${profile.id === model.profileId ? 'selected' : ''}`} key={profile.id}><button className="model-profile-select" type="button" onClick={() => openProfileEditor(profile)} aria-label={`编辑 ${profile.name}`}><span className={`runtime-nav-dot ${profileCodex ? (data.codex.installed && data.codex.appServerAvailable ? 'ready' : '') : 'easyagent-dot'}`} /><span><strong>{profile.name}</strong><small>{profileCodex ? 'Codex Runtime' : 'EasyAgent Runtime'} · {profile.settings.model || (profileCodex ? '使用 config.toml' : '未填写模型')}</small></span></button><div className="model-profile-row-actions"><span className={`profile-runtime-tag ${profileCodex ? 'codex' : 'easyagent'}`}>{profileCodex ? 'CODEX' : 'EASYAGENT'}</span><button className={`profile-activate ${profile.id === data.activeModelProfileId ? 'active' : ''}`} type="button" disabled={profile.id === data.activeModelProfileId || savingModel} onClick={() => activateProfile(profile)}>{profile.id === data.activeModelProfileId ? '当前默认' : '设为默认'}</button><button className="profile-edit" type="button" onClick={() => openProfileEditor(profile)}>编辑</button></div></div>})}{!currentProfileSaved && model.profileId && <div className="model-profile-row draft selected"><button className="model-profile-select" type="button" onClick={() => setModelEditorOpen(true)} aria-label="编辑未保存配置"><span className="runtime-nav-dot" /><span><strong>{model.profileName || '新配置'}</strong><small>{model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'} · 未保存</small></span></button><div className="model-profile-row-actions"><span className="profile-runtime-tag draft">DRAFT</span><button className="profile-edit" type="button" onClick={() => setModelEditorOpen(true)}>继续编辑</button></div></div>}<div className="directory-foot">默认配置会出现在首页输入框；已有会话不会因修改配置而改变。</div></div></div>
         </>}
         {settingsSection === 'tools' && (codex ? <div className="section-block codex-tools-note"><div className="runtime-boundary-note"><strong>Codex 能力边界</strong><span>工具、Skill、沙箱和审批由 Codex app-server 管理；EasyAgent 的内置 Tools 和 MCP 不会注入 Codex。</span></div></div> : <>
           <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>首轮只发送少量核心 Schema；文件、Shell、网页和 Skill 需要时再加载。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="capability-note"><strong>工作区</strong><span><code>{data.runtime.workspace}</code></span><strong>私有 Runtime</strong><span><code>{data.runtime.runtime}</code></span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
@@ -228,6 +246,7 @@ export function Capabilities({ section, data, onRefresh, onError }: { section: C
         </>)}
       </div>
     </div>
+    {modelEditorOpen && <div className="model-drawer-backdrop" onMouseDown={closeModelEditor}><aside className="model-drawer" aria-label="模型配置编辑" onMouseDown={(event) => event.stopPropagation()}><header className="model-drawer-head"><div><p className="eyebrow">{modelEditorMode === 'new' ? 'NEW PROFILE' : 'EDIT PROFILE'}</p><h2>{modelEditorMode === 'new' ? '新建模型配置' : '编辑模型配置'}</h2><p>这套配置只属于当前标记的 Runtime；保存后可用于下一次新会话。</p></div><button className="drawer-close" type="button" aria-label="关闭模型配置编辑" onClick={closeModelEditor}>×</button></header><div className="model-drawer-body"><div className="model-drawer-meta"><span className={`profile-runtime-tag ${codex ? 'codex' : 'easyagent'}`}>{codex ? 'CODEX RUNTIME' : 'EASYAGENT RUNTIME'}</span><strong>{model.profileName || '未命名配置'}</strong><small>{codex ? 'app-server · thread / sandbox' : `${model.provider || 'Provider 未设置'} · ${model.model || '模型未设置'}`}</small></div><label className="model-drawer-name">配置名称<input value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="例如：本地 Ollama" /></label>{codex ? <CodexSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} /> : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onActivateOllama={activateOllamaModel} />}<div className="model-drawer-danger">{currentProfileSaved && <button className="ghost-button danger" type="button" disabled={data.modelProfiles.length <= 1 || deletingProfile} onClick={removeProfile}>{deletingProfile ? '删除中…' : '删除这套配置'}</button>}<span>{currentProfileSaved ? '删除不会影响已创建会话。' : '关闭抽屉会放弃这次未保存的配置。'}</span></div></div></aside></div>}
     {mcp && <div className="modal-backdrop" onMouseDown={() => setMCP(null)}><div className="modal" onMouseDown={(event) => event.stopPropagation()}>
       <div className="modal-head"><div><p className="eyebrow">MCP SERVER</p><h2>{mcp.name}</h2></div><button aria-label="关闭 MCP 配置" onClick={() => setMCP(null)}>×</button></div>
       <div className="form-grid"><label>ID<input value={mcp.id} disabled /></label><label>名称<input value={mcp.name} onChange={(event) => setMCP({ ...mcp, name: event.target.value })} /></label><label className="wide">用途描述<input value={mcp.description || ''} onChange={(event) => setMCP({ ...mcp, description: event.target.value })} placeholder="告诉 Agent 什么时候应该加载这个 MCP" /></label><label>Transport<select value={mcp.transport} onChange={(event) => setMCP({ ...mcp, transport: event.target.value as MCPConfig['transport'] })}><option value="stdio">stdio</option><option value="http">HTTP</option></select></label><label className="check-label"><input type="checkbox" checked={mcp.enabled} onChange={(event) => setMCP({ ...mcp, enabled: event.target.checked })} />启用</label>{mcp.transport === 'stdio' ? <><label>命令<input value={mcp.command || ''} onChange={(event) => setMCP({ ...mcp, command: event.target.value })} /></label><label className="wide">参数（每行一个）<textarea value={mcp.args.join('\n')} onChange={(event) => setMCP({ ...mcp, args: event.target.value.split('\n').filter(Boolean) })} /></label><label className="wide">环境变量（KEY=VALUE，每行一个）<textarea value={recordLines(mcp.environment)} onChange={(event) => setMCP({ ...mcp, environment: parseRecord(event.target.value) })} /></label></> : <><label className="wide">Endpoint<input value={mcp.endpoint || ''} onChange={(event) => setMCP({ ...mcp, endpoint: event.target.value })} /></label><label>认证<select value={mcp.authType || ''} onChange={(event) => setMCP({ ...mcp, authType: event.target.value })}><option value="">无</option><option value="bearer">Bearer Token</option><option value="basic">用户名密码</option></select></label>{mcp.authType === 'bearer' && <label>Token<input type="password" placeholder={mcp.secretConfigured ? '已配置，留空不修改' : ''} value={mcp.token || ''} onChange={(event) => setMCP({ ...mcp, token: event.target.value })} /></label>}{mcp.authType === 'basic' && <><label>用户名<input value={mcp.username || ''} onChange={(event) => setMCP({ ...mcp, username: event.target.value })} /></label><label>密码<input type="password" placeholder={mcp.secretConfigured ? '已配置，留空不修改' : ''} value={mcp.password || ''} onChange={(event) => setMCP({ ...mcp, password: event.target.value })} /></label></>}<label className="wide">自定义 Header（KEY=VALUE，每行一个）<textarea value={recordLines(mcp.headers)} onChange={(event) => setMCP({ ...mcp, headers: parseRecord(event.target.value) })} /></label></>}</div>
