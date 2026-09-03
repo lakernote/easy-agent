@@ -25,6 +25,8 @@ import (
 	"github.com/lakernote/easy-agent/web"
 )
 
+const defaultListenAddress = "0.0.0.0:8080"
+
 func main() {
 	// 1. 初始化 EasyAgent 自己管理的 Home、默认工作区、私有运行时和 PATH。
 	// 这些是应用内部状态，不要求用户在启动命令中配置；真正执行任务时，用户可在
@@ -36,7 +38,7 @@ func main() {
 
 	// 2. 启动只需要两个可选参数，而且都有可直接使用的默认值。
 	// flag.String 返回 *string（字符串指针）；flag.Parse 后通过 *address 取实际值。
-	address := flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
+	address := flag.String("listen", defaultListenAddress, "HTTP listen address")
 	databasePath := flag.String("db", filepath.Join(environment.Home(), "easyagent.db"), "SQLite database file")
 	flag.Parse()
 
@@ -45,6 +47,13 @@ func main() {
 	// 实例正在执行的会话误判成“服务重启中断”。
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			port := *address
+			if _, configuredPort, splitErr := net.SplitHostPort(*address); splitErr == nil {
+				port = configuredPort
+			}
+			log.Fatalf("listen %s: address already in use; stop the existing EasyAgent process or choose another port with -listen, for example -listen 0.0.0.0:8081 (check with: ss -ltnp | grep :%s)", *address, port)
+		}
 		log.Fatalf("listen %s: %v", *address, err)
 	}
 	defer listener.Close()
@@ -79,9 +88,12 @@ func main() {
 	serviceContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	displayAddress := *address
-	if strings.HasPrefix(displayAddress, ":") {
+	if strings.HasPrefix(displayAddress, "0.0.0.0:") {
+		displayAddress = "127.0.0.1" + strings.TrimPrefix(displayAddress, "0.0.0.0")
+	} else if strings.HasPrefix(displayAddress, ":") {
 		displayAddress = "localhost" + displayAddress
 	}
+	boundAddress := listener.Addr().String()
 
 	// 8. 配置标准库 HTTP Server。
 	// server.Server 实现业务路由并通过 Handler() 暴露 http.Handler；超时用于避免慢连接
@@ -101,7 +113,7 @@ func main() {
 	// 这相当于只有一个结果的 Future/BlockingQueue，但 channel 是 Go 原生同步原语。
 	listenErrors := make(chan error, 1)
 	go func() {
-		log.Printf("EasyAgent is running at http://%s", displayAddress)
+		log.Printf("EasyAgent is running at http://%s (bound to %s)", displayAddress, boundAddress)
 		listenErrors <- httpServer.Serve(listener)
 	}()
 

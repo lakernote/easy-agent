@@ -43,7 +43,7 @@ chmod +x easyagent
 ./easyagent
 ```
 
-打开 <http://127.0.0.1:8080>，进入「模型与工具」配置模型后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
+启动后打开 <http://127.0.0.1:8080>（远程服务器请把 `127.0.0.1` 换成服务器 IP），进入「模型与工具」配置模型后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
 
 从源码构建：
 
@@ -60,7 +60,7 @@ make build
 ./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
 ```
 
-不传参数时监听 `127.0.0.1:8080`，数据库位于 `~/.easyagent/easyagent.db`。
+不传参数时监听 `0.0.0.0:8080`，数据库位于 `~/.easyagent/easyagent.db`。服务器上如果端口已被占用，先用 `ss -ltnp | grep :8080` 找到进程，再停止旧实例或换端口，例如 `./easyagent -listen 0.0.0.0:8081`。
 EasyAgent 自动管理 `~/.easyagent` 和默认工作区
 `~/.easyagent/workspaces/default`，不依赖服务进程从哪个目录启动。
 

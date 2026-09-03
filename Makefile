@@ -24,7 +24,7 @@ test:
 	go vet ./...
 	go test -race ./...
 
-# build 成功后以前台方式启动；默认监听 127.0.0.1:8080。
+# build 成功后以前台方式启动；默认监听 0.0.0.0:8080。
 run: build
 	./bin/easyagent
 
