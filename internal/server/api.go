@@ -10,25 +10,27 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
+	"github.com/lakernote/easy-agent/internal/codexruntime"
 	mcppresets "github.com/lakernote/easy-agent/internal/mcp/presets"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
 type bootstrapPayload struct {
-	Sessions             []sessionView         `json:"sessions"`
-	SessionsHasMore      bool                  `json:"sessionsHasMore,omitempty"`
-	Model                store.ModelSettings   `json:"model"`
-	ModelProfiles        []store.ModelProfile  `json:"modelProfiles"`
-	ActiveModelProfileID string                `json:"activeModelProfileId"`
-	Skills               []store.SkillOverride `json:"skills"`
-	BuiltinTools         []builtintools.Info   `json:"builtinTools"`
-	MCPPresets           []mcppresets.Preset   `json:"mcpPresets"`
-	ModelRules           modelRulesPayload     `json:"modelRules"`
-	MCPs                 []store.MCPConfig     `json:"mcps"`
-	SystemPrompt         string                `json:"systemPrompt"`
-	Ollama               ollamaStatus          `json:"ollama"`
-	Codex                codexRuntimeStatus    `json:"codex"`
-	Runtime              runtimeInfoPayload    `json:"runtime"`
+	Sessions             []sessionView               `json:"sessions"`
+	SessionsHasMore      bool                        `json:"sessionsHasMore,omitempty"`
+	Model                store.ModelSettings         `json:"model"`
+	ModelProfiles        []store.ModelProfile        `json:"modelProfiles"`
+	ActiveModelProfileID string                      `json:"activeModelProfileId"`
+	Skills               []store.SkillOverride       `json:"skills"`
+	BuiltinTools         []builtintools.Info         `json:"builtinTools"`
+	MCPPresets           []mcppresets.Preset         `json:"mcpPresets"`
+	ModelRules           modelRulesPayload           `json:"modelRules"`
+	MCPs                 []store.MCPConfig           `json:"mcps"`
+	SystemPrompt         string                      `json:"systemPrompt"`
+	Ollama               ollamaStatus                `json:"ollama"`
+	Codex                codexRuntimeStatus          `json:"codex"`
+	CodexConfig          codexruntime.ProviderConfig `json:"codexConfig"`
+	Runtime              runtimeInfoPayload          `json:"runtime"`
 }
 
 type runtimeInfoPayload struct {
@@ -110,9 +112,18 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		Sessions: publicSessions(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
-		Runtime: runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
-		Codex:   server.detectCodex(request.Context()),
+		Runtime:     runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
+		Codex:       server.detectCodex(request.Context()),
+		CodexConfig: server.loadCodexConfig(),
 	})
+}
+
+func (server *Server) loadCodexConfig() codexruntime.ProviderConfig {
+	config, err := codexruntime.LoadProviderConfig()
+	if err != nil {
+		return codexruntime.ProviderConfig{}
+	}
+	return config
 }
 
 func (server *Server) getOlderSessions(response http.ResponseWriter, request *http.Request) {

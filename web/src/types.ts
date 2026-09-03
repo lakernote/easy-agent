@@ -247,6 +247,24 @@ export type CodexRuntimeStatus = {
   installUrl: string
 }
 
+export type CodexProviderConfig = {
+  configPath: string
+  provider: string
+  providerName: string
+  baseUrl: string
+  model: string
+  reasoningEffort: string
+  envKey: string
+  apiKeyConfigured: boolean
+  configured: boolean
+  warning?: string
+}
+
+export type CodexProviderConfigInput = Pick<CodexProviderConfig, 'provider' | 'providerName' | 'baseUrl' | 'model' | 'reasoningEffort' | 'envKey'> & {
+  apiKey?: string
+  clearApiKey?: boolean
+}
+
 export type Bootstrap = {
   sessions: Session[]
   sessionsHasMore?: boolean
@@ -261,5 +279,6 @@ export type Bootstrap = {
   systemPrompt: string
   ollama: OllamaStatus
   codex: CodexRuntimeStatus
+  codexConfig: CodexProviderConfig
   runtime: { home: string; workspace: string; runtime: string }
 }

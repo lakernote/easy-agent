@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -30,9 +31,11 @@ type Server struct {
 	cancel  context.CancelFunc
 	wait    sync.WaitGroup
 	// 单机版默认只同时运行一个模型任务，避免本地模型争抢内存。
-	semaphore chan struct{}
-	taskMu    sync.Mutex
-	tasks     map[string]taskHandle
+	semaphore  chan struct{}
+	taskMu     sync.Mutex
+	tasks      map[string]taskHandle
+	codexEnvMu sync.RWMutex
+	codexEnv   map[string]string
 }
 
 type taskHandle struct {
@@ -45,9 +48,31 @@ type taskHandle struct {
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: make(map[string]taskHandle)}
+	codexEnv, _ := codexruntime.LoadManagedEnvironment()
+	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: make(map[string]taskHandle), codexEnv: codexEnv}
 	server.routes()
 	return server
+}
+
+func (server *Server) codexEnvironment() []string {
+	server.codexEnvMu.RLock()
+	values := make(map[string]string, len(server.codexEnv))
+	for key, value := range server.codexEnv {
+		values[key] = value
+	}
+	server.codexEnvMu.RUnlock()
+	return server.env.Environ(values)
+}
+
+func (server *Server) reloadCodexEnvironment() error {
+	values, err := codexruntime.LoadManagedEnvironment()
+	if err != nil {
+		return err
+	}
+	server.codexEnvMu.Lock()
+	server.codexEnv = values
+	server.codexEnvMu.Unlock()
+	return nil
 }
 
 func (server *Server) Handler() http.Handler {
@@ -89,6 +114,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/v1/model/test", server.testModel)
 	server.mux.HandleFunc("GET /api/v1/ollama", server.getOllama)
 	server.mux.HandleFunc("GET /api/v1/codex", server.getCodex)
+	server.mux.HandleFunc("GET /api/v1/codex/config", server.getCodexConfig)
+	server.mux.HandleFunc("PUT /api/v1/codex/config", server.saveCodexConfig)
+	server.mux.HandleFunc("POST /api/v1/codex/install", server.installCodex)
 	server.mux.HandleFunc("POST /api/v1/ollama/use", server.useOllama)
 	server.mux.HandleFunc("PUT /api/v1/skills/{name}", server.saveSkill)
 	server.mux.HandleFunc("DELETE /api/v1/skills/{name}", server.resetSkill)

@@ -85,9 +85,9 @@ export default function App() {
   const effectiveModel = session?.model || data.model.model
   const usesCodex = effectiveRuntime === 'codex'
   const usesOllama = data.model.provider === 'ollama' || data.model.baseUrl.includes(':11434')
-  const modelReady = usesCodex ? data.codex.installed && data.codex.appServerAvailable : Boolean(effectiveModel) && (!usesOllama || data.ollama.running)
+  const modelReady = usesCodex ? data.codex.installed && data.codex.appServerAvailable && data.codexConfig.configured : Boolean(effectiveModel) && (!usesOllama || data.ollama.running)
   const modelLabel = usesCodex
-    ? (data.codex.installed && data.codex.appServerAvailable ? `Codex Runtime${effectiveModel ? ` · ${effectiveModel}` : ''}` : 'Codex app-server 未就绪')
+    ? (!data.codex.installed || !data.codex.appServerAvailable ? 'Codex app-server 未就绪' : !data.codexConfig.configured ? 'Codex Runtime · 未配置 Provider' : `Codex Runtime${effectiveModel || data.codexConfig.model ? ` · ${effectiveModel || data.codexConfig.model}` : ''}`)
     : !effectiveModel ? 'EasyAgent · 未配置模型' : usesOllama && !data.ollama.running ? 'EasyAgent · Ollama 未运行' : `EasyAgent · ${effectiveModel}`
 
   return <div className="app-shell">

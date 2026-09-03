@@ -50,7 +50,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
-		Env:     server.env.Environ(nil),
+		Env:     server.codexEnvironment(),
 		OnDelta: func(delta string) { server.appendTaskPartial(session.ID, delta) },
 		OnUsage: func(value codexruntime.Usage) {
 			server.setTaskUsage(session.ID, store.Usage{

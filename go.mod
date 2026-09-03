@@ -6,6 +6,7 @@ go 1.26.7
 
 // 第一组是代码直接 import 的依赖，类似 pom.xml 中直接声明的 dependency。
 require (
+	github.com/BurntSushi/toml v1.5.0 // 读取和安全更新 Codex config.toml
 	github.com/modelcontextprotocol/go-sdk v1.7.0 // MCP 官方 Go SDK，用于动态接入外部 Agent 工具
 	modernc.org/sqlite v1.45.0 // 纯 Go SQLite 驱动，不依赖系统 SQLite 或 CGO
 )

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -85,6 +86,34 @@ func TestSaveSkillValidatesSkillMarkdown(t *testing.T) {
 	var saved store.SkillOverride
 	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&saved) != nil || saved.Description != "frontmatter 描述" {
 		t.Fatalf("保存后应使用 frontmatter 元数据: HTTP=%d value=%+v", response.StatusCode, saved)
+	}
+}
+
+func TestCodexConfigEndpointSeparatesProviderAndSecret(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	payload := `{"provider":"groq","providerName":"Groq","baseUrl":"https://api.groq.com/openai/v1","model":"openai/gpt-oss-20b","reasoningEffort":"medium","envKey":"GROQ_API_KEY","apiKey":"gsk-test-secret"}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/codex/config", strings.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("save Codex config failed: %d %s", response.Code, response.Body.String())
+	}
+	configData, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil || strings.Contains(string(configData), "gsk-test-secret") || !strings.Contains(string(configData), `env_key = "GROQ_API_KEY"`) {
+		t.Fatalf("Codex config should not contain secret: data=%s err=%v", configData, err)
+	}
+	secrets, err := os.ReadFile(filepath.Join(home, ".codex", "easyagent-secrets.json"))
+	if err != nil || !strings.Contains(string(secrets), "gsk-test-secret") {
+		t.Fatalf("managed secret was not persisted: data=%s err=%v", secrets, err)
 	}
 }
 

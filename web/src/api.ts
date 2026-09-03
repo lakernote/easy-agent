@@ -1,4 +1,4 @@
-import type { AttachmentInput, Bootstrap, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport } from './types'
+import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -28,6 +28,9 @@ export const api = {
   testModel: (model: ModelSettings) => request<{ ok: boolean; model: string; toolCall: string; answer: string; inputTokens: number; outputTokens: number; durationMs: number }>('/api/v1/model/test', { method: 'POST', body: JSON.stringify(model) }),
   useOllama: (model: string) => request<ModelSettings>('/api/v1/ollama/use', { method: 'POST', body: JSON.stringify({ model }) }),
   codex: () => request<Bootstrap['codex']>('/api/v1/codex'),
+  codexConfig: () => request<CodexProviderConfig>('/api/v1/codex/config'),
+  saveCodexConfig: (config: CodexProviderConfigInput) => request<CodexProviderConfig>('/api/v1/codex/config', { method: 'PUT', body: JSON.stringify(config) }),
+  installCodex: () => request<{ ok: boolean; status: Bootstrap['codex']; message: string }>('/api/v1/codex/install', { method: 'POST', body: JSON.stringify({}) }),
   saveSkill: (skill: Skill) => request<Skill>(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', body: JSON.stringify(skill) }),
   resetSkill: (name: string) => request<void>(`/api/v1/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   saveMCP: (mcp: MCPConfig) => request<MCPConfig>(`/api/v1/mcp/${encodeURIComponent(mcp.id)}`, { method: 'PUT', body: JSON.stringify(mcp) }),

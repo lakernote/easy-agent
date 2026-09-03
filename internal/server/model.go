@@ -79,7 +79,7 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 		}
 		result, runErr := codexruntime.RunMessage(request.Context(), codexruntime.Config{
 			Path: status.Path, Workspace: server.env.Workspace(), Model: settings.Model,
-			Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second, Env: server.env.Environ(nil),
+			Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second, Env: server.codexEnvironment(),
 		}, "只回复 CODEX_RUNTIME_TEST_OK，不要调用工具。")
 		if runErr != nil {
 			writeError(response, http.StatusBadGateway, "Codex app-server 能启动，但实际会话测试失败："+runErr.Error())

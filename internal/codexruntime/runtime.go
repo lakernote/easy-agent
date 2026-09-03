@@ -23,6 +23,7 @@ import (
 )
 
 const installDocsURL = "https://developers.openai.com/codex/cli"
+const installScriptURL = "https://chatgpt.com/codex/install.sh"
 
 type Status struct {
 	// Installed 表示 codex CLI 可执行文件存在。app-server 不是另一个安装包，
@@ -39,7 +40,7 @@ type Status struct {
 
 // Detect 只做本机文件和 --version 检查，不启动 app-server，也不修改用户环境。
 func Detect(environment *appenv.Environment) Status {
-	status := Status{InstallURL: installDocsURL, InstallCommand: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"}
+	status := Status{InstallURL: installDocsURL, InstallCommand: "curl -fsSL " + installScriptURL + " | sh"}
 	paths := []string{}
 	if environment != nil {
 		if value, err := environment.ResolveCommand("codex"); err == nil {
@@ -96,6 +97,35 @@ func Detect(environment *appenv.Environment) Status {
 	}
 	status.Message = "未检测到 Codex CLI；服务器只需安装 CLI，不需要 ChatGPT Desktop"
 	return status
+}
+
+// Install 下载并执行官方 Codex CLI 安装脚本。安装在当前 EasyAgent 进程用户的
+// HOME 下，不使用 sudo；这样服务器上的检测、配置和后续 app-server 会保持同一用户。
+func Install(ctx context.Context, environment *appenv.Environment) (string, error) {
+	if environment == nil {
+		return "", errors.New("Codex Runtime 缺少运行环境")
+	}
+	curlPath, err := environment.ResolveCommand("curl")
+	if err != nil {
+		return "", errors.New("服务器未找到 curl，请先安装 curl")
+	}
+	command := exec.CommandContext(ctx, curlPath, "-fsSL", installScriptURL)
+	command.Env = environment.Environ(nil)
+	output, err := command.Output()
+	if err != nil {
+		if exitErr := new(exec.ExitError); errors.As(err, &exitErr) {
+			return string(exitErr.Stderr), fmt.Errorf("下载 Codex CLI 安装脚本失败: %w", err)
+		}
+		return "", fmt.Errorf("下载 Codex CLI 安装脚本失败: %w", err)
+	}
+	install := exec.CommandContext(ctx, "/bin/sh")
+	install.Env = environment.Environ(nil)
+	install.Stdin = bytes.NewReader(output)
+	installOutput, err := install.CombinedOutput()
+	if err != nil {
+		return string(installOutput), fmt.Errorf("安装 Codex CLI 失败: %w", err)
+	}
+	return string(installOutput), nil
 }
 
 type Config struct {
