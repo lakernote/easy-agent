@@ -5,6 +5,7 @@ import { formatDuration, parseRecord, recordLines } from './format'
 import { ConfirmDialog } from './dialogs'
 
 type Notice = { ready: boolean; title: string; message: string }
+type SettingsSection = 'runtime' | 'models' | 'tools'
 
 export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
   const [model, setModel] = useState<ModelSettings>({ ...data.model })
@@ -20,6 +21,7 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const [confirmingMCPDelete, setConfirmingMCPDelete] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
   const [deletingProfile, setDeletingProfile] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('runtime')
 
   useEffect(() => setModel({ ...data.model }), [data.model])
 
@@ -54,8 +56,8 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
     setModelNotice(null); onError('')
   }
 
+  const currentProfileSaved = data.modelProfiles.some((profile) => profile.id === model.profileId)
   const savedProfileOptions = data.modelProfiles.filter((profile) => profile.settings.runtime === model.runtime)
-  const currentProfileSaved = savedProfileOptions.some((profile) => profile.id === model.profileId)
   const profileOptions = currentProfileSaved || !model.profileId
     ? savedProfileOptions
     : [...savedProfileOptions, { id: model.profileId, name: model.profileName || '新配置', settings: model }]
@@ -71,7 +73,7 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const removeProfile = async () => {
     if (!model.profileId || deletingProfile) return
     if (!currentProfileSaved) { setModel({ ...data.model }); return }
-    if (savedProfileOptions.length <= 1) return
+    if (data.modelProfiles.length <= 1) return
     if (!window.confirm(`删除“${model.profileName || '当前配置'}”？已有会话不会受影响。`)) return
     setDeletingProfile(true); onError('')
     try { await api.deleteModelProfile(model.profileId); await onRefresh() }
@@ -79,10 +81,38 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
     finally { setDeletingProfile(false) }
   }
 
-  const useOllama = async (name: string) => {
-    onError('')
-    try { await api.useOllama(name); await onRefresh() }
+  const activateProfile = async (profile: ModelProfile) => {
+    if (savingModel || profile.id === data.activeModelProfileId) {
+      selectProfile(profile)
+      return
+    }
+    setModel({ ...profile.settings, profileId: profile.id, profileName: profile.name })
+    setSavingModel(true); setModelNotice(null); onError('')
+    try { await api.saveModel({ ...profile.settings, profileId: profile.id, profileName: profile.name }); await onRefresh() }
     catch (reason) { onError((reason as Error).message) }
+    finally { setSavingModel(false) }
+  }
+
+  const activateOllamaModel = async (name: string) => {
+    const existing = data.modelProfiles.find((profile) => profile.settings.runtime === 'easyagent' && profile.settings.model === name)
+    if (existing) {
+      await activateProfile(existing)
+      return
+    }
+    const next: ModelSettings = {
+      ...data.model,
+      profileId: `easyagent-${Date.now()}`,
+      profileName: `Ollama · ${name}`,
+      runtime: 'easyagent',
+      provider: 'ollama',
+      protocol: 'chat_completions',
+      baseUrl: `${data.ollama.baseUrl}/v1`,
+      model: name,
+    }
+    setModel(next); setSavingModel(true); setModelNotice(null); onError('')
+    try { await api.saveModel(next); await onRefresh() }
+    catch (reason) { onError((reason as Error).message) }
+    finally { setSavingModel(false) }
   }
 
   const detectCodex = async () => {
@@ -159,8 +189,13 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
   const activeRuntimeLabel = runtimeChanged ? '待启用' : '已启用'
 
   return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'}`}>
-    <div className="page-intro runtime-intro"><p className="eyebrow">运行时配置</p><h1>选择执行引擎</h1><p>新会话创建时固定 Runtime；已有会话不会被切换影响。每个 Runtime 只展示它真正负责的配置。</p></div>
-    <div className="runtime-workbench">
+    <div className="page-intro runtime-intro"><p className="eyebrow">运行时配置</p><h1>运行时与模型</h1><p>把执行引擎、模型连接和工具能力分开管理；新会话创建时选择，已创建会话保持不变。</p></div>
+    <nav className="settings-section-nav" aria-label="设置分区" role="tablist">
+      <button className={settingsSection === 'runtime' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'runtime'} onClick={() => setSettingsSection('runtime')}><span>01</span><strong>运行时</strong><small>EasyAgent / Codex</small></button>
+      <button className={settingsSection === 'models' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'models'} onClick={() => setSettingsSection('models')}><span>02</span><strong>模型配置</strong><small>{data.modelProfiles.length} 套可选配置</small></button>
+      <button className={settingsSection === 'tools' ? 'active' : ''} type="button" role="tab" aria-selected={settingsSection === 'tools'} onClick={() => setSettingsSection('tools')}><span>03</span><strong>工具与 MCP</strong><small>{codex ? '由 Codex 管理' : `${data.builtinTools.length + data.mcps.length} 项能力`}</small></button>
+    </nav>
+    <div className={`runtime-workbench settings-view-${settingsSection}`}>
       <nav className="runtime-rail" aria-label="选择 Agent Runtime">
         <div className="runtime-rail-head"><p className="eyebrow">RUNTIME</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
@@ -172,17 +207,23 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
         <div className="runtime-rail-foot">切换只影响下一次新会话</div>
       </nav>
       <div className="runtime-main">
+        {settingsSection === 'runtime' && <>
         <div className="runtime-main-head"><div><p className="eyebrow">{runtimeChanged ? 'NEXT RUNTIME' : 'ACTIVE RUNTIME'}</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{runtimeChanged ? `保存后，${codex ? '新会话' : '下一次新会话'}将使用 ${codex ? 'Codex app-server' : 'EasyAgent Go'}；已有会话不变。` : codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><div className="runtime-main-head-actions"><span className={`runtime-state ${runtimeChanged ? 'pending' : 'active'}`}>{activeRuntimeLabel}</span>{runtimeChanged && <button className="primary-button runtime-enable-button" disabled={savingModel} onClick={saveModel}>{savingModel ? '启用中…' : `启用 ${codex ? 'Codex' : 'EasyAgent'} Runtime`}</button>}</div></div>
-        <div className="model-profile-switcher"><div><p className="eyebrow">MODEL PROFILE</p><input className="model-profile-name" aria-label="配置名称" value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="配置名称" /><small>新会话可在输入框中选择；已创建会话保持原配置。</small></div><select value={model.profileId || ''} onChange={(event) => { const profile = profileOptions.find((item) => item.id === event.target.value); if (profile) selectProfile(profile) }} aria-label="选择模型配置"><option value="" disabled>选择配置</option>{profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.settings.model ? ` · ${profile.settings.model}` : ''}</option>)}</select><div className="model-profile-actions"><button className="ghost-button" type="button" onClick={createProfile}>＋ 新建配置</button><button className="ghost-button danger" type="button" disabled={(currentProfileSaved && savedProfileOptions.length <= 1) || deletingProfile} onClick={removeProfile}>{deletingProfile ? '删除中…' : currentProfileSaved ? '删除' : '取消新建'}</button></div></div>
         {codex && <CodexStatus data={data} onDetect={detectCodex} />}
+        <div className="runtime-summary"><div><p className="eyebrow">NEW SESSION DEFAULT</p><strong>{data.model.profileName || '未命名模型配置'}</strong><span>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'} · {data.model.model || (data.model.runtime === 'codex' ? '使用 ~/.codex/config.toml' : '未填写模型')}</span></div><div><p className="eyebrow">AVAILABLE PROFILES</p><strong>{data.modelProfiles.length} 套</strong><span>可在模型配置中分别保存并切换</span></div><button className="ghost-button" type="button" onClick={() => setSettingsSection('models')}>管理模型配置 <span aria-hidden="true">→</span></button></div>
+        </>}
+        {settingsSection === 'models' && <>
+        <div className="model-catalog"><div className="model-catalog-head"><div><p className="eyebrow">MODEL CATALOG</p><h2>模型配置</h2><p>每套配置独立保存 Provider、模型、上下文和超时；保存后可用于下一次新会话。</p></div><span className="settings-count">{data.modelProfiles.length} 套</span></div><div className="model-profile-directory" aria-label="模型配置列表">{data.modelProfiles.map((profile) => <div className={`model-profile-row ${profile.id === model.profileId ? 'selected' : ''}`} key={profile.id}><button className="model-profile-select" type="button" onClick={() => selectProfile(profile)}><span className={`runtime-nav-dot ${profile.settings.runtime === 'codex' ? (data.codex.installed && data.codex.appServerAvailable ? 'ready' : '') : 'easyagent-dot'}`} /><span><strong>{profile.name}</strong><small>{profile.settings.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · {profile.settings.model || (profile.settings.runtime === 'codex' ? 'config.toml' : '未填写模型')}</small></span></button><button className={`profile-activate ${profile.id === data.activeModelProfileId ? 'active' : ''}`} type="button" disabled={profile.id === data.activeModelProfileId || savingModel} onClick={() => activateProfile(profile)}>{profile.id === data.activeModelProfileId ? '当前新会话默认' : '设为默认'}</button></div>)}{!currentProfileSaved && model.profileId && <div className="model-profile-row draft selected"><div className="model-profile-select"><span className="runtime-nav-dot" /><span><strong>{model.profileName || '新配置'}</strong><small>{model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · 未保存</small></span></div><em>编辑中</em></div>}<div className="directory-foot">默认配置会出现在首页输入框；删除前会检查是否仍被历史会话使用。</div></div></div>
+        <div className="model-profile-switcher"><div><p className="eyebrow">CURRENT PROFILE</p><input className="model-profile-name" aria-label="配置名称" value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="配置名称" /><small>当前编辑的配置；切换后请保存。</small></div><select value={model.profileId || ''} onChange={(event) => { const profile = profileOptions.find((item) => item.id === event.target.value); if (profile) selectProfile(profile) }} aria-label="选择当前模型配置"><option value="" disabled>选择配置</option>{profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.settings.model ? ` · ${profile.settings.model}` : ''}</option>)}</select><div className="model-profile-actions"><button className="ghost-button" type="button" onClick={createProfile}>＋ 新建配置</button><button className="ghost-button danger" type="button" disabled={(currentProfileSaved && data.modelProfiles.length <= 1) || deletingProfile} onClick={removeProfile}>{deletingProfile ? '删除中…' : currentProfileSaved ? '删除' : '取消新建'}</button></div></div>
         {codex
           ? <CodexSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} />
-          : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onUseOllama={useOllama} />}
-        {!codex && <>
+          : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onActivateOllama={activateOllamaModel} />}
+        </>}
+        {settingsSection === 'tools' && (codex ? <div className="section-block codex-tools-note"><div className="runtime-boundary-note"><strong>Codex 能力边界</strong><span>工具、Skill、沙箱和审批由 Codex app-server 管理；EasyAgent 的内置 Tools 和 MCP 不会注入 Codex。</span></div></div> : <>
           <div className="section-block"><div className="section-heading"><div><h2>内置 Tools</h2><p>首轮只发送少量核心 Schema；文件、Shell、网页和 Skill 需要时再加载。</p></div><span className="tag">{data.builtinTools.length} 个</span></div><div className="capability-note"><strong>工作区</strong><span><code>{data.runtime.workspace}</code></span><strong>私有 Runtime</strong><span><code>{data.runtime.runtime}</code></span></div><div className="tool-table">{data.builtinTools.map((tool) => <div key={tool.name}><code>{tool.name}</code><span>{tool.description}</span><em>{tool.category || tool.source}</em></div>)}</div></div>
           <MCPSettings data={data} mcp={mcp} mcpNotice={mcpNotice} installingPreset={installingPreset} checkingPreset={checkingPreset} togglingMCP={togglingMCP} onInstall={installPreset} onCheck={checkPreset} onTest={testMCP} onToggle={toggleMCP} onCreate={() => setMCP({ id: `mcp-${Date.now()}`, name: 'New MCP', description: '', enabled: false, transport: 'http', args: [], headers: {}, environment: {} })} onEdit={(item, preset) => setMCP({ ...item, name: preset?.name || item.name, description: preset?.description || item.description })} dataPresets={data.mcpPresets} onCloseNotice={() => setMCPNotice(null)} />
           <details className="prompt-block"><summary><div><h2>基础 System Prompt</h2><p>只属于 EasyAgent Runtime；Codex 使用自己的 instructions/config。</p></div><span>查看</span></summary><pre>{data.systemPrompt}</pre></details>
-        </>}
+        </>)}
       </div>
     </div>
     {mcp && <div className="modal-backdrop" onMouseDown={() => setMCP(null)}><div className="modal" onMouseDown={(event) => event.stopPropagation()}>
@@ -209,8 +250,13 @@ function CodexSettings({ data, model, setModel, notice, testing, saving, onTest,
   return <div className="section-block codex-config"><div className="section-heading"><div><h2>Codex 配置</h2><p>认证和 Provider 从本机 Codex 配置读取；model override 可留空，留空时使用 config.toml。</p></div><span className="tag">app-server</span></div><div className="runtime-boundary-note"><strong>服务器部署</strong><span>只需在运行 EasyAgent 的服务器安装 Codex CLI；<code>codex app-server</code> 随 CLI 提供，不需要安装 ChatGPT Desktop。认证和 ~/.codex 配置也必须位于服务器运行用户的环境中。</span></div><div className="form-grid"><label className="wide">Model override（可选）<input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} placeholder="留空：使用 ~/.codex/config.toml" /><small>只填写当前 Codex 账号和 Provider 支持的模型；不会把 Ollama 模型传给 Codex。</small></label><label>请求超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /><small>单次 turn 最多 {data.modelRules.maxRequestTimeoutSeconds} 秒</small></label></div><ModelNotice notice={notice} /><div className="form-actions"><button className="ghost-button" disabled={testing} onClick={onTest}>{testing ? '正在执行实际 app-server 测试…' : '测试 Codex app-server'}</button><button className="primary-button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存 Codex 配置'}</button></div></div>
 }
 
-function EasyAgentSettings({ data, model, setModel, notice, testing, saving, onTest, onSave, onUseOllama }: { data: Bootstrap; model: ModelSettings; setModel: (value: ModelSettings) => void; notice: Notice | null; testing: boolean; saving: boolean; onTest: () => void; onSave: () => void; onUseOllama: (name: string) => void }) {
-  return <div className="section-block easyagent-config"><div className="section-heading"><div><h2>模型连接</h2><p>EasyAgent 支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div><span className="tag">{model.protocol}</span></div><div className="form-grid"><label>提供方<input value={model.provider} onChange={(event) => setModel({ ...model, provider: event.target.value })} /></label><label>协议<select value={model.protocol} onChange={(event) => setModel({ ...model, protocol: event.target.value as ModelSettings['protocol'] })}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label><label className="wide">Base URL<input value={model.baseUrl} onChange={(event) => setModel({ ...model, baseUrl: event.target.value })} /></label><label>模型名称<input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} /></label><label>推理模式<select value={model.thinking || ''} onChange={(event) => setModel({ ...model, thinking: event.target.value })}><option value="">模型默认</option><option value="disabled">尝试关闭推理</option></select><small>工具选择失败时，优先检查服务端是否支持原生 tool_calls。</small></label><label>最大输出 Token<input type="number" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label><label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /></label><label>上下文窗口 Token<input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(event) => setModel({ ...model, contextWindowTokens: Number(event.target.value) })} /><small>0 表示未知；Ollama 运行后会读取实际窗口。</small></label><label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label><label>API Key<input type="password" placeholder={model.secretConfigured ? '已配置，留空不修改' : '可留空'} value={model.apiKey || ''} onChange={(event) => setModel({ ...model, apiKey: event.target.value })} /></label><label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(event) => setModel({ ...model, apiKeyEnv: event.target.value })} /></label></div><ModelNotice notice={notice} /><div className="form-actions"><button className="ghost-button" disabled={testing} onClick={onTest}>{testing ? '正在验证 Function Calling…' : '测试 EasyAgent 模型'}</button><button className="primary-button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存 EasyAgent 配置'}</button></div><div className="ollama-strip"><div><strong><span className={`service-dot ${data.ollama.running ? '' : 'off'}`} />Ollama · 无需 API Key</strong><small>{data.ollama.message}</small></div><div>{data.ollama.models.map((item) => <button key={item.name} className="ghost-button" onClick={() => onUseOllama(item.name)}>使用 {item.name}</button>)}</div></div></div>
+function EasyAgentSettings({ data, model, setModel, notice, testing, saving, onTest, onSave, onActivateOllama }: { data: Bootstrap; model: ModelSettings; setModel: (value: ModelSettings) => void; notice: Notice | null; testing: boolean; saving: boolean; onTest: () => void; onSave: () => void; onActivateOllama: (name: string) => Promise<void> }) {
+  return <div className="section-block easyagent-config"><div className="section-heading"><div><h2>模型连接</h2><p>EasyAgent 支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div><span className="tag">{model.protocol}</span></div><OllamaModelCatalog data={data} saving={saving} onActivate={onActivateOllama} /><div className="form-grid"><label>提供方<input value={model.provider} onChange={(event) => setModel({ ...model, provider: event.target.value })} /></label><label>协议<select value={model.protocol} onChange={(event) => setModel({ ...model, protocol: event.target.value as ModelSettings['protocol'] })}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label><label className="wide">Base URL<input value={model.baseUrl} onChange={(event) => setModel({ ...model, baseUrl: event.target.value })} /></label><label>模型名称<input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} /></label><label>推理模式<select value={model.thinking || ''} onChange={(event) => setModel({ ...model, thinking: event.target.value })}><option value="">模型默认</option><option value="disabled">尝试关闭推理</option></select><small>工具选择失败时，优先检查服务端是否支持原生 tool_calls。</small></label><label>最大输出 Token<input type="number" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label><label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /></label><label>上下文窗口 Token<input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(event) => setModel({ ...model, contextWindowTokens: Number(event.target.value) })} /><small>0 表示未知；Ollama 运行后会读取实际窗口。</small></label><label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label><label>API Key<input type="password" placeholder={model.secretConfigured ? '已配置，留空不修改' : '可留空'} value={model.apiKey || ''} onChange={(event) => setModel({ ...model, apiKey: event.target.value })} /></label><label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(event) => setModel({ ...model, apiKeyEnv: event.target.value })} /></label></div><ModelNotice notice={notice} /><div className="form-actions"><button className="ghost-button" disabled={testing} onClick={onTest}>{testing ? '正在验证 Function Calling…' : '测试 EasyAgent 模型'}</button><button className="primary-button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存 EasyAgent 配置'}</button></div></div>
+}
+
+function OllamaModelCatalog({ data, saving, onActivate }: { data: Bootstrap; saving: boolean; onActivate: (name: string) => Promise<void> }) {
+  if (!data.ollama.running) return <div className="ollama-model-catalog offline"><strong><span className="service-dot off" />Ollama 未运行</strong><small>{data.ollama.message}</small></div>
+  return <div className="ollama-model-catalog"><div className="ollama-model-head"><div><strong>已下载模型</strong><small>点击“设为默认”会保存为独立配置，并用于下一次新会话。</small></div><span>{data.ollama.models.length} 个</span></div>{data.ollama.models.length === 0 ? <p className="ollama-empty">Ollama 已连接，但还没有下载模型。</p> : <div className="ollama-model-list">{data.ollama.models.map((item) => { const profile = data.modelProfiles.find((candidate) => candidate.settings.runtime === 'easyagent' && candidate.settings.model === item.name); const active = profile?.id === data.activeModelProfileId; return <div className="ollama-model-row" key={item.name}><div><code>{item.name}</code><small>{profile ? `已保存为“${profile.name}”` : '尚未建立模型配置'}</small></div><span className={active ? 'active' : profile ? 'configured' : ''}>{active ? '当前默认' : profile ? '已配置' : '可用'}</span><button className="ghost-button" type="button" disabled={saving} onClick={() => void onActivate(item.name)}>{active ? '当前默认' : profile ? '设为默认' : '创建并启用'}</button></div>})}</div>}</div>
 }
 
 function MCPSettings({ data, mcpNotice, installingPreset, checkingPreset, togglingMCP, onInstall, onCheck, onTest, onToggle, onCreate, onEdit, dataPresets, onCloseNotice }: { data: Bootstrap; mcp: MCPConfig | null; mcpNotice: { ready: boolean; title: string; message: string; tools: string[] } | null; installingPreset: string; checkingPreset: string; togglingMCP: string; onInstall: (preset: Bootstrap['mcpPresets'][number]) => void; onCheck: (preset: Bootstrap['mcpPresets'][number]) => void; onTest: (id: string) => void; onToggle: (item: MCPConfig) => void; onCreate: () => void; onEdit: (item: MCPConfig, preset?: Bootstrap['mcpPresets'][number]) => void; dataPresets: Bootstrap['mcpPresets']; onCloseNotice: () => void }) {
