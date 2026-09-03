@@ -111,14 +111,14 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
     {section === 'settings' && <div className="settings-scope-note"><span>共享目录</span><strong>Skills 内容</strong><small>统一编辑，是否参与当前任务由 Runtime 决定</small><span>Runtime 绑定</span><strong>模型 · Tools / MCP</strong><small>模型配置按 Runtime 隔离；Codex 能力由 app-server 管理</small></div>}
     <div className={`runtime-workbench settings-view-${settingsSection}`}>
       {(section === 'runtime' || section === 'settings') && settingsSection === 'runtime' && <nav className="runtime-rail" aria-label="选择 Agent Runtime">
-        <div className="runtime-rail-head"><p className="eyebrow">运行引擎</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
+        <div className="runtime-rail-head"><div><p className="eyebrow">运行环境</p><strong>选择执行引擎</strong></div><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
           <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? (persistedCodex ? '待启用' : '已启用') : data.ollama.running ? '就绪' : '配置'}</em>
         </button>
         <button className={`runtime-nav-item ${codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('codex')} aria-pressed={codex}>
           <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{codex ? (persistedCodex ? '已启用' : '待启用') : data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
         </button>
-        <div className="runtime-rail-foot">切换只影响下一次新会话</div>
+        <div className="runtime-rail-foot">配置只在创建新会话时生效；已有会话保持不变。</div>
       </nav>}
       <div className="runtime-main">
         {settingsSection === 'runtime' && <>
