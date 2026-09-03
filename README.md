@@ -58,6 +58,25 @@ EasyAgent 自动管理 `~/.easyagent` 和默认工作区
 MCP 自己的固定版本包；Node.js、Python、Java 等宿主运行时由服务器管理员或
 项目环境提供，页面只负责检测，不执行系统级安装或升级。
 
+### 在 Linux 服务器启用 Codex Runtime
+
+Codex Runtime 需要安装在运行 EasyAgent 的服务器上。服务器只安装 Codex CLI，
+不需要安装 ChatGPT Desktop；`codex app-server` 是 CLI 自带的子命令。Ubuntu
+或其他支持的 Linux 主机可按 Codex 官方安装说明执行：
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+codex --version
+codex app-server --help
+```
+
+然后在同一个服务器运行用户的环境中完成 Codex 登录和配置，再回到 EasyAgent
+「模型与工具 → 运行时配置」点击「重新检测」并启用 Codex Runtime。EasyAgent
+不会把本机 ChatGPT Desktop 的登录状态复制到远程服务器，也不会代替服务器上的
+Codex 凭据管理。若服务器是多人共享部署，需要明确使用一个服务账号，或为每个
+用户隔离 Unix 用户、HOME 和 Codex 配置；不要把某个用户的 `~/.codex` 凭据复制
+给所有用户。
+
 ## 三种扩展
 
 | 能力 | 适合放什么 | 如何使用 |

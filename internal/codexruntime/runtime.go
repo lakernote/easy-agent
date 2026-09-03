@@ -93,7 +93,7 @@ func Detect(environment *appenv.Environment) Status {
 		}
 		return status
 	}
-	status.Message = "未检测到 Codex CLI；安装后点击重新检测"
+	status.Message = "未检测到 Codex CLI；服务器只需安装 CLI，不需要 ChatGPT Desktop"
 	return status
 }
 
