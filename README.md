@@ -16,7 +16,26 @@
 - 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
 - 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
 
-<p align="center"><img src="docs/images/conversation.png" alt="EasyAgent 对话界面" width="920" /></p>
+## 界面预览
+
+对话、运行时和能力管理使用同一套工作区视觉语言；新会话创建时固定运行时与模型配置，已有会话不会被后续修改影响。
+
+<p align="center">
+  <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />
+</p>
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <strong>多 Runtime 与运行时配置</strong><br />
+      <img src="docs/images/model-and-tools.png" alt="多 Runtime 设置" width="440" />
+    </td>
+    <td align="center" width="50%">
+      <strong>Skills 按需加载与编辑</strong><br />
+      <img src="docs/images/skills.png" alt="Skills 管理" width="440" />
+    </td>
+  </tr>
+</table>
 
 ## 快速开始
 
@@ -27,7 +46,7 @@ chmod +x easyagent
 ./easyagent
 ```
 
-启动后打开 <http://127.0.0.1:8080>（远程服务器请把 `127.0.0.1` 换成服务器 IP），进入「模型与工具」配置模型后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
+启动后打开 <http://127.0.0.1:8080>（远程服务器请把 `127.0.0.1` 换成服务器 IP），进入「设置 → 模型配置」完成配置后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
 
 从源码构建：
 
@@ -76,7 +95,7 @@ Base URL、默认模型、推理强度和 API Key。API Key 不要写入 `env_ke
 或为每个用户隔离 Unix 用户、HOME 和 Codex 配置；不要把某个用户的 `~/.codex`
 凭据复制给所有用户。
 
-「模型与工具」支持为 EasyAgent 和 Codex 分别保存多套配置。设置页保存的是当前
+「设置 → 模型配置」支持为 EasyAgent 和 Codex 分别保存多套配置。设置页保存的是当前
 profile；首页新会话可以选择同一 Runtime 下的 profile。会话创建后会固定它的
 profile，之后修改或删除其他 profile 不会改变已有会话；仍被会话使用的 profile
 不能删除。
