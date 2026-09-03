@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import type { Bootstrap, Skill } from './types'
 export function Skills({ data, onRefresh, onError }: { data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
@@ -12,6 +12,8 @@ export function Skills({ data, onRefresh, onError }: { data: Bootstrap; onRefres
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [createError, setCreateError] = useState('')
+  const [skillQuery, setSkillQuery] = useState('')
+  const [skillFilter, setSkillFilter] = useState<'all' | 'enabled' | 'custom'>('all')
 
   // 自定义 Skill 在首次保存前还不在 data.skills 中，不能用第一项覆盖这份草稿。
   useEffect(() => {
@@ -21,6 +23,16 @@ export function Skills({ data, onRefresh, onError }: { data: Bootstrap; onRefres
   }, [selectedName])
 
   const contentDirty = Boolean(draft && (!selected || draft.description !== selected.description || draft.content !== selected.content))
+  const enabledCount = data.skills.filter((item) => item.enabled).length
+  const customCount = data.skills.filter((item) => !item.builtin).length
+  const visibleSkills = useMemo(() => {
+    const keyword = skillQuery.trim().toLocaleLowerCase()
+    return data.skills.filter((item) => {
+      const matchesQuery = !keyword || item.name.toLocaleLowerCase().includes(keyword) || item.description.toLocaleLowerCase().includes(keyword)
+      const matchesFilter = skillFilter === 'all' || (skillFilter === 'enabled' ? item.enabled : !item.builtin)
+      return matchesQuery && matchesFilter
+    })
+  }, [data.skills, skillFilter, skillQuery])
 
   const save = async () => {
     if (!draft || saving) return
@@ -89,10 +101,13 @@ export function Skills({ data, onRefresh, onError }: { data: Bootstrap; onRefres
 
   return <section className="settings-page">
     <div className="page-intro"><p className="eyebrow">按需加载</p><h1>Skills</h1><p>默认只向模型提供名称和简介，由 Agent 按需调用 <code>load_skill</code>；在输入框用 <code>@skill:name</code> 明确选择时，本轮会直接使用完整说明。</p></div>
+    <div className="skills-overview"><div><p className="eyebrow">SKILL LIBRARY</p><strong>{data.skills.length} 项能力</strong><span>按需加载，不把完整正文塞进每一轮上下文</span></div><div><p className="eyebrow">ENABLED</p><strong>{enabledCount} / {data.skills.length}</strong><span>当前可被 Agent 自动选择</span></div><div><p className="eyebrow">CUSTOM</p><strong>{customCount} 项</strong><span>自定义内容保存在本地</span></div></div>
     <div className="split-settings">
       <div className="settings-list">
         <button className="add-row" onClick={openCreate}>＋ 添加 Skill</button>
-        {data.skills.map((item) => <button key={item.name} className={item.name === draft?.name ? 'active' : ''} onClick={() => setSelectedName(item.name)}><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><div><strong>{item.name}</strong><small>{item.description}</small></div><em>{item.builtin ? '内置' : '自定义'} · {item.enabled ? '启用' : '停用'}</em></button>)}
+        <div className="settings-list-tools"><label className="settings-search"><span aria-hidden="true">⌕</span><input value={skillQuery} onChange={(event) => setSkillQuery(event.target.value)} placeholder="搜索 Skill" aria-label="搜索 Skill" /></label><select value={skillFilter} onChange={(event) => setSkillFilter(event.target.value as typeof skillFilter)} aria-label="筛选 Skill"><option value="all">全部</option><option value="enabled">已启用</option><option value="custom">自定义</option></select></div>
+        {visibleSkills.map((item) => <button key={item.name} className={item.name === draft?.name ? 'active' : ''} onClick={() => setSelectedName(item.name)}><span className={`status ${item.enabled ? 'idle' : 'off'}`} /><div><strong>{item.name}</strong><small>{item.description}</small></div><em>{item.builtin ? '内置' : '自定义'} · {item.enabled ? '启用' : '停用'}</em></button>)}
+        {visibleSkills.length === 0 && <div className="settings-list-empty"><strong>没有匹配的 Skill</strong><button type="button" onClick={() => { setSkillQuery(''); setSkillFilter('all') }}>清除筛选</button></div>}
       </div>
       {draft && <div className="editor-pane">
         <div className="editor-title">
