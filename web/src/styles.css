@@ -291,6 +291,42 @@ html, body, #root { height: 100%; }
 .settings-canvas::-webkit-scrollbar-thumb, .conversation-content::-webkit-scrollbar-thumb, .session-list::-webkit-scrollbar-thumb, .trace-panel::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #bcc8bf; background-clip: content-box; }
 .settings-canvas::-webkit-scrollbar-thumb:hover, .conversation-content::-webkit-scrollbar-thumb:hover, .session-list::-webkit-scrollbar-thumb:hover, .trace-panel::-webkit-scrollbar-thumb:hover { background: #8fa497; background-clip: content-box; }
 
+/* 交互状态保持克制：用文字、图标和小圆点提示当前位置，不再给整块导航加绿色色块。 */
+.primary-nav button.active,
+.primary-nav button.active:hover { position: relative; color: #245f41; background: transparent; box-shadow: none; font-weight: 650; }
+.primary-nav button.active::after { position: absolute; top: 50%; right: 8px; width: 4px; height: 4px; border-radius: 50%; background: var(--green); content: ''; transform: translateY(-50%); }
+.primary-nav button.active svg { color: var(--green); }
+.primary-nav button:focus-visible { outline: none; box-shadow: inset 0 -2px #8bbda0; }
+.primary-nav button.active:focus-visible { box-shadow: none; }
+.session-row.active,
+.session-row.active:hover { background: #edf4ef; box-shadow: none; }
+.session-row.active .status { box-shadow: 0 0 0 3px #d9ebe0; }
+.session-row.active .session-copy strong { color: #245f41; }
+
+/* 内容滚动条轻量化；首页场景条仍可触摸横滑，但不把滚动条当成页面装饰。 */
+.conversation::-webkit-scrollbar,
+.settings-canvas::-webkit-scrollbar,
+.conversation-content::-webkit-scrollbar,
+.session-list::-webkit-scrollbar,
+.trace-panel::-webkit-scrollbar { width: 6px; }
+.conversation::-webkit-scrollbar-track,
+.settings-canvas::-webkit-scrollbar-track,
+.conversation-content::-webkit-scrollbar-track,
+.session-list::-webkit-scrollbar-track,
+.trace-panel::-webkit-scrollbar-track { background: transparent; }
+.conversation::-webkit-scrollbar-thumb,
+.settings-canvas::-webkit-scrollbar-thumb,
+.conversation-content::-webkit-scrollbar-thumb,
+.session-list::-webkit-scrollbar-thumb,
+.trace-panel::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: #b8c5bc; background-clip: content-box; }
+.conversation::-webkit-scrollbar-thumb:hover,
+.settings-canvas::-webkit-scrollbar-thumb:hover,
+.conversation-content::-webkit-scrollbar-thumb:hover,
+.session-list::-webkit-scrollbar-thumb:hover,
+.trace-panel::-webkit-scrollbar-thumb:hover { background: #8fa497; background-clip: content-box; }
+.suggestions { scrollbar-width: none; }
+.suggestions::-webkit-scrollbar { display: none; }
+
 /* Runtime 是设置页的导航上下文，不再用两个巨大的选择卡片抢占首屏。 */
 .runtime-intro { margin-bottom: 24px; }
 .runtime-workbench { display: grid; min-width: 0; grid-template-columns: 214px minmax(0, 1fr); align-items: start; gap: 22px; }
@@ -361,4 +397,24 @@ html, body, #root { height: 100%; }
   .model-profile-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }.model-profile-row-actions { justify-content: flex-end; }.model-profile-row-actions .profile-runtime-tag { margin-right: auto; }
   .settings-section-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; margin-bottom: 14px; }.settings-section-nav button { display: block; padding: 9px 7px 10px; }.settings-section-nav button span, .settings-section-nav button small { display: block; }.settings-section-nav button strong { display: block; margin-top: 4px; font-size: 10px; }.settings-section-nav button small { margin-top: 3px; font-size: 8px; }.runtime-summary { grid-template-columns: 1fr; gap: 13px; }.runtime-summary .ghost-button { justify-self: start; }.ollama-model-row { grid-template-columns: minmax(0, 1fr) auto; }.ollama-model-row > span { display: none; }.ollama-model-row .ghost-button { grid-column: 2; grid-row: 1; }
   .model-catalog-head { align-items: stretch; flex-direction: column; gap: 12px; }.catalog-actions { justify-content: space-between; }.model-drawer-head { padding: 18px 16px 15px; }.model-drawer-body { padding: 18px 16px 28px; }.model-drawer-body .form-grid { grid-template-columns: 1fr; }.model-drawer-body .form-grid .wide { grid-column: auto; }.model-drawer-body .form-actions { align-items: stretch; flex-direction: column; }.model-drawer-body .form-actions button { width: 100%; }.model-drawer-danger { align-items: stretch; flex-direction: column; }.model-drawer-danger span { text-align: left; }
+  .primary-nav button.active::after { top: auto; right: auto; bottom: 0; left: 50%; transform: translateX(-50%); }
 }
+
+/* 组件规则之后的最终状态层，避免历史样式重新覆盖安静的选中态。 */
+.runtime-nav-item.selected { border-color: transparent; background: #eaf3ed; box-shadow: none; }
+.runtime-nav-item.selected:hover { background: #e4efe8; }
+.model-profile-row.selected { border-color: #e3eae5; background: #fbfdfb; box-shadow: none; }
+.settings-section-nav button.active { color: #245e3d; border-bottom-color: #2d8b61; background: transparent; }
+.settings-section-nav button.active:hover { background: #f3f7f4; }
+.settings-section-nav button.active span { color: #2d8b61; }
+.settings-section-nav button:focus-visible { outline: none; box-shadow: inset 0 -2px #8bbda0; }
+.settings-section-nav button.active:focus-visible { box-shadow: inset 0 -2px #2d8b61; }
+.model-profile-directory { gap: 0; border-top: 1px solid #e3eae5; }
+.model-profile-row { border-right: 0; border-left: 0; border-top: 0; border-radius: 0; background: transparent; }
+.model-profile-row:hover { background: #f7faf8; }
+.profile-runtime-tag { min-height: 20px; padding: 0 3px; border-radius: 0; border-left: 2px solid #75a98a; background: transparent; }
+.profile-runtime-tag.codex { border-left-color: #b39d5d; background: transparent; }
+.profile-runtime-tag.draft { border-left-color: #c89b48; background: transparent; }
+.session-open:focus-visible { outline: none; }
+.session-row:focus-within { box-shadow: inset 0 -2px #8bbda0; }
+.session-row.active:focus-within { box-shadow: inset 0 -2px #8bbda0; }
