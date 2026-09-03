@@ -278,9 +278,14 @@ input:focus, textarea:focus, select:focus { border-color: #6e9b7d; box-shadow: 0
 html, body, #root { height: 100%; }
 .app-shell { height: 100vh; min-height: 0; overflow: hidden; }
 .main-canvas { height: 100vh; min-height: 0; overflow: hidden; }
+.settings-canvas { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
 .conversation { justify-content: stretch; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
 .conversation-content { width: min(820px, 100%); height: auto; min-height: 100%; overflow: visible; }
-.settings-page { height: calc(100vh - 64px); min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
+.settings-canvas .settings-page { height: auto; min-height: calc(100vh - 64px); overflow: visible; }
+.settings-canvas::-webkit-scrollbar, .conversation-content::-webkit-scrollbar, .session-list::-webkit-scrollbar, .trace-panel::-webkit-scrollbar { width: 10px; }
+.settings-canvas::-webkit-scrollbar-track, .conversation-content::-webkit-scrollbar-track, .session-list::-webkit-scrollbar-track, .trace-panel::-webkit-scrollbar-track { background: transparent; }
+.settings-canvas::-webkit-scrollbar-thumb, .conversation-content::-webkit-scrollbar-thumb, .session-list::-webkit-scrollbar-thumb, .trace-panel::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #bcc8bf; background-clip: content-box; }
+.settings-canvas::-webkit-scrollbar-thumb:hover, .conversation-content::-webkit-scrollbar-thumb:hover, .session-list::-webkit-scrollbar-thumb:hover, .trace-panel::-webkit-scrollbar-thumb:hover { background: #8fa497; background-clip: content-box; }
 
 /* Runtime 是设置页的导航上下文，不再用两个巨大的选择卡片抢占首屏。 */
 .runtime-intro { margin-bottom: 24px; }
@@ -291,9 +296,9 @@ html, body, #root { height: 100%; }
 .runtime-rail-head > strong, .runtime-rail-head > small { display: block; }
 .runtime-rail-head > strong { font-size: 13px; }
 .runtime-rail-head > small { margin-top: 5px; color: #89968e; font-size: 9px; }
-.runtime-nav-item { display: grid; width: 100%; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 67px; padding: 10px 10px; border: 0; border-radius: 9px; color: #526259; background: transparent; cursor: pointer; text-align: left; }
+.runtime-nav-item { display: grid; width: 100%; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 67px; padding: 10px 10px; border: 1px solid transparent; border-radius: 9px; color: #526259; background: transparent; cursor: pointer; text-align: left; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
 .runtime-nav-item:hover { background: #e6efe8; }
-.runtime-nav-item.selected { color: #1d4f37; background: white; box-shadow: 0 1px 3px #294a3512, inset 3px 0 var(--green); }
+.runtime-nav-item.selected { color: #1d4f37; border-color: #8dbba1; background: #fff; box-shadow: 0 3px 10px #294a3514; }
 .runtime-nav-item > span:nth-child(2) { min-width: 0; }
 .runtime-nav-item strong, .runtime-nav-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-nav-item strong { font-size: 11px; }
@@ -302,6 +307,7 @@ html, body, #root { height: 100%; }
 .runtime-nav-item.selected em { color: var(--green); }
 .runtime-nav-dot { width: 8px; height: 8px; border: 2px solid #aeb9b1; border-radius: 50%; }
 .runtime-nav-dot.ready, .runtime-nav-dot.easyagent-dot { border-color: #61a783; background: #61a783; }
+.runtime-nav-item.selected .runtime-nav-dot { box-shadow: 0 0 0 4px #dcefe4; }
 .runtime-rail-foot { margin: 7px 4px 2px; padding: 10px 8px 4px; border-top: 1px solid #dce6df; color: #8b978f; font-size: 8px; line-height: 1.45; }
 .runtime-main { min-width: 0; }
 .runtime-main-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 4px 2px 15px; border-bottom: 1px solid var(--line); }
@@ -316,6 +322,7 @@ html, body, #root { height: 100%; }
 
 @media (max-width: 860px) {
   .main-canvas { height: calc(100vh - 62px); }
+  .settings-canvas { overflow-y: auto; }
   .settings-page { height: calc(100vh - 120px); width: calc(100% - 24px); }
   .runtime-workbench { grid-template-columns: 1fr; gap: 14px; }
   .runtime-rail { position: static; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 6px; }

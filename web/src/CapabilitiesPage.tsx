@@ -133,10 +133,10 @@ export function Capabilities({ data, onRefresh, onError }: { data: Bootstrap; on
       <nav className="runtime-rail" aria-label="选择 Agent Runtime">
         <div className="runtime-rail-head"><p className="eyebrow">RUNTIME</p><strong>执行引擎</strong><small>新会话创建时固定</small></div>
         <button className={`runtime-nav-item ${!codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('easyagent')} aria-pressed={!codex}>
-          <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{data.ollama.running ? '就绪' : '配置'}</em>
+          <span className="runtime-nav-dot easyagent-dot" /><span><strong>EasyAgent</strong><small>Go Agent · Ollama / OpenAI</small></span><em>{!codex ? '当前' : data.ollama.running ? '就绪' : '配置'}</em>
         </button>
         <button className={`runtime-nav-item ${codex ? 'selected' : ''}`} type="button" onClick={() => selectRuntime('codex')} aria-pressed={codex}>
-          <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
+          <span className={`runtime-nav-dot ${data.codex.installed && data.codex.appServerAvailable ? 'ready' : ''}`} /><span><strong>Codex</strong><small>app-server · thread / sandbox</small></span><em>{codex ? '当前' : data.codex.installed && data.codex.appServerAvailable ? '就绪' : '检测'}</em>
         </button>
         <div className="runtime-rail-foot">切换只影响下一次新会话</div>
       </nav>
