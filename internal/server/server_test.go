@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -27,6 +28,71 @@ func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	output := redactTraceAttachmentData(input)
 	if strings.Contains(output, "c2VjcmV0") || !strings.Contains(output, "image/png attachment data omitted") || !strings.Contains(output, `"text":"keep"`) {
 		t.Fatalf("Trace 附件脱敏错误: %s", output)
+	}
+}
+
+func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	defer application.Shutdown(context.Background())
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	if response, err := client.Get(httpServer.URL + "/api/v1/bootstrap"); err != nil {
+		t.Fatal(err)
+	} else {
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("未登录 API 应拒绝: %d", response.StatusCode)
+		}
+	}
+	loginBody := bytes.NewBufferString(`{"username":"admin","password":"admin"}`)
+	login, err := client.Post(httpServer.URL+"/api/v1/auth/login", "application/json", loginBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+	if login.StatusCode != http.StatusOK {
+		t.Fatalf("默认账号登录失败: %d", login.StatusCode)
+	}
+	if response, err := client.Get(httpServer.URL + "/api/v1/bootstrap"); err != nil {
+		t.Fatal(err)
+	} else {
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("登录后 API 仍被拒绝: %d", response.StatusCode)
+		}
+	}
+	changeBody := bytes.NewBufferString(`{"currentPassword":"admin","newPassword":"new-admin-password"}`)
+	request, _ := http.NewRequest(http.MethodPut, httpServer.URL+"/api/v1/auth/password", changeBody)
+	request.Header.Set("Content-Type", "application/json")
+	changed, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed.Body.Close()
+	if changed.StatusCode != http.StatusOK {
+		t.Fatalf("改密失败: %d", changed.StatusCode)
+	}
+	oldLogin, err := client.Post(httpServer.URL+"/api/v1/auth/login", "application/json", bytes.NewBufferString(`{"username":"admin","password":"admin"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldLogin.Body.Close()
+	if oldLogin.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("旧密码应失效: %d", oldLogin.StatusCode)
 	}
 }
 
@@ -325,7 +391,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -502,7 +568,7 @@ func TestMultiTurnSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, assets, environment)
+	application := NewForTests(database, assets, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -994,5 +1060,5 @@ func newTestApplication(t *testing.T, database *store.Store, assets fstest.MapFS
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(database, assets, environment)
+	return NewForTests(database, assets, environment)
 }

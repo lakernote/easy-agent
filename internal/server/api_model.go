@@ -53,8 +53,8 @@ func validateModel(value store.ModelSettings) error {
 		if value.MaxOutputTokens <= 0 {
 			return errors.New("最大输出 Token 必须大于 0")
 		}
-		if value.RequestTimeoutSeconds < store.MinRequestTimeoutSeconds || value.RequestTimeoutSeconds > store.MaxRequestTimeoutSeconds {
-			return errors.New("模型超时必须在 " + strconv.Itoa(store.MinRequestTimeoutSeconds) + " 到 " + strconv.Itoa(store.MaxRequestTimeoutSeconds) + " 秒之间")
+		if value.TurnTimeoutSeconds < store.MinCodexTurnTimeoutSeconds || value.TurnTimeoutSeconds > store.MaxCodexTurnTimeoutSeconds {
+			return errors.New("Codex 整轮任务上限必须在 " + strconv.Itoa(store.MinCodexTurnTimeoutSeconds) + " 到 " + strconv.Itoa(store.MaxCodexTurnTimeoutSeconds) + " 秒之间")
 		}
 		return nil
 	}

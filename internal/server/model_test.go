@@ -76,3 +76,28 @@ func TestPrepareModelInputDoesNotMoveSecretAcrossProviders(t *testing.T) {
 		t.Fatal("切换 Provider 后错误继承了旧密钥")
 	}
 }
+
+func TestCodexTurnTimeoutIsIndependentFromRequestTimeout(t *testing.T) {
+	input, err := prepareModelInput(store.ModelSettings{
+		Runtime:         store.RuntimeCodex,
+		MaxOutputTokens: 100,
+	}, store.ModelSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.TurnTimeoutSeconds != store.DefaultCodexTurnTimeoutSeconds {
+		t.Fatalf("Codex 未使用独立的整轮任务默认上限: got %d, want %d", input.TurnTimeoutSeconds, store.DefaultCodexTurnTimeoutSeconds)
+	}
+	if input.RequestTimeoutSeconds != store.DefaultRequestTimeoutSeconds {
+		t.Fatalf("请求超时默认值异常: got %d, want %d", input.RequestTimeoutSeconds, store.DefaultRequestTimeoutSeconds)
+	}
+
+	input.TurnTimeoutSeconds = store.MaxCodexTurnTimeoutSeconds
+	if err := validateModel(input); err != nil {
+		t.Fatalf("最大合法整轮任务上限不应失败: %v", err)
+	}
+	input.TurnTimeoutSeconds = store.MaxCodexTurnTimeoutSeconds + 1
+	if err := validateModel(input); err == nil {
+		t.Fatal("超过最大整轮任务上限的配置应失败")
+	}
+}

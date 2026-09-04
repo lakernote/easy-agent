@@ -1,5 +1,14 @@
 import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport } from './types'
 
+export class APIError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'APIError'
+    this.status = status
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -7,13 +16,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
-    throw new Error(payload.error || `HTTP ${response.status}`)
+    throw new APIError(payload.error || `HTTP ${response.status}`, response.status)
   }
   if (response.status === 204) return undefined as T
   return response.json()
 }
 
 export const api = {
+  me: () => request<{ authenticated: boolean; username: string }>('/api/v1/auth/me'),
+  login: (username: string, password: string) => request<{ authenticated: boolean; username: string }>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  logout: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
+  changePassword: (currentPassword: string, newPassword: string) => request<{ authenticated: boolean; message: string }>('/api/v1/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
   usage: (period: UsageReport['period'], days?: number) => request<UsageReport>(`/api/v1/usage?period=${period}${days ? `&days=${days}` : ''}`),
   olderSessions: (beforeUpdatedAt: string, beforeID: string) => request<{ sessions: Session[]; hasMore: boolean }>(`/api/v1/sessions/history?beforeUpdatedAt=${encodeURIComponent(beforeUpdatedAt)}&beforeID=${encodeURIComponent(beforeID)}`),
@@ -22,12 +35,15 @@ export const api = {
   createSession: (message: string, attachments: AttachmentInput[] = [], workspace = '', profileId = '') => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message, attachments, workspace, profileId }) }),
   sendMessage: (id: string, message: string, attachments: AttachmentInput[] = []) => request<Session>(`/api/v1/sessions/${id}/messages`, { method: 'POST', body: JSON.stringify({ message, attachments }) }),
   cancelSession: (id: string) => request<Session>(`/api/v1/sessions/${id}/cancel`, { method: 'POST' }),
+  resolveCodexRequest: (id: string, requestId: string, response: unknown) => request<void>(`/api/v1/sessions/${id}/codex-request`, { method: 'POST', body: JSON.stringify({ requestId, response }) }),
   deleteSession: (id: string) => request<void>(`/api/v1/sessions/${id}`, { method: 'DELETE' }),
   saveModel: (model: ModelSettings) => request<ModelSettings>('/api/v1/model', { method: 'PUT', body: JSON.stringify(model) }),
   deleteModelProfile: (id: string) => request<void>(`/api/v1/model/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testModel: (model: ModelSettings) => request<{ ok: boolean; model: string; toolCall: string; answer: string; inputTokens: number; outputTokens: number; durationMs: number }>('/api/v1/model/test', { method: 'POST', body: JSON.stringify(model) }),
   useOllama: (model: string) => request<ModelSettings>('/api/v1/ollama/use', { method: 'POST', body: JSON.stringify({ model }) }),
   codex: () => request<Bootstrap['codex']>('/api/v1/codex'),
+  codexModels: () => request<unknown>('/api/v1/codex/models'),
+  codexAccount: () => request<unknown>('/api/v1/codex/account'),
   codexConfig: () => request<CodexProviderConfig>('/api/v1/codex/config'),
   saveCodexConfig: (config: CodexProviderConfigInput) => request<CodexProviderConfig>('/api/v1/codex/config', { method: 'PUT', body: JSON.stringify(config) }),
   installCodex: () => request<{ ok: boolean; status: Bootstrap['codex']; message: string }>('/api/v1/codex/install', { method: 'POST', body: JSON.stringify({}) }),

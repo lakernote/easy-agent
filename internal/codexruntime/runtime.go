@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
 )
@@ -138,6 +139,16 @@ type Config struct {
 	OnDelta   func(string)
 	OnEvent   func(Event)
 	OnUsage   func(Usage)
+	// OnServerRequest 可选地处理 app-server 发起的反向 JSON-RPC 请求。
+	// 未设置时，RunMessage 会回复标准 JSON-RPC 方法未实现错误，避免把
+	// “服务器请求”误判成协议损坏并直接断开连接。
+	OnServerRequest func(ServerRequest) (any, error)
+}
+
+type ServerRequest struct {
+	ID     json.RawMessage
+	Method string
+	Params json.RawMessage
 }
 
 type Usage struct {
@@ -184,14 +195,30 @@ type rpcMessage struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+const (
+	maxTraceValueBytes    = 64 * 1024
+	maxProgressValueBytes = 4 * 1024
+)
+
 type synchronizedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu    sync.Mutex
+	buf   bytes.Buffer
+	limit int
 }
 
 func (b *synchronizedBuffer) Write(value []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.limit > 0 {
+		if len(value) >= b.limit {
+			b.buf.Reset()
+			_, _ = b.buf.Write(value[len(value)-b.limit:])
+			return len(value), nil
+		}
+		if overflow := b.buf.Len() + len(value) - b.limit; overflow > 0 {
+			_ = b.buf.Next(overflow)
+		}
+	}
 	return b.buf.Write(value)
 }
 
@@ -219,7 +246,9 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	ctx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, config.Path, "app-server")
+	// 不使用 CommandContext 的自动 Kill：取消时先给 app-server 一个协议层
+	// turn/interrupt 机会，随后再用进程组终止作为兜底。
+	command := exec.Command(config.Path, "app-server")
 	command.Dir = config.Workspace
 	if len(config.Env) > 0 {
 		command.Env = config.Env
@@ -236,43 +265,116 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if err != nil {
 		return Result{}, err
 	}
+	configureProcessTree(command)
 	var stderrTail synchronizedBuffer
-	go func() { _, _ = io.CopyN(&stderrTail, stderr, 32*1024) }()
+	stderrTail.limit = 32 * 1024
+	// 持续排空 stderr，避免 app-server/工具写满 pipe 后阻塞；只保留
+	// 最后的少量内容用于错误诊断，避免异常进程无限占用内存。
+	go func() { _, _ = io.Copy(&stderrTail, stderr) }()
 	if err := command.Start(); err != nil {
 		return Result{}, fmt.Errorf("启动 Codex app-server: %w", err)
 	}
-	defer func() { _ = stdin.Close(); _ = command.Process.Kill(); _ = command.Wait() }()
+	var threadID, turnID string
+	interrupt := func() {}
+	defer func() {
+		if ctx.Err() != nil && turnID != "" {
+			interrupt()
+		}
+		_ = stdin.Close()
+		terminateProcessTree(command)
+		_ = command.Wait()
+	}()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
-	send := func(method string, id int, params any) error {
-		payload, err := json.Marshal(struct {
-			Method string `json:"method"`
-			ID     int    `json:"id,omitempty"`
-			Params any    `json:"params,omitempty"`
-		}{Method: method, ID: id, Params: params})
+	type readResult struct {
+		message rpcMessage
+		err     error
+	}
+	readResults := make(chan readResult, 1)
+	emitReadResult := func(result readResult) bool {
+		select {
+		case readResults <- result:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	go func() {
+		for scanner.Scan() {
+			var message rpcMessage
+			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+				emitReadResult(readResult{err: fmt.Errorf("Codex app-server 返回无效 JSON: %w", err)})
+				return
+			}
+			if !emitReadResult(readResult{message: message}) {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			emitReadResult(readResult{err: err})
+			return
+		}
+		if stderr := strings.TrimSpace(stderrTail.Snapshot()); stderr != "" {
+			emitReadResult(readResult{err: fmt.Errorf("Codex app-server 已退出: %s", stderr)})
+			return
+		}
+		emitReadResult(readResult{err: io.EOF})
+	}()
+	var writeMu sync.Mutex
+	write := func(value any) error {
+		payload, err := json.Marshal(value)
 		if err != nil {
 			return err
 		}
 		payload = append(payload, '\n')
+		writeMu.Lock()
+		defer writeMu.Unlock()
 		_, err = stdin.Write(payload)
 		return err
 	}
+	send := func(method string, id int, params any) error {
+		return write(struct {
+			Method string `json:"method"`
+			ID     int    `json:"id,omitempty"`
+			Params any    `json:"params,omitempty"`
+		}{Method: method, ID: id, Params: params})
+	}
+	interrupt = func() {
+		_ = send("turn/interrupt", 99, map[string]any{"threadId": threadID, "turnId": turnID})
+		// Give the protocol message a short window to be consumed before the
+		// process-group kill below. This is deliberately bounded during shutdown.
+		time.Sleep(120 * time.Millisecond)
+	}
+	sendResponse := func(id json.RawMessage, result any, responseErr error) error {
+		if responseErr != nil {
+			return write(struct {
+				ID    json.RawMessage `json:"id"`
+				Error map[string]any  `json:"error"`
+			}{ID: id, Error: map[string]any{"code": -32000, "message": responseErr.Error()}})
+		}
+		return write(struct {
+			ID     json.RawMessage `json:"id"`
+			Result any             `json:"result"`
+		}{ID: id, Result: result})
+	}
+	handleServerRequest := func(message rpcMessage) error {
+		if config.OnServerRequest == nil {
+			return sendResponse(message.ID, nil, fmt.Errorf("EasyAgent 未实现 app-server 方法: %s", message.Method))
+		}
+		result, requestErr := config.OnServerRequest(ServerRequest{ID: message.ID, Method: message.Method, Params: message.Params})
+		return sendResponse(message.ID, result, requestErr)
+	}
 	read := func() (rpcMessage, error) {
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return rpcMessage{}, err
-			}
-			if stderr := strings.TrimSpace(stderrTail.Snapshot()); stderr != "" {
-				return rpcMessage{}, fmt.Errorf("Codex app-server 已退出: %s", stderr)
-			}
-			return rpcMessage{}, io.EOF
+		if err := ctx.Err(); err != nil {
+			return rpcMessage{}, err
 		}
-		var message rpcMessage
-		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
-			return rpcMessage{}, fmt.Errorf("Codex app-server 返回无效 JSON: %w", err)
+		select {
+		case <-ctx.Done():
+			return rpcMessage{}, ctx.Err()
+		case result := <-readResults:
+			return result.message, result.err
 		}
-		return message, nil
 	}
 	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
 	var latestUsage Usage
@@ -286,7 +388,10 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				return nil, err
 			}
 			if len(message.ID) > 0 && message.Method != "" {
-				return nil, fmt.Errorf("Codex Runtime 请求了 EasyAgent 尚未支持的交互: %s", message.Method)
+				if err := handleServerRequest(message); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			if len(message.ID) == 0 {
 				consumeNotificationWithAnswer(message, config, &strings.Builder{}, timers, &latestUsage)
@@ -311,7 +416,10 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	}
 	threadParams := map[string]any{
 		"cwd": config.Workspace, "approvalPolicy": "never",
-		"sandboxPolicy": map[string]any{"type": "workspaceWrite", "writableRoots": []string{config.Workspace}, "networkAccess": true},
+		// thread/start 和 thread/resume 使用 SandboxMode 字符串；只有
+		// turn/start 使用 sandboxPolicy 对象。EasyAgent 的 Codex Runtime
+		// 默认按产品约定使用完全访问模式。
+		"sandbox": "danger-full-access",
 	}
 	if config.Model != "" {
 		threadParams["model"] = config.Model
@@ -333,12 +441,22 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if err := json.Unmarshal(threadResult, &thread); err != nil || thread.Thread.ID == "" {
 		return Result{}, errors.New("Codex app-server 没有返回 thread id")
 	}
-	threadID := thread.Thread.ID
-	if _, err := request("turn/start", 3, map[string]any{
+	threadID = thread.Thread.ID
+	turnResult, err := request("turn/start", 3, map[string]any{
 		"threadId": threadID, "input": []map[string]string{{"type": "text", "text": userMessage}},
-		"cwd": config.Workspace, "approvalPolicy": "never", "sandboxPolicy": threadParams["sandboxPolicy"],
-	}); err != nil {
+		"cwd": config.Workspace, "approvalPolicy": "never",
+		"sandboxPolicy": map[string]any{"type": "dangerFullAccess"},
+	})
+	if err != nil {
 		return Result{}, err
+	}
+	var startedTurn struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal(turnResult, &startedTurn) == nil {
+		turnID = startedTurn.Turn.ID
 	}
 
 	var answer strings.Builder
@@ -347,8 +465,11 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		if err != nil {
 			return Result{}, err
 		}
-		if len(message.ID) > 0 {
-			return Result{}, fmt.Errorf("Codex Runtime 请求了 EasyAgent 尚未支持的交互: %s", message.Method)
+		if len(message.ID) > 0 && message.Method != "" {
+			if err := handleServerRequest(message); err != nil {
+				return Result{}, err
+			}
+			continue
 		}
 		if message.Method == "item/agentMessage/delta" {
 			var params struct {
@@ -371,7 +492,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			}
 			_ = json.Unmarshal(message.Params, &params)
 			consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
-			if params.Turn.Status == "failed" || params.Turn.Status == "interrupted" {
+			if codexStatus(params.Turn.Status) == "error" {
 				return Result{}, rpcError(params.Turn.Error)
 			}
 			if answer.Len() == 0 {
@@ -403,6 +524,10 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		return
 	}
 	if config.OnEvent == nil {
+		return
+	}
+	if event, ok := progressEvent(message); ok {
+		config.OnEvent(event)
 		return
 	}
 	if message.Method == "turn/started" || message.Method == "turn/completed" {
@@ -465,6 +590,50 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		duration = reported
 	}
 	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), Duration: duration})
+}
+
+// progressEvent maps high-volume app-server notifications into bounded Trace
+// rows. Keeping the protocol name in Name makes new Codex notifications
+// observable even before EasyAgent gets a dedicated UI renderer for them.
+func progressEvent(message rpcMessage) (Event, bool) {
+	progressNames := map[string]string{
+		"item/plan/delta":                   "plan",
+		"item/commandExecution/outputDelta": "commandExecution",
+		"item/fileChange/outputDelta":       "fileChange",
+		"item/fileChange/patchUpdated":      "fileChange",
+		"item/mcpToolCall/progress":         "mcpToolCall",
+		"item/reasoning/summaryTextDelta":   "reasoning",
+		"item/reasoning/summaryPartAdded":   "reasoning",
+		"thread/status/changed":             "thread",
+		"serverRequest/resolved":            "serverRequest",
+	}
+	name, ok := progressNames[message.Method]
+	if !ok {
+		return Event{}, false
+	}
+	var payload map[string]any
+	if json.Unmarshal(message.Params, &payload) != nil {
+		return Event{}, false
+	}
+	detail := firstString(payload, "delta", "outputDelta", "text", "status", "message")
+	output := firstString(payload, "patch", "output", "delta", "outputDelta")
+	status := "progress"
+	if message.Method == "thread/status/changed" {
+		status = "updated"
+	}
+	if message.Method == "serverRequest/resolved" {
+		status = "resolved"
+	}
+	return Event{Kind: "codex_progress", Name: name, Status: status, Detail: detail, Output: output}, true
+}
+
+func firstString(value map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if text, ok := value[key].(string); ok && strings.TrimSpace(text) != "" {
+			return truncateUTF8(strings.TrimSpace(text), maxProgressValueBytes)
+		}
+	}
+	return ""
 }
 
 func parseTokenUsage(raw json.RawMessage) (Usage, bool) {
@@ -593,14 +762,36 @@ func itemDuration(item map[string]any) time.Duration {
 }
 
 func marshalItemValue(value any) string {
+	var result string
 	if text, ok := value.(string); ok {
-		return text
+		result = text
+	} else {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return ""
+		}
+		result = string(data)
 	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return ""
+	return truncateUTF8(result, maxTraceValueBytes)
+}
+
+func truncateUTF8(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
 	}
-	return string(data)
+	const suffix = "… [truncated]"
+	if limit <= len(suffix) {
+		cut := limit
+		for cut > 0 && !utf8.ValidString(value[:cut]) {
+			cut--
+		}
+		return value[:cut]
+	}
+	cut := limit - len(suffix)
+	for cut > 0 && !utf8.ValidString(value[:cut]) {
+		cut--
+	}
+	return value[:cut] + suffix
 }
 
 func isAgentMessage(raw json.RawMessage) bool {

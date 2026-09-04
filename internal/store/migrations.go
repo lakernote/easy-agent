@@ -10,6 +10,14 @@ CREATE TABLE IF NOT EXISTS ea_settings (
   key TEXT PRIMARY KEY,
   value_json BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ea_auth_users (
+  username TEXT PRIMARY KEY,
+  password_salt BLOB NOT NULL,
+  password_hash BLOB NOT NULL,
+  password_iterations INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ea_skills (
   name TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -147,7 +155,9 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 		return err
 	}
 	if count == 0 {
-		return store.SaveModelSettings(DefaultModelSettings())
+		if err := store.SaveModelSettings(DefaultModelSettings()); err != nil {
+			return err
+		}
 	}
-	return nil
+	return store.EnsureAdmin()
 }

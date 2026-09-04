@@ -100,7 +100,7 @@ body { overflow: hidden; background: #f7f7f5; }
 .settings-hub-content .runtime-rail-head > small { color: #929b94; font-size: 9px; }
 .settings-hub-content .runtime-nav-item { min-height: 88px; padding: 13px 14px; border-color: #e0e5e0; border-radius: 10px; background: #fff; }
 .settings-hub-content .runtime-nav-item:hover { border-color: #cbd8ce; background: #fbfdfb; }
-.settings-hub-content .runtime-nav-item.selected, .settings-hub-content .runtime-nav-item.selected:hover { color: #254a35; border-color: #a9c7b4; background: #eff7f1; box-shadow: inset 3px 0 #4b9a70; }
+.settings-hub-content .runtime-nav-item.selected, .settings-hub-content .runtime-nav-item.selected:hover { color: #254a35; border-color: #a9c7b4; background: #eff7f1; box-shadow: none; }
 .settings-hub-content .runtime-nav-item.selected .runtime-nav-dot { box-shadow: 0 0 0 3px #d8ece0; }
 .settings-hub-content .runtime-nav-item.selected em { color: #2d7b50; }
 .settings-hub-content .runtime-nav-item strong { font-size: 13px; }
@@ -119,6 +119,12 @@ body { overflow: hidden; background: #f7f7f5; }
 .settings-hub-content .settings-list > button.active { background: #f0f1ee; box-shadow: none; }
 .settings-hub-content .usage-kpis, .settings-hub-content .usage-panel { border-color: #e3e4e0; box-shadow: none; }
 .settings-hub-content .usage-kpis { background: #fafaf8; }
+.account-panel { margin-bottom: 12px; }
+
+@media (max-width: 700px) {
+  .login-panel { padding: 28px 22px; }.login-brand { margin-bottom: 34px; }
+  .account-panel { grid-template-columns: 1fr; }.account-panel > button { justify-self: start; }.password-form { grid-template-columns: 1fr; }.password-form .primary-button { width: 100%; }
+}
 
 /* 左下角只保留一个轻量设置入口，避免把设置分区摘要挤进导航。 */
 .sidebar-settings { min-height: 44px; margin: 4px 10px 8px; padding: 0 12px; border: 0; border-radius: 8px; color: #687169; }
@@ -179,4 +185,24 @@ body { overflow: hidden; background: #f7f7f5; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Settings polish: keep the hub content-led instead of stretching each section
+   to the viewport, and give account changes a clear, compact action area. */
+.settings-hub { width: min(1360px, calc(100% - 64px)); padding-top: 28px; }
+.settings-hub-layout { gap: 32px; padding-top: 22px; }
+.settings-hub-content > .settings-page { min-height: 0 !important; }
+.settings-hub-content .runtime-workbench { min-height: 0; }
+.account-panel { margin-top: 28px; margin-bottom: 12px; padding: 22px 24px 24px; border: 1px solid #e3e8e3; border-radius: 14px; background: #fbfcfa; }
+.account-security-page { margin-top: 0; }
+.account-panel h2 { color: #263229; }
+.account-panel > button { min-height: 42px; }
+.password-form { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; padding: 18px; background: #fff; }
+.password-form .primary-button { grid-column: 1 / -1; width: min(300px, 100%); justify-self: start; }
+
+@media (max-width: 700px) {
+  .settings-hub { width: calc(100% - 28px); padding-top: 24px; }
+  .account-panel { padding: 18px; }
+  .password-form { grid-template-columns: 1fr; padding: 14px; }
+  .password-form .primary-button { grid-column: auto; width: 100%; }
 }

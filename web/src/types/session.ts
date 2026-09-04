@@ -93,6 +93,7 @@ export type Session = {
   context: ContextInfo
   partialOutput?: string
   runProgress?: string
+  codexRequest?: { id: string; method: string; params: unknown }
 }
 
 export type SessionHistoryPage = {

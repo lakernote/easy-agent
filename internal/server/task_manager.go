@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/lakernote/easy-agent/internal/store"
@@ -22,6 +24,19 @@ type taskHandle struct {
 	partial  string
 	progress string
 	usage    store.Usage
+	pending  *pendingCodexRequest
+}
+
+type pendingCodexRequest struct {
+	ID       string
+	Method   string
+	Params   json.RawMessage
+	Response chan pendingCodexResponse
+}
+
+type pendingCodexResponse struct {
+	Value any
+	Err   error
 }
 
 func newTaskManager() *taskManager {
@@ -102,6 +117,61 @@ func (manager *taskManager) progress(id string) string {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	return manager.tasks[id].progress
+}
+
+func (manager *taskManager) setPending(id string, request pendingCodexRequest) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	current, ok := manager.tasks[id]
+	if !ok {
+		return context.Canceled
+	}
+	if current.pending != nil {
+		return errors.New("已有一个待处理的 Codex 请求")
+	}
+	current.pending = &request
+	current.progress = "Codex · 等待 UI 确认"
+	manager.tasks[id] = current
+	return nil
+}
+
+func (manager *taskManager) pending(id string) *pendingCodexRequest {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	current, ok := manager.tasks[id]
+	if !ok || current.pending == nil {
+		return nil
+	}
+	value := *current.pending
+	return &value
+}
+
+func (manager *taskManager) resolvePending(id, requestID string, value any) bool {
+	manager.mu.Lock()
+	current, ok := manager.tasks[id]
+	if !ok || current.pending == nil || current.pending.ID != requestID {
+		manager.mu.Unlock()
+		return false
+	}
+	pending := current.pending
+	current.pending = nil
+	manager.tasks[id] = current
+	manager.mu.Unlock()
+	select {
+	case pending.Response <- pendingCodexResponse{Value: value}:
+	default:
+	}
+	return true
+}
+
+func (manager *taskManager) clearPending(id string) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	current, ok := manager.tasks[id]
+	if ok {
+		current.pending = nil
+		manager.tasks[id] = current
+	}
 }
 
 func (manager *taskManager) clear(id, token string) {

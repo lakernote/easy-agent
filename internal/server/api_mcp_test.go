@@ -57,7 +57,7 @@ func TestUninstallPresetRemovesOnlyPrivatePackageAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	defer application.Shutdown(context.Background())
 
 	if err := database.SaveMCP(store.MCPConfig{ID: "playwright", Name: "Playwright", Transport: "stdio"}); err != nil {

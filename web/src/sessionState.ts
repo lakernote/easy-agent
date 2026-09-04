@@ -1,5 +1,5 @@
 import type { Bootstrap, Session, SessionHistoryPage } from './types'
-export type Page = 'chat' | 'runtime' | 'models' | 'skills' | 'tools' | 'usage' | 'settings'
+export type Page = 'chat' | 'runtime' | 'models' | 'skills' | 'tools' | 'usage' | 'security' | 'settings'
 export const isActive = (status?: Session['status']) => status === 'queued' || status === 'running'
 
 export function updateSessionSummary(data: Bootstrap, session: Session): Bootstrap {
@@ -12,6 +12,7 @@ export function updateSessionSummary(data: Bootstrap, session: Session): Bootstr
       updatedAt: session.updatedAt,
       runProgress: session.runProgress,
       partialOutput: session.partialOutput,
+      codexRequest: session.codexRequest,
     } : item),
   }
 }

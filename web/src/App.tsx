@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from './api'
+import { APIError, api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, updateSessionSummary, type Page } from './sessionState'
 import { friendlyError } from './dialogs'
@@ -8,6 +8,7 @@ import { Sidebar } from './Sidebar'
 import { Chat } from './Chat'
 import { TracePanel } from './TracePanel'
 import { SettingsShell } from './SettingsShell'
+import { LoginPage } from './LoginPage'
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
   const [session, setSession] = useState<Session | null>(null)
@@ -15,6 +16,8 @@ export default function App() {
   const [traceOpen, setTraceOpen] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [authError, setAuthError] = useState('')
 
   const refresh = useCallback(async () => {
     const next = await api.bootstrap()
@@ -23,8 +26,25 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    refresh().catch((reason) => setError(reason.message)).finally(() => setLoading(false))
+    api.me().then(() => refresh()).then(() => setAuthenticated(true)).catch((reason) => {
+      if (!(reason instanceof APIError) || reason.status !== 401) setAuthError((reason as Error).message)
+    }).finally(() => setLoading(false))
   }, [refresh])
+
+  const afterLogin = useCallback(async () => {
+    await refresh()
+    setAuthenticated(true)
+    setAuthError('')
+    setError('')
+  }, [refresh])
+
+  const logout = useCallback(async () => {
+    try { await api.logout() } finally {
+      setAuthenticated(false)
+      setData(null)
+      setSession(null)
+    }
+  }, [])
 
   const openSession = useCallback(async (id: string) => {
     setPage('chat')
@@ -59,7 +79,10 @@ export default function App() {
         setSession((previous) => previous?.id === current.id ? mergeSessionSnapshot(previous, current) : current)
         setData((previous) => previous ? updateSessionSummary(previous, current) : previous)
         if (!isActive(current.status)) await refresh()
-      } catch (reason) { setError((reason as Error).message) }
+      } catch (reason) {
+        if (reason instanceof APIError && reason.status === 401) { setAuthenticated(false); setData(null); setSession(null) }
+        else setError((reason as Error).message)
+      }
     }, 800)
     return () => window.clearInterval(timer)
   }, [session?.id, session?.status, refresh, setCurrentSession])
@@ -74,7 +97,16 @@ export default function App() {
     } catch (reason) { setError((reason as Error).message) }
   }
 
+  const resolveCodexRequest = async (value: unknown) => {
+    if (!session?.codexRequest) return
+    try {
+      await api.resolveCodexRequest(session.id, session.codexRequest.id, value)
+      setSession((current) => current ? { ...current, codexRequest: undefined } : current)
+    } catch (reason) { setError((reason as Error).message) }
+  }
+
   if (loading) return <div className="boot"><span className="spinner" />正在启动 EasyAgent…</div>
+  if (!authenticated) return <LoginPage onLogin={afterLogin} initialError={authError} />
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
   return <div className="app-shell">
@@ -87,8 +119,16 @@ export default function App() {
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
       {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} />}
-      {page !== 'chat' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} />}
+      {page !== 'chat' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} />}
     </main>
     {traceOpen && session && <TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} />}
+    {session?.codexRequest && <CodexRequestPrompt request={session.codexRequest} onResolve={resolveCodexRequest} onCancel={stopSession} />}
   </div>
+}
+
+function CodexRequestPrompt({ request, onResolve, onCancel }: { request: NonNullable<Session['codexRequest']>; onResolve: (value: unknown) => Promise<void>; onCancel: () => Promise<void> }) {
+  const approval = request.method === 'item/commandExecution/requestApproval' || request.method === 'item/fileChange/requestApproval'
+  const elicitation = request.method === 'mcpServer/elicitation/request'
+  const responseFor = (accepted: boolean) => approval ? { decision: accepted ? 'accept' : 'decline' } : { action: accepted ? 'accept' : 'decline' }
+  return <div className="approval-backdrop" role="presentation"><section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="approval-title"><p className="login-kicker">CODEX APP-SERVER</p><h2 id="approval-title">{approval || elicitation ? '需要你的确认' : 'Codex 请求输入'}</h2><p>{approval ? 'Codex 请求执行一个需要 UI 授权的操作。请确认下面的请求内容。' : elicitation ? 'MCP 请求用户确认或补充信息；当前页面支持接受或拒绝。' : '这个请求类型暂未提供专用表单，可查看原始参数后停止当前任务。'}</p><code className="approval-method">{request.method}</code><pre>{JSON.stringify(request.params, null, 2)}</pre><div className="approval-actions"><button className="ghost-button" type="button" onClick={() => void onCancel()}>停止任务</button>{(approval || elicitation) && <button className="ghost-button danger" type="button" onClick={() => void onResolve(responseFor(false))}>拒绝</button>}{(approval || elicitation) && <button className="primary-button" type="button" onClick={() => void onResolve(responseFor(true))}>允许</button>}</div></section></div>
 }

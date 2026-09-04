@@ -6,9 +6,13 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/codexruntime"
@@ -25,17 +29,36 @@ type Server struct {
 	cancel  context.CancelFunc
 	wait    sync.WaitGroup
 	// 单机版默认只同时运行一个模型任务，避免本地模型争抢内存。
-	semaphore  chan struct{}
-	tasks      *taskManager
-	runtimes   *runtimeRegistry
-	codexEnvMu sync.RWMutex
-	codexEnv   map[string]string
+	semaphore   chan struct{}
+	tasks       *taskManager
+	runtimes    *runtimeRegistry
+	codexEnvMu  sync.RWMutex
+	codexEnv    map[string]string
+	authMu      sync.Mutex
+	sessions    map[string]authSession
+	authEnabled bool
+}
+
+const authCookieName = "easyagent_session"
+
+type authSession struct {
+	ExpiresAt time.Time
 }
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
+	return newServer(database, assets, environment, true)
+}
+
+// NewForTests keeps existing handler-focused tests independent from browser
+// cookie setup. Production always uses New and therefore always enables auth.
+func NewForTests(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
+	return newServer(database, assets, environment, false)
+}
+
+func newServer(database *store.Store, assets fs.FS, environment *appenv.Environment, authEnabled bool) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	codexEnv, _ := codexruntime.LoadManagedEnvironment()
-	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: newTaskManager(), codexEnv: codexEnv}
+	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: newTaskManager(), codexEnv: codexEnv, sessions: make(map[string]authSession), authEnabled: authEnabled}
 	server.runtimes = newRuntimeRegistry(server)
 	server.routes()
 	return server
@@ -68,8 +91,68 @@ func (server *Server) Handler() http.Handler {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
 		response.Header().Set("Referrer-Policy", "no-referrer")
+		if server.requiresAuthentication(request) && !server.isAuthenticated(request) {
+			response.Header().Set("Cache-Control", "no-store")
+			writeError(response, http.StatusUnauthorized, "需要登录")
+			return
+		}
 		server.mux.ServeHTTP(response, request)
 	})
+}
+
+func (server *Server) requiresAuthentication(request *http.Request) bool {
+	if !server.authEnabled {
+		return false
+	}
+	if request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/health" {
+		return false
+	}
+	return strings.HasPrefix(request.URL.Path, "/api/v1/")
+}
+
+func (server *Server) isAuthenticated(request *http.Request) bool {
+	cookie, err := request.Cookie(authCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	server.authMu.Lock()
+	defer server.authMu.Unlock()
+	session, ok := server.sessions[cookie.Value]
+	if !ok || time.Now().After(session.ExpiresAt) {
+		delete(server.sessions, cookie.Value)
+		return false
+	}
+	return true
+}
+
+func (server *Server) createAuthSession(response http.ResponseWriter, request *http.Request) bool {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeError(response, http.StatusInternalServerError, "无法创建登录会话")
+		return false
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	expiresAt := time.Now().Add(12 * time.Hour)
+	server.authMu.Lock()
+	now := time.Now()
+	for value, session := range server.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(server.sessions, value)
+		}
+	}
+	server.sessions[token] = authSession{ExpiresAt: expiresAt}
+	server.authMu.Unlock()
+	http.SetCookie(response, &http.Cookie{Name: authCookieName, Value: token, Path: "/", Expires: expiresAt, MaxAge: 12 * 60 * 60, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: request.TLS != nil})
+	return true
+}
+
+func (server *Server) clearAuthSession(response http.ResponseWriter, request *http.Request) {
+	if cookie, err := request.Cookie(authCookieName); err == nil {
+		server.authMu.Lock()
+		delete(server.sessions, cookie.Value)
+		server.authMu.Unlock()
+	}
+	http.SetCookie(response, &http.Cookie{Name: authCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: request.TLS != nil})
 }
 
 func (server *Server) Shutdown(ctx context.Context) error {

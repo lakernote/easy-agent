@@ -16,6 +16,9 @@ const (
 	DefaultRequestTimeoutSeconds       = 300
 	MinRequestTimeoutSeconds           = 30
 	MaxRequestTimeoutSeconds           = 600
+	DefaultCodexTurnTimeoutSeconds     = 7200
+	MinCodexTurnTimeoutSeconds         = 300
+	MaxCodexTurnTimeoutSeconds         = 86400
 	DefaultCompressionThresholdPercent = 75
 	MinCompressionThresholdPercent     = 50
 	MaxCompressionThresholdPercent     = 90
@@ -23,21 +26,25 @@ const (
 
 // ModelSettings 是持久化的模型连接和上下文预算设置。
 type ModelSettings struct {
-	ProfileID                   string `json:"profileId,omitempty"`
-	ProfileName                 string `json:"profileName,omitempty"`
-	Runtime                     string `json:"runtime"`
-	Provider                    string `json:"provider"`
-	Protocol                    string `json:"protocol"`
-	BaseURL                     string `json:"baseUrl"`
-	Model                       string `json:"model"`
-	APIKey                      string `json:"apiKey,omitempty"`
-	APIKeyEnv                   string `json:"apiKeyEnv,omitempty"`
-	Thinking                    string `json:"thinking,omitempty"`
-	MaxOutputTokens             int    `json:"maxOutputTokens,omitempty"`
-	RequestTimeoutSeconds       int    `json:"requestTimeoutSeconds,omitempty"`
-	ContextWindowTokens         int    `json:"contextWindowTokens,omitempty"`
-	CompressionThresholdPercent int    `json:"compressionThresholdPercent,omitempty"`
-	SecretConfigured            bool   `json:"secretConfigured,omitempty"`
+	ProfileID       string `json:"profileId,omitempty"`
+	ProfileName     string `json:"profileName,omitempty"`
+	Runtime         string `json:"runtime"`
+	Provider        string `json:"provider"`
+	Protocol        string `json:"protocol"`
+	BaseURL         string `json:"baseUrl"`
+	Model           string `json:"model"`
+	APIKey          string `json:"apiKey,omitempty"`
+	APIKeyEnv       string `json:"apiKeyEnv,omitempty"`
+	Thinking        string `json:"thinking,omitempty"`
+	MaxOutputTokens int    `json:"maxOutputTokens,omitempty"`
+	// RequestTimeoutSeconds is the timeout for one provider request in EasyAgent.
+	// Codex uses its own TurnTimeoutSeconds because app-server owns the inner
+	// model/tool requests.
+	RequestTimeoutSeconds       int  `json:"requestTimeoutSeconds,omitempty"`
+	TurnTimeoutSeconds          int  `json:"turnTimeoutSeconds,omitempty"`
+	ContextWindowTokens         int  `json:"contextWindowTokens,omitempty"`
+	CompressionThresholdPercent int  `json:"compressionThresholdPercent,omitempty"`
+	SecretConfigured            bool `json:"secretConfigured,omitempty"`
 }
 
 // ModelProfile 是一套可复用的 Runtime 配置。Codex profile 只保存 EasyAgent
@@ -77,6 +84,9 @@ func (value ModelSettings) WithDefaults() ModelSettings {
 	}
 	if value.RequestTimeoutSeconds == 0 {
 		value.RequestTimeoutSeconds = DefaultRequestTimeoutSeconds
+	}
+	if value.Runtime == RuntimeCodex && value.TurnTimeoutSeconds == 0 {
+		value.TurnTimeoutSeconds = DefaultCodexTurnTimeoutSeconds
 	}
 	if value.CompressionThresholdPercent == 0 {
 		value.CompressionThresholdPercent = DefaultCompressionThresholdPercent

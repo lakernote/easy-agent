@@ -11,8 +11,18 @@ func TestDefaultModelDoesNotGuessInstalledModel(t *testing.T) {
 	if value.Model != "" {
 		t.Fatalf("默认配置不应猜测本机已安装模型: %q", value.Model)
 	}
-	if value.BaseURL != DefaultOllamaBaseURL || value.RequestTimeoutSeconds != DefaultRequestTimeoutSeconds || value.CompressionThresholdPercent != DefaultCompressionThresholdPercent {
+	if value.BaseURL != DefaultOllamaBaseURL || value.RequestTimeoutSeconds != DefaultRequestTimeoutSeconds || value.TurnTimeoutSeconds != 0 || value.CompressionThresholdPercent != DefaultCompressionThresholdPercent {
 		t.Fatalf("默认配置没有使用集中常量: %+v", value)
+	}
+}
+
+func TestCodexModelGetsIndependentTurnTimeoutDefault(t *testing.T) {
+	value := (ModelSettings{Runtime: RuntimeCodex}).WithDefaults()
+	if value.TurnTimeoutSeconds != DefaultCodexTurnTimeoutSeconds {
+		t.Fatalf("Codex 整轮任务超时默认值不正确: got %d, want %d", value.TurnTimeoutSeconds, DefaultCodexTurnTimeoutSeconds)
+	}
+	if value.RequestTimeoutSeconds != DefaultRequestTimeoutSeconds {
+		t.Fatalf("Codex 不应丢失兼容的请求超时默认值: got %d, want %d", value.RequestTimeoutSeconds, DefaultRequestTimeoutSeconds)
 	}
 }
 

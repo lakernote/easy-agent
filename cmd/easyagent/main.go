@@ -25,7 +25,10 @@ import (
 	"github.com/lakernote/easy-agent/web"
 )
 
-const defaultListenAddress = "0.0.0.0:8080"
+// Authentication protects the UI/API, but binding a default-admin service to
+// every network interface is still an unnecessary exposure. Use localhost by
+// default; operators can explicitly choose -listen 0.0.0.0:8080 when needed.
+const defaultListenAddress = "127.0.0.1:8080"
 
 func main() {
 	// 1. 初始化 EasyAgent 自己管理的 Home、默认工作区、私有运行时和 PATH。
@@ -127,14 +130,16 @@ func main() {
 		}
 	}
 
-	// 10. 优雅停机。先停止接收 HTTP 请求，再等待 Runner/Agent 等后台任务退出。
-	// 15 秒 deadline 防止某个任务永久阻塞进程关闭。
-	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancelShutdown()
-	if err := httpServer.Shutdown(shutdownContext); err != nil {
+	// 10. 分两个阶段优雅停机。HTTP 收尾和 Runner/Agent 收尾不能共用一个
+	// deadline，否则慢连接会耗尽 Runner 清理 Codex/MCP 子进程的时间。
+	httpShutdownContext, cancelHTTPShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := httpServer.Shutdown(httpShutdownContext); err != nil {
 		log.Printf("HTTP shutdown: %v", err)
 	}
-	if err := application.Shutdown(shutdownContext); err != nil {
+	cancelHTTPShutdown()
+	runnerShutdownContext, cancelRunnerShutdown := context.WithTimeout(context.Background(), 15*time.Second)
+	if err := application.Shutdown(runnerShutdownContext); err != nil {
 		log.Printf("runner shutdown: %v", err)
 	}
+	cancelRunnerShutdown()
 }

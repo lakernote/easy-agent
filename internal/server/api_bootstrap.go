@@ -39,6 +39,9 @@ type modelRulesPayload struct {
 	DefaultRequestTimeoutSeconds       int `json:"defaultRequestTimeoutSeconds"`
 	MinRequestTimeoutSeconds           int `json:"minRequestTimeoutSeconds"`
 	MaxRequestTimeoutSeconds           int `json:"maxRequestTimeoutSeconds"`
+	DefaultCodexTurnTimeoutSeconds     int `json:"defaultCodexTurnTimeoutSeconds"`
+	MinCodexTurnTimeoutSeconds         int `json:"minCodexTurnTimeoutSeconds"`
+	MaxCodexTurnTimeoutSeconds         int `json:"maxCodexTurnTimeoutSeconds"`
 	DefaultCompressionThresholdPercent int `json:"defaultCompressionThresholdPercent"`
 	MinCompressionThresholdPercent     int `json:"minCompressionThresholdPercent"`
 	MaxCompressionThresholdPercent     int `json:"maxCompressionThresholdPercent"`
@@ -85,7 +88,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
 	writeJSON(response, http.StatusOK, bootstrapPayload{
-		Sessions: publicSessions(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
+		Sessions: server.sessionViews(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime:     runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},

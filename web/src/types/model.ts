@@ -11,6 +11,7 @@ export type ModelSettings = {
   thinking?: string
   maxOutputTokens: number
   requestTimeoutSeconds: number
+  turnTimeoutSeconds: number
   contextWindowTokens: number
   compressionThresholdPercent: number
   secretConfigured?: boolean
@@ -27,6 +28,9 @@ export type ModelRules = {
   defaultRequestTimeoutSeconds: number
   minRequestTimeoutSeconds: number
   maxRequestTimeoutSeconds: number
+  defaultCodexTurnTimeoutSeconds: number
+  minCodexTurnTimeoutSeconds: number
+  maxCodexTurnTimeoutSeconds: number
   defaultCompressionThresholdPercent: number
   minCompressionThresholdPercent: number
   maxCompressionThresholdPercent: number

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../api'
 import type { Bootstrap, CodexProviderConfig, MCPConfig, ModelSettings } from '../types'
 
 export type Notice = { ready: boolean; title: string; message: string }
@@ -11,6 +12,8 @@ type CodexStatusProps = {
 }
 
 export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStatusProps) {
+  const [inspection, setInspection] = useState<{ account?: unknown; models?: unknown } | null>(null)
+  const [inspecting, setInspecting] = useState(false)
   const ready = data.codex.installed && data.codex.appServerAvailable
   const title = ready
     ? `Codex CLI + app-server 已就绪${data.codex.version ? ` · ${data.codex.version}` : ''}`
@@ -18,6 +21,13 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
   const detail = data.codex.installed
     ? `${data.codex.path} · app-server 是 CLI 的子命令，不需要另装一个 app`
     : data.codex.message
+  const inspect = async () => {
+    setInspecting(true)
+    try {
+      const [account, models] = await Promise.all([api.codexAccount(), api.codexModels()])
+      setInspection({ account, models })
+    } finally { setInspecting(false) }
+  }
 
   return (
     <div className={`runtime-status ${ready ? 'ready' : 'missing'}`} role="status" aria-live="polite">
@@ -29,8 +39,10 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
         {!data.codex.installed && <button className="primary-button" type="button" disabled={installing} onClick={onInstall}>{installing ? '安装中…' : '在服务器安装 Codex CLI'}</button>}
         {!data.codex.installed && <a className="ghost-button" href={data.codex.installUrl} target="_blank" rel="noreferrer">安装说明</a>}
         <button className="ghost-button" type="button" onClick={onDetect}>重新检测</button>
+        {ready && <button className="ghost-button" type="button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? '读取中…' : '读取账号 / 模型'}</button>}
       </div>
       {!data.codex.installed && <code className="runtime-install-command">{data.codex.installCommand}</code>}
+      {inspection && <div className="codex-inspection"><div><span>账号信息</span><pre>{JSON.stringify(inspection.account, null, 2)}</pre></div><div><span>模型目录</span><pre>{JSON.stringify(inspection.models, null, 2)}</pre></div></div>}
     </div>
   )
 }
@@ -115,9 +127,9 @@ export function CodexSettings({ data, config, setConfig, model, setModel, notice
           <input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} placeholder="留空：使用上面的默认模型" />
           <small>多个 Codex 配置可以用不同 override；留空时使用 config.toml 默认模型。</small>
         </label>
-        <label>请求超时（秒）
-          <input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} />
-          <small>单次 turn 最多 {data.modelRules.maxRequestTimeoutSeconds} 秒</small>
+        <label>整轮任务上限（秒）
+          <input type="number" min={data.modelRules.minCodexTurnTimeoutSeconds} max={data.modelRules.maxCodexTurnTimeoutSeconds} value={model.turnTimeoutSeconds} onChange={(event) => setModel({ ...model, turnTimeoutSeconds: Number(event.target.value) })} />
+          <small>覆盖思考、命令、文件变更、MCP 和审批等待；默认 2 小时，最长 24 小时。</small>
         </label>
       </div>
       <ModelNotice notice={notice} />

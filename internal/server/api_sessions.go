@@ -55,7 +55,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 	value.RunProgress = server.tasks.progress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
-	writeJSON(response, http.StatusAccepted, publicSession(value))
+	writeJSON(response, http.StatusAccepted, server.sessionView(value))
 }
 
 func (server *Server) continueSession(response http.ResponseWriter, request *http.Request) {
@@ -101,7 +101,7 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 	value.RunProgress = server.tasks.progress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
-	writeJSON(response, http.StatusAccepted, publicSession(value))
+	writeJSON(response, http.StatusAccepted, server.sessionView(value))
 }
 
 func (server *Server) deleteSession(response http.ResponseWriter, request *http.Request) {
@@ -142,5 +142,5 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 	settings = enrichOllamaContextWindow(request.Context(), settings)
 	decorateContext(&value, settings)
 	value.RunProgress = server.tasks.progress(id)
-	writeJSON(response, http.StatusOK, publicSession(value))
+	writeJSON(response, http.StatusOK, server.sessionView(value))
 }

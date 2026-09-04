@@ -52,7 +52,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const selectRuntime = (runtime: ModelSettings['runtime']) => {
     const existing = data.modelProfiles.find((profile) => profile.settings.runtime === runtime)
     setModel(existing ? { ...existing.settings, profileId: existing.id, profileName: existing.name } : (current) => runtime === 'codex'
-      ? { ...current, profileId: `codex-${Date.now()}`, profileName: 'Codex 新配置', runtime, provider: 'codex', protocol: 'app_server', baseUrl: '', apiKey: '', apiKeyEnv: '', thinking: '', contextWindowTokens: 0, compressionThresholdPercent: 0, model: '' }
+      ? { ...current, profileId: `codex-${Date.now()}`, profileName: 'Codex 新配置', runtime, provider: 'codex', protocol: 'app_server', baseUrl: '', apiKey: '', apiKeyEnv: '', thinking: '', contextWindowTokens: 0, compressionThresholdPercent: 0, model: '', turnTimeoutSeconds: data.modelRules.defaultCodexTurnTimeoutSeconds }
       : { ...current, profileId: `easyagent-${Date.now()}`, profileName: 'EasyAgent 新配置', runtime, provider: data.ollama.running ? 'ollama' : current.provider === 'codex' ? 'ollama' : current.provider, protocol: current.protocol === 'app_server' ? 'chat_completions' : current.protocol, baseUrl: current.baseUrl || data.ollama.baseUrl })
     setModelNotice(null); onError('')
   }

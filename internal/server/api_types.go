@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/store"
@@ -32,6 +33,13 @@ type sessionView struct {
 	Context           store.ContextInfo `json:"context"`
 	PartialOutput     string            `json:"partialOutput,omitempty"`
 	RunProgress       string            `json:"runProgress,omitempty"`
+	CodexRequest      *codexRequestView `json:"codexRequest,omitempty"`
+}
+
+type codexRequestView struct {
+	ID     string          `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
 }
 
 func publicSession(value store.Session) sessionView {
@@ -44,6 +52,22 @@ func publicSession(value store.Session) sessionView {
 		MessagesHasMore: value.MessagesHasMore, EventsHasMore: value.EventsHasMore, Usage: value.Usage,
 		Context: value.Context, PartialOutput: value.PartialOutput, RunProgress: value.RunProgress,
 	}
+}
+
+func (server *Server) sessionView(value store.Session) sessionView {
+	view := publicSession(value)
+	if pending := server.tasks.pending(value.ID); pending != nil {
+		view.CodexRequest = &codexRequestView{ID: pending.ID, Method: pending.Method, Params: pending.Params}
+	}
+	return view
+}
+
+func (server *Server) sessionViews(values []store.Session) []sessionView {
+	result := make([]sessionView, 0, len(values))
+	for _, value := range values {
+		result = append(result, server.sessionView(value))
+	}
+	return result
 }
 
 func publicSessions(values []store.Session) []sessionView {

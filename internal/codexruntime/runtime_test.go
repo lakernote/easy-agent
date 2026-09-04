@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
 )
@@ -62,6 +63,94 @@ done
 	}
 }
 
+func TestRunMessageAnswersUnsupportedServerRequestAndContinues(t *testing.T) {
+	bin := t.TempDir()
+	path := filepath.Join(bin, "codex")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) echo '{"id":1,"result":{}}' ;;
+    *'"method":"thread/start"'*)
+      printf '%s' "$line" > "$EASYAGENT_THREAD_REQUEST_FILE"
+      echo '{"method":"item/tool/requestUserInput","id":99,"params":{"threadId":"thread-test"}}'
+      IFS= read -r response
+      printf '%s' "$response" > "$EASYAGENT_RESPONSE_FILE"
+      echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}'
+      ;;
+    *'"method":"turn/start"'*)
+      printf '%s' "$line" > "$EASYAGENT_TURN_REQUEST_FILE"
+      echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'
+      echo '{"method":"item/agentMessage/delta","params":{"delta":"continued"}}'
+      echo '{"method":"turn/completed","params":{"turn":{"status":"completed","error":null}}}'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	responseFile := filepath.Join(t.TempDir(), "response.json")
+	threadRequestFile := filepath.Join(t.TempDir(), "thread-request.json")
+	turnRequestFile := filepath.Join(t.TempDir(), "turn-request.json")
+	workspace := t.TempDir()
+	result, err := RunMessage(context.Background(), Config{
+		Path: path, Workspace: workspace, Timeout: time.Second,
+		Env: append(os.Environ(), "EASYAGENT_RESPONSE_FILE="+responseFile, "EASYAGENT_THREAD_REQUEST_FILE="+threadRequestFile, "EASYAGENT_TURN_REQUEST_FILE="+turnRequestFile),
+	}, "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Answer != "continued" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	response, err := os.ReadFile(responseFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(response), `"id":99`) || !strings.Contains(string(response), `"code":-32000`) {
+		t.Fatalf("expected JSON-RPC error response, got %s", response)
+	}
+	threadRequest, err := os.ReadFile(threadRequestFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(threadRequest), `"sandbox":"danger-full-access"`) || strings.Contains(string(threadRequest), `"sandboxPolicy"`) {
+		t.Fatalf("thread request should use SandboxMode, got %s", threadRequest)
+	}
+	turnRequest, err := os.ReadFile(turnRequestFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(turnRequest), `"sandboxPolicy":{"type":"dangerFullAccess"}`) || strings.Contains(string(turnRequest), `"writableRoots"`) {
+		t.Fatalf("turn request should use dangerFullAccess, got %s", turnRequest)
+	}
+}
+
+func TestRunMessageReturnsWhenContextExpiresWithOpenChildPipe(t *testing.T) {
+	bin := t.TempDir()
+	path := filepath.Join(bin, "codex")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) echo '{"id":1,"result":{}}' ;;
+    *'"method":"thread/start"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
+    *'"method":"turn/start"'*)
+      echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'
+      sleep 10
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now()
+	_, err := RunMessage(context.Background(), Config{Path: path, Workspace: t.TempDir(), Timeout: 100 * time.Millisecond}, "timeout")
+	if err == nil || time.Since(startedAt) > 2*time.Second {
+		t.Fatalf("RunMessage should honor context cancellation: err=%v elapsed=%s", err, time.Since(startedAt))
+	}
+}
+
 func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
 	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
 	var events []Event
@@ -102,5 +191,13 @@ func TestParseTokenUsage(t *testing.T) {
 	usage, ok := parseTokenUsage(json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":1200,"outputTokens":300,"cachedInputTokens":900,"cacheWriteInputTokens":50,"reasoningOutputTokens":100,"totalTokens":1500},"total":{"inputTokens":1200,"outputTokens":300,"cachedInputTokens":900,"cacheWriteInputTokens":50,"reasoningOutputTokens":100,"totalTokens":1500},"modelContextWindow":32768}}`))
 	if !ok || !usage.Reported || usage.InputTokens != 1200 || usage.CachedInputTokens != 900 || usage.CacheWriteInputTokens != 50 || usage.ModelContextWindow != 32768 {
 		t.Fatalf("unexpected token usage: %+v", usage)
+	}
+}
+
+func TestTruncateUTF8KeepsTraceBounded(t *testing.T) {
+	value := strings.Repeat("中", maxTraceValueBytes)
+	result := truncateUTF8(value, maxTraceValueBytes)
+	if len(result) > maxTraceValueBytes || !strings.HasSuffix(result, "… [truncated]") || !utf8.ValidString(result) {
+		t.Fatalf("unexpected truncated value: bytes=%d valid=%v", len(result), utf8.ValidString(result))
 	}
 }

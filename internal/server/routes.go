@@ -3,6 +3,10 @@ package server
 import "net/http"
 
 func (server *Server) routes() {
+	server.mux.HandleFunc("POST /api/v1/auth/login", server.login)
+	server.mux.HandleFunc("POST /api/v1/auth/logout", server.logout)
+	server.mux.HandleFunc("GET /api/v1/auth/me", server.me)
+	server.mux.HandleFunc("PUT /api/v1/auth/password", server.changePassword)
 	server.mux.HandleFunc("GET /api/v1/health", server.health)
 	server.mux.HandleFunc("GET /api/v1/bootstrap", server.bootstrap)
 	server.mux.HandleFunc("GET /api/v1/usage", server.usage)
@@ -13,12 +17,15 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/v1/sessions", server.createSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/messages", server.continueSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/cancel", server.cancelSession)
+	server.mux.HandleFunc("POST /api/v1/sessions/{id}/codex-request", server.resolveCodexRequest)
 	server.mux.HandleFunc("DELETE /api/v1/sessions/{id}", server.deleteSession)
 	server.mux.HandleFunc("PUT /api/v1/model", server.saveModel)
 	server.mux.HandleFunc("DELETE /api/v1/model/{id}", server.deleteModelProfile)
 	server.mux.HandleFunc("POST /api/v1/model/test", server.testModel)
 	server.mux.HandleFunc("GET /api/v1/ollama", server.getOllama)
 	server.mux.HandleFunc("GET /api/v1/codex", server.getCodex)
+	server.mux.HandleFunc("GET /api/v1/codex/models", server.getCodexModels)
+	server.mux.HandleFunc("GET /api/v1/codex/account", server.getCodexAccount)
 	server.mux.HandleFunc("GET /api/v1/codex/config", server.getCodexConfig)
 	server.mux.HandleFunc("PUT /api/v1/codex/config", server.saveCodexConfig)
 	server.mux.HandleFunc("POST /api/v1/codex/install", server.installCodex)

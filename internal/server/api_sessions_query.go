@@ -46,7 +46,7 @@ func (server *Server) getOlderSessions(response http.ResponseWriter, request *ht
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(response, http.StatusOK, sessionListPage{Sessions: publicSessions(sessions), HasMore: hasMore})
+	writeJSON(response, http.StatusOK, sessionListPage{Sessions: server.sessionViews(sessions), HasMore: hasMore})
 }
 
 func modelRules() modelRulesPayload {
@@ -55,6 +55,9 @@ func modelRules() modelRulesPayload {
 		DefaultRequestTimeoutSeconds:       store.DefaultRequestTimeoutSeconds,
 		MinRequestTimeoutSeconds:           store.MinRequestTimeoutSeconds,
 		MaxRequestTimeoutSeconds:           store.MaxRequestTimeoutSeconds,
+		DefaultCodexTurnTimeoutSeconds:     store.DefaultCodexTurnTimeoutSeconds,
+		MinCodexTurnTimeoutSeconds:         store.MinCodexTurnTimeoutSeconds,
+		MaxCodexTurnTimeoutSeconds:         store.MaxCodexTurnTimeoutSeconds,
 		DefaultCompressionThresholdPercent: store.DefaultCompressionThresholdPercent,
 		MinCompressionThresholdPercent:     store.MinCompressionThresholdPercent,
 		MaxCompressionThresholdPercent:     store.MaxCompressionThresholdPercent,
@@ -93,7 +96,7 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 			value.Context.ContextWindowTokens = live.ContextWindowTokens
 		}
 	}
-	writeJSON(response, http.StatusOK, publicSession(value))
+	writeJSON(response, http.StatusOK, server.sessionView(value))
 }
 
 // getSessionHistory 是页面的 keyset pagination 接口。kind 决定只读取消息或

@@ -48,6 +48,26 @@ func TestOpenProtectsDatabaseFile(t *testing.T) {
 	}
 }
 
+func TestDefaultAdminCanRotatePassword(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if valid, err := database.Authenticate("admin", "admin"); err != nil || !valid {
+		t.Fatalf("默认管理员认证失败: valid=%v err=%v", valid, err)
+	}
+	if err := database.ChangePassword("admin", "admin", "new-admin-password"); err != nil {
+		t.Fatal(err)
+	}
+	if valid, err := database.Authenticate("admin", "admin"); err != nil || valid {
+		t.Fatalf("旧密码不应继续有效: valid=%v err=%v", valid, err)
+	}
+	if valid, err := database.Authenticate("admin", "new-admin-password"); err != nil || !valid {
+		t.Fatalf("新密码认证失败: valid=%v err=%v", valid, err)
+	}
+}
+
 func TestOpenMigratesLegacyCompactionSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	database, err := sql.Open("sqlite", path)
