@@ -1,24 +1,25 @@
 <div align="center">
   <img src="web/public/logo.svg" alt="EasyAgent Logo" width="96" />
   <h1>EasyAgent</h1>
-  <p>一个可部署在个人电脑或 Linux 服务器上的轻量通用 Agent</p>
+  <p>可运行在个人电脑或 Linux 服务器上的轻量、自托管 Agent</p>
   <p><code>用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答</code></p>
 </div>
 
-打开页面即可直接对话；需要更多能力时，再按需添加上下文、Skill 或 MCP。系统不引入 Graph、多 Agent 编排或工作流 DSL，模型通过原生 Function Calling 自己决定是否调用工具，Go 代码不根据用户关键词做业务路由。
+EasyAgent 使用模型原生 Function Calling 决定是否调用工具，不引入 Graph、多 Agent
+编排或工作流 DSL。它提供两种执行引擎：内置 Go Agent，以及通过
+`codex app-server` 接入的 Codex Runtime。
 
-## 能做什么
+## 主要能力
 
-- 多轮对话，支持流式显示、图片、文本、代码和 PDF。
-- 连接 OpenAI、DeepSeek、Ollama 以及 OpenAI 兼容模型服务。
-- 内置文件读写搜索、Shell、网页搜索/读取、时间、天气、计算和 Skill 加载工具。
-- 在页面管理 Skill 与 MCP，任务需要时才加载。
-- 查看完整 Agent Trace：真实请求响应、工具输入输出、Token、缓存、耗时与错误。
-- 长会话自动生成上下文检查点，原始消息始终保存在 SQLite。
+- 多轮对话、流式回答、会话搜索与运行中取消。
+- 支持 OpenAI、Ollama 及 OpenAI-compatible 模型服务。
+- EasyAgent Runtime 支持图片、UTF-8 文本/代码和 PDF 附件。
+- 内置文件、Shell、网页、时间、天气和计算工具，并可扩展 Skill 与 MCP。
+- Agent Trace 展示模型与工具调用、Token、缓存、耗时和错误。
+- 长会话自动生成上下文检查点；原始消息完整保存在 SQLite。
+- 单管理员登录，模型配置和会话数据均在本机保存。
 
 ## 界面预览
-
-对话、运行时和能力管理使用同一套工作区视觉语言；新会话创建时固定运行时与模型配置，已有会话不会被后续修改影响。
 
 <p align="center">
   <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />
@@ -27,11 +28,11 @@
 <table>
   <tr>
     <td align="center" width="50%">
-      <strong>多 Runtime 与运行时配置</strong><br />
-      <img src="docs/images/model-and-tools.png" alt="多 Runtime 设置" width="440" />
+      <strong>Runtime 与模型配置</strong><br />
+      <img src="docs/images/model-and-tools.png" alt="Runtime 与模型配置" width="440" />
     </td>
     <td align="center" width="50%">
-      <strong>Skills 按需加载与编辑</strong><br />
+      <strong>Skills 管理</strong><br />
       <img src="docs/images/skills.png" alt="Skills 管理" width="440" />
     </td>
   </tr>
@@ -39,24 +40,24 @@
 
 ## 快速开始
 
-从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载对应平台的压缩包：
+从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载并解压对应平台的
+压缩包。Linux 和 macOS 进入解压目录后运行：
 
 ```bash
-tar -xzf easyagent_0.2.0_linux_amd64.tar.gz
-cd easyagent_0.2.0_linux_amd64
 chmod +x easyagent
 ./easyagent
 ```
 
-Windows 用户解压对应 `.zip` 后运行 `easyagent.exe`；macOS 用户将文件名中的
-`linux` 换成 `darwin`，Apple Silicon 选择 `arm64`、Intel Mac 选择 `amd64`。
-当前自动发布包尚未接入 Apple Developer ID 或 Windows Authenticode 证书，因此
-macOS Gatekeeper 或 Windows SmartScreen 可能提示“未知开发者”；正式对外分发时
-可在 Release workflow 中继续接入签名与 notarization。
+Windows 运行 `easyagent.exe`。服务默认监听 `0.0.0.0:8080`，启动后打开
+<http://127.0.0.1:8080>；远程访问时改为服务器 IP。
 
-启动后打开 <http://127.0.0.1:8080>（远程服务器请把 `127.0.0.1` 换成服务器 IP），进入「设置 → 模型配置」完成配置后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
+首次登录用户名和密码均为 `admin`。登录后请立即在
+**设置 → 账户安全** 修改密码，再到 **设置 → 模型配置** 配置模型。
 
-从源码构建：
+> 默认监听所有网卡。公网部署必须使用 TLS 反向代理，并通过防火墙或 VPN 限制
+> 访问来源。发布包目前没有 macOS/Windows 代码签名，系统可能提示未知开发者。
+
+### 从源码构建
 
 ```bash
 git clone https://github.com/lakernote/easy-agent.git
@@ -65,28 +66,23 @@ make build
 ./bin/easyagent
 ```
 
-启动参数只有监听地址和 SQLite 路径，而且都有默认值：
+`make build` 会构建前端并将其嵌入 Go 二进制。启动参数：
 
 ```bash
 ./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
 ```
 
-不传参数时监听 `0.0.0.0:8080`，数据库位于 `~/.easyagent/easyagent.db`。首次登录账号和密码均为 `admin`，请登录后立即在「设置 → 账户安全」修改密码。服务器上如果端口已被占用，先用 `ss -ltnp | grep :8080` 找到进程，再停止旧实例或换端口，例如 `./easyagent -listen 0.0.0.0:8081`。
-EasyAgent 自动管理 `~/.easyagent` 和默认工作区
-`~/.easyagent/workspaces/default`，不依赖服务进程从哪个目录启动。
+不传参数时，数据库位于 `~/.easyagent/easyagent.db`，默认工作区位于
+`~/.easyagent/workspaces/default`。新建会话时可以选择服务器上已有的其他目录；
+会话创建后会固定 Runtime、模型配置和工作区。
 
-工作区不属于启动参数：新建会话时可在输入框上方选择最近使用的目录，或输入
-服务器上已存在的目录；留空就使用默认工作区。工作区保存到会话中，后续多轮的
-文件、Shell 和 stdio MCP 始终使用同一个目录。Playwright 预设安装在私有
-`runtime/mcp` 目录，不修改项目或全局 npm 依赖。EasyAgent 只安装和卸载
-MCP 自己的固定版本包；Node.js、Python、Java 等宿主运行时由服务器管理员或
-项目环境提供，页面只负责检测，不执行系统级安装或升级。
+发布包本身不依赖 Go、Node.js、Python、Git 或系统 SQLite。只有 Shell、stdio MCP
+或任务本身需要调用这些程序时，才需要在服务器上安装。
 
-### 在 Linux 服务器启用 Codex Runtime
+### Codex Runtime
 
-Codex Runtime 需要安装在运行 EasyAgent 的服务器上。服务器只安装 Codex CLI，
-不需要安装 ChatGPT Desktop；`codex app-server` 是 CLI 自带的子命令。Ubuntu
-或其他支持的 Linux 主机可按 Codex 官方安装说明执行：
+Codex Runtime 需要服务器安装 Codex CLI；`app-server` 是 CLI 自带的子命令，
+无需单独安装，也不需要 ChatGPT Desktop：
 
 ```bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
@@ -94,76 +90,48 @@ codex --version
 codex app-server --help
 ```
 
-安装完成后进入 EasyAgent「设置 → 执行引擎」，页面会自动检测；也可以直接点击
-「在服务器安装 Codex CLI」。进入「模型配置」编辑 Codex 配置，即可填写 Provider、
-Base URL、默认模型、推理强度和 API Key。API Key 不要写入 `env_key`：`env_key`
-只填写变量名，例如 `GROQ_API_KEY`；EasyAgent 会把密钥保存到当前服务用户的
-私有文件，并在启动 app-server 时注入。EasyAgent 不会把本机 ChatGPT Desktop
-的登录状态复制到远程服务器。若服务器是多人共享部署，需要明确使用一个服务账号，
-或为每个用户隔离 Unix 用户、HOME 和 Codex 配置；不要把某个用户的 `~/.codex`
-凭据复制给所有用户。
+也可以在 **设置 → 运行时** 中检测或安装 Codex CLI，再到 **模型配置** 保存
+Provider、Base URL、模型、推理强度和 API Key。`env_key` 应填写环境变量名（例如
+`GROQ_API_KEY`），不能填写密钥本身。
 
-「设置 → 模型配置」支持为 EasyAgent 和 Codex 分别保存多套配置。设置页保存的是当前
-profile；首页新会话可以选择同一 Runtime 下的 profile。会话创建后会固定它的
-profile，之后修改或删除其他 profile 不会改变已有会话；仍被会话使用的 profile
-不能删除。
+Codex 的 thread、工具、Skill、MCP、沙箱和上下文由 app-server 管理；EasyAgent 的
+内置 Tools 与 MCP 不会注入 Codex。当前 Codex Runtime 只转发文本消息，不处理页面
+附件。
+
+> EasyAgent 以 `approvalPolicy=never` 和 `dangerFullAccess` 启动 Codex 任务。
+> Codex 因此拥有 EasyAgent 服务账号可用的文件和命令权限。请使用低权限系统账号，
+> 并仅选择可信工作区。
+
+## 扩展方式
+
+| 类型 | 用途 | 加载方式 |
+| --- | --- | --- |
+| Tool | 文件、Shell、搜索等确定性操作 | 核心工具常驻，其余按需加载 |
+| Skill | 任务方法、团队规范和领域经验 | 页面管理，模型按需读取 |
+| MCP | GitHub、浏览器、数据库等外部能力 | 页面配置、验证并启用 |
 
 ## 发布版本
 
-仓库的 `Release` GitHub Action 会构建 Windows、macOS 和 Linux 的 amd64/arm64
-压缩包，并生成 SHA-256 校验文件。发布时进入 GitHub 的
-**Actions → Release → Run workflow**，选择要发布的分支并输入一个尚未存在的
-版本号，例如 `v2.0.1`。Action 会基于该分支的当前提交自动创建 tag 和 Release；
-不需要在本地创建或推送 tag。包含 `-rc.1`、`-beta.1` 等后缀的版本会自动标记为
+进入 **GitHub Actions → Release → Run workflow**，选择分支并输入尚未存在的版本号，
+例如 `v2.0.1`。Action 会自动创建 tag 和 Release，并生成 Windows、macOS、Linux 的
+amd64/arm64 压缩包与 `checksums.txt`。带 `-rc.1`、`-beta.1` 等后缀的版本会标记为
 预发布。
 
-每个 Release 包含：
-
-- `easyagent_<version>_windows_amd64.zip`
-- `easyagent_<version>_windows_arm64.zip`
-- `easyagent_<version>_darwin_amd64.tar.gz`
-- `easyagent_<version>_darwin_arm64.tar.gz`
-- `easyagent_<version>_linux_amd64.tar.gz`
-- `easyagent_<version>_linux_arm64.tar.gz`
-- `checksums.txt`
-
-运行 `easyagent -version` 可以确认二进制内写入的版本和提交。
-
-## 三种扩展
-
-| 能力 | 适合放什么 | 如何使用 |
-| --- | --- | --- |
-| Tool | 高频、确定性的本机操作 | 首轮常驻少量核心工具，其余按需加载并调用 |
-| Skill | 任务方法、团队规范和领域经验 | 页面编辑，模型按需读取 |
-| MCP | GitHub、浏览器、数据库等外部系统 | 页面配置，模型按需连接 |
-
-<details>
-<summary>免费 OpenAI-compatible LLM Provider</summary>
-
-下面 4 个 Provider 都可以接入 EasyAgent，但“免费”不等于无限量，也不代表免费政策永久不变。模型名单、速率限制和账号资格应以各平台当前控制台为准。
-
-| Provider | 地区与定位 | 当前可用的免费模型示例 | 免费额度 / 限制 | OpenAI-compatible 接入 | Agent / Tool Calling 备注 |
-| --- | --- | --- | --- | --- | --- |
-| [智谱 BigModel](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash) | 中国大陆；智谱 GLM 官方模型平台 | `glm-4.7-flash` | 官方价格页当前标记输入、输出均免费；具体并发和速率以账号权益为准 | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7-flash` 官方支持 Function Calling、MCP、结构化输出，适合作为国内主力 |
-| [SiliconFlow 硅基流动](https://siliconflow.cn/pricing) | 中国大陆；开源模型托管与聚合平台 | 当前价格页中标记为 ¥0 的模型，例如 `THUDM/GLM-Z1-9B-0414`、`tencent/Hunyuan-MT-7B` | 免费模型名单动态调整；按账号和模型限流，Qwen / DeepSeek 等大模型通常不是免费模型 | `https://api.siliconflow.cn/v1` | 支持 OpenAI SDK 和 Function Calling；具体免费模型是否支持 tools 要以模型详情页为准 |
-| [Groq](https://console.groq.com/docs/rate-limits) | 海外；使用 LPU 提供高速推理 | `openai/gpt-oss-120b`、`openai/gpt-oss-20b` | Free Plan 当前对 `gpt-oss-120b` 约为 30 RPM、1,000 RPD、8K TPM、200K TPD | `https://api.groq.com/openai/v1` | 官方支持 Function Calling、并行工具调用和结构化输出；适合作为高速 Agent Provider |
-| [Cerebras Inference](https://inference-docs.cerebras.ai/resources/openai) | 海外；使用 Cerebras 芯片提供高速推理 | `gpt-oss-120b` | Free 层当前约为 5 RPM、30K TPM、1M TPH、1M TPD；具体限制以账号页面为准 | `https://api.cerebras.ai/v1` | 兼容 OpenAI SDK，适合作为 Groq 的高速备用；Provider 特有参数不要写死到通用 Agent 逻辑 |
-
-推荐的 fallback 顺序：智谱 `glm-4.7-flash` → SiliconFlow 当前 ¥0 模型 → Groq `openai/gpt-oss-120b` → Cerebras `gpt-oss-120b`。生产代码应对 429、超时、模型下线和网络不可达做重试、熔断和降级。
-
-</details>
+运行 `easyagent -version` 可以查看二进制内写入的版本和提交。
 
 ## 文档
 
-- [设计说明：场景、术语、边界和伪代码](docs/design.md)
-- [运行时细节：消息、上下文、Tool、Skill、MCP 和 Trace](docs/agent-runtime.md)
-- [工程复盘：遇到的问题、错误方案、修正与 Review 清单](docs/engineering-notes.md)
+- [设计说明](docs/design.md)
+- [Agent Runtime 与 Trace](docs/agent-runtime.md)
+- [工程复盘与 Review 清单](docs/engineering-notes.md)
 - [安全说明](SECURITY.md)
 - [参与贡献](CONTRIBUTING.md)
 
 ## 当前边界
 
-EasyAgent 目前是单机、单进程、SQLite 应用，提供单管理员登录，但没有 RBAC 或多租户隔离。默认监听所有网卡，公网部署时应使用 TLS 反向代理、防火墙或 VPN，并立即修改默认密码。Agent 的效果取决于所选模型、上下文和可用能力。
+EasyAgent 是单机、单进程、SQLite 应用，只提供一个管理员账号，没有 RBAC、
+多租户隔离或分布式任务队列。正在运行的任务保存在进程内；服务退出时会取消任务并
+清理其管理的 Codex/MCP 子进程，重启后不会恢复执行。
 
 ## 许可证
 
