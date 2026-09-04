@@ -1,161 +1,103 @@
 <div align="center">
-  <img src="web/public/logo.svg" alt="EasyAgent Logo" width="96" />
+  <img src="web/public/logo.svg" alt="EasyAgent Logo" width="88" />
   <h1>EasyAgent</h1>
-  <p>可运行在个人电脑或 Linux 服务器上的轻量、自托管 Agent</p>
-  <p><code>用户消息 → 模型 → Tool / Skill / MCP → 模型 → 最终回答</code></p>
+  <p>把 AI Agent 部署到自己的电脑或 Linux 服务器，通过浏览器随时使用。</p>
+  <p><strong>单个 Go 二进制 · Web UI · 双 Runtime · Tools / Skills / MCP · 实时 Trace</strong></p>
 </div>
 
-EasyAgent 使用模型原生 Function Calling 决定是否调用工具，不引入 Graph、多 Agent
-编排或工作流 DSL。它提供两种执行引擎：内置 Go Agent，以及通过
-`codex app-server` 接入的 Codex Runtime。
+## 解决什么问题
 
-## 主要能力
+- **远程运行 Agent**：不依赖桌面 App，把任务放到长期在线的服务器执行。
+- **团队共享使用**：团队成员通过同一个 Web 页面，共享模型、Skills、MCP 和服务器工作区。
+- **长任务更可靠**：任务排队与状态持久化；服务重启后恢复待执行任务，并明确标记被中断的任务。
+- **并发修改不冲突**：支持多任务并行；Git 项目按会话创建 worktree，普通目录自动互斥。
+- **过程看得见**：实时展示模型请求、工具调用、Token、缓存、耗时和错误，断线后可继续接收 Trace。
+- **扩展只配置一次**：EasyAgent Runtime 与 Codex Runtime 共用 Skills 和 MCP。
 
-- 多轮对话、流式回答、会话搜索、排队暂停/继续与运行中中断。
-- 支持 OpenAI、Ollama 及 OpenAI-compatible 模型服务。
-- EasyAgent Runtime 支持图片、UTF-8 文本/代码和 PDF 附件。
-- 内置文件、Shell、网页、时间、天气和计算工具，并可扩展 Skill 与 MCP。
-- Agent Trace 展示模型与工具调用、Token、缓存、耗时和错误。
-- 两种 Runtime 共用任务设置：默认并发 4、整轮上限 12 小时；Git 项目按会话创建 worktree，其他目录自动互斥。
-- 任务队列持久化，Trace 通过 SSE 实时推送并支持断线续传。
-- 长会话自动生成上下文检查点；原始消息完整保存在 SQLite。
-- 单管理员登录，模型配置和会话数据均在本机保存。
+## 核心功能
 
-## 界面预览
+- EasyAgent Runtime：内置 Go Agent，支持 OpenAI、Ollama 和 OpenAI-compatible 模型。
+- Codex Runtime：通过 Codex CLI 自带的 `app-server` 运行 Codex thread。
+- 支持流式对话、会话搜索、任务队列、暂停/继续和运行中停止。
+- 默认并发 4 个任务，单轮任务最长 12 小时，均可在设置中调整。
+- 内置文件、Shell、网页、时间、天气和计算工具。
+- 页面管理 Skills 与 MCP；内置 Context7、Playwright、GitHub、OpenAI Docs 等 MCP 预设。
+- 支持 Codex thread 列表、详情、继续和分支。
+- SQLite 本地保存会话、配置、任务和完整 Trace。
 
 <p align="center">
   <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />
 </p>
 
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <strong>Runtime 与模型配置</strong><br />
-      <img src="docs/images/model-and-tools.png" alt="Runtime 与模型配置" width="440" />
-    </td>
-    <td align="center" width="50%">
-      <strong>Skills 管理</strong><br />
-      <img src="docs/images/skills.png" alt="Skills 管理" width="440" />
-    </td>
-  </tr>
-</table>
+## 快速下载
 
-## 快速开始
+打开 [最新版本下载页](https://github.com/lakernote/easy-agent/releases/latest)，根据系统和架构选择文件：
 
-从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载并解压对应平台的
-压缩包。Linux 和 macOS 进入解压目录后运行：
+| 系统 | x64 / Intel | ARM64 / Apple Silicon |
+| --- | --- | --- |
+| Windows | `easyagent_*_windows_amd64.zip` | `easyagent_*_windows_arm64.zip` |
+| macOS | `easyagent_*_darwin_amd64.tar.gz` | `easyagent_*_darwin_arm64.tar.gz` |
+| Linux | `easyagent_*_linux_amd64.tar.gz` | `easyagent_*_linux_arm64.tar.gz` |
 
-```bash
-./easyagent
-```
+[查看全部 Releases](https://github.com/lakernote/easy-agent/releases) · [最新版 SHA-256 校验文件](https://github.com/lakernote/easy-agent/releases/latest/download/checksums.txt)
 
-Linux AMD64 也可以进入准备安装 EasyAgent 的目录，然后直接复制下面的命令。
-它会把 `v0.0.1` 解压到当前目录并在后台启动：
+下载并解压后运行：
+
+- Windows：双击或执行 `easyagent.exe`
+- macOS / Linux：执行 `./easyagent`
+
+macOS/Windows 发布包暂未代码签名；如果系统首次拦截，请在系统安全设置中确认运行。
+
+服务默认监听 `0.0.0.0:8080`。启动后访问 <http://127.0.0.1:8080>；部署在服务器时，将地址换成服务器 IP。
+
+首次登录用户名和密码均为 `admin`。登录后先到 **设置 → 账户安全** 修改密码，再到 **设置 → 模型配置** 添加模型。
+
+### Linux x64 一键启动
+
+进入准备存放 EasyAgent 的空目录，执行：
 
 ```bash
 (
 set -euo pipefail
-curl -fL https://github.com/lakernote/easy-agent/releases/download/v0.0.1/easyagent_0.0.1_linux_amd64.tar.gz \
+release_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+  https://github.com/lakernote/easy-agent/releases/latest)"
+tag="${release_url##*/}"
+version="${tag#v}"
+curl -fL "https://github.com/lakernote/easy-agent/releases/download/${tag}/easyagent_${version}_linux_amd64.tar.gz" \
   | tar -xz --strip-components=1
 nohup ./easyagent >easyagent.log 2>&1 </dev/null &
 printf '%s\n' "$!" >easyagent.pid
 )
 ```
 
-发布包已经包含可执行权限，无需再运行 `chmod +x`；如果二进制经过其他工具复制后
-丢失权限，再手动赋权即可。使用 `tail -f easyagent.log` 查看日志；需要停止时执行
-`kill "$(cat easyagent.pid)"`。
+- 查看日志：`tail -f easyagent.log`
+- 停止服务：`kill "$(cat easyagent.pid)"`
 
-Windows 运行 `easyagent.exe`。服务默认监听 `0.0.0.0:8080`，启动后打开
-<http://127.0.0.1:8080>；远程访问时改为服务器 IP。
+发布包已包含可执行权限，不需要额外运行 `chmod +x`。程序、日志和 PID 文件位于当前目录；数据库和默认工作区保存在 `~/.easyagent/`。
 
-首次登录用户名和密码均为 `admin`。登录后请立即在
-**设置 → 账户安全** 修改密码，再到 **设置 → 模型配置** 配置模型。
+## Runtime 怎么选
 
-> 默认监听所有网卡。公网部署必须使用 TLS 反向代理，并通过防火墙或 VPN 限制
-> 访问来源。发布包目前没有 macOS/Windows 代码签名，系统可能提示未知开发者。
+| Runtime | 适合场景 | 额外要求 |
+| --- | --- | --- |
+| EasyAgent Runtime | 通用对话、工具调用、团队自定义 Agent | 无，配置模型即可 |
+| Codex Runtime | 代码任务、Codex thread、原生 Codex 工具 | 服务器需要安装 Codex CLI |
 
-### 从源码构建
-
-```bash
-git clone https://github.com/lakernote/easy-agent.git
-cd easy-agent
-make build
-./bin/easyagent
-```
-
-`make build` 会构建前端并将其嵌入 Go 二进制。启动参数：
-
-```bash
-./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
-```
-
-不传参数时，数据库位于 `~/.easyagent/easyagent.db`，默认工作区位于
-`~/.easyagent/workspaces/default`。新建会话时可以选择服务器上已有的其他目录；
-会话创建后会固定 Runtime、模型配置和工作区。
-
-发布包本身不依赖 Go、Node.js、Python、Git 或系统 SQLite。只有 Shell、stdio MCP
-或任务本身需要调用这些程序时，才需要在服务器上安装。
-
-### Codex Runtime
-
-Codex Runtime 需要服务器安装 Codex CLI；`app-server` 是 CLI 自带的子命令，
-无需单独安装，也不需要 ChatGPT Desktop：
+安装 Codex CLI：
 
 ```bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
-codex --version
-codex app-server --help
 ```
 
-也可以在 **设置 → 运行时** 中检测或安装 Codex CLI，再到 **模型配置** 保存
-Provider、Base URL、模型、推理强度和 API Key。`env_key` 应填写环境变量名（例如
-`GROQ_API_KEY`），不能填写密钥本身。
+`app-server` 已包含在 Codex CLI 中，无需单独安装。EasyAgent 默认以完全访问模式运行 Codex 任务，因此 Codex 可以使用 EasyAgent 服务账号有权访问的文件和命令。
 
-Codex 的 thread、原生工具、沙箱和上下文由 app-server 管理；EasyAgent 页面维护的
-Skill 与 MCP 会转换为 Codex 的标准 Skill 输入和 `mcp_servers` 配置，因此两种 Runtime
-可以共用团队能力。Codex Runtime 支持 thread 继续、列表、只读详情和分支；当前只转发
-文本消息，不处理页面附件。
+## 使用前注意
 
-> EasyAgent 以 `approvalPolicy=never` 和 `dangerFullAccess` 启动 Codex 任务。
-> Codex 因此拥有 EasyAgent 服务账号可用的文件和命令权限。请使用低权限系统账号，
-> 并仅选择可信工作区。
+- 默认监听所有网卡，首次登录密码为 `admin`；服务器部署后请立即修改密码。
+- 不要直接暴露到公网。建议使用防火墙或 VPN 限制来源，并通过反向代理启用 HTTPS。
+- 当前定位是单机共享服务：一个管理员账号、一个 SQLite 数据库，不提供 RBAC 或多租户隔离。
+- Shell 和 stdio MCP 使用服务进程权限运行，不是安全沙箱；建议使用低权限系统账号。
+- 发布包无需 Go、Node.js 或系统 SQLite。只有任务调用 Git、Python 等命令时，服务器才需要安装对应程序。
 
-## 扩展方式
-
-| 类型 | 用途 | 加载方式 |
-| --- | --- | --- |
-| Tool | 文件、Shell、搜索等确定性操作 | 核心工具常驻，其余按需加载 |
-| Skill | 任务方法、团队规范和领域经验 | 页面管理，模型按需读取 |
-| MCP | GitHub、浏览器、数据库等外部能力 | 页面配置、验证并启用 |
-
-内置 MCP 预设包括 OpenAI Docs、Context7、Playwright 和 GitHub；Context7 使用官方远端
-Endpoint，无需本地安装，API Key 可选。内置 Skill 可在页面启停、编辑或恢复默认内容。
-
-## 发布版本
-
-进入 **GitHub Actions → Release → Run workflow**，选择分支并输入尚未存在的版本号，
-例如 `v2.0.1`。Action 会自动创建 tag 和 Release，并生成 Windows、macOS、Linux 的
-amd64/arm64 压缩包与 `checksums.txt`。带 `-rc.1`、`-beta.1` 等后缀的版本会标记为
-预发布。
-
-运行 `easyagent -version` 可以查看二进制内写入的版本和提交。
-
-## 文档
-
-- [设计说明](docs/design.md)
-- [Agent Runtime 与 Trace](docs/agent-runtime.md)
-- [工程复盘与 Review 清单](docs/engineering-notes.md)
-- [安全说明](SECURITY.md)
-- [参与贡献](CONTRIBUTING.md)
-
-## 当前边界
-
-EasyAgent 是单机、单进程、SQLite 应用，只提供一个共享管理员账号，没有 RBAC、
-多租户隔离或分布式任务队列。服务退出时会清理其管理的 Codex/MCP 子进程；尚未开始的
-排队任务会在重启后继续，手动暂停的任务保持暂停；已经运行的任务会标记为中断，避免
-自动重放命令或文件副作用。
-
-## 许可证
+## License
 
 [MIT](LICENSE)
