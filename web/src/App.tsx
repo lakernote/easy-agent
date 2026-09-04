@@ -26,7 +26,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    api.me().then(() => refresh()).then(() => setAuthenticated(true)).catch((reason) => {
+    api.me().then(async (status) => {
+      if (!status.authenticated) return
+      await refresh()
+      setAuthenticated(true)
+    }).catch((reason) => {
       if (!(reason instanceof APIError) || reason.status !== 401) setAuthError((reason as Error).message)
     }).finally(() => setLoading(false))
   }, [refresh])
@@ -73,28 +77,53 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !isActive(session.status)) return
-    const timer = window.setInterval(async () => {
+    const stream = new EventSource(`/api/v1/sessions/${encodeURIComponent(session.id)}/stream`)
+    const update = (event: MessageEvent<string>) => {
       try {
-        const current = await api.session(session.id)
+        const current = JSON.parse(event.data) as Session
         setSession((previous) => previous?.id === current.id ? mergeSessionSnapshot(previous, current) : current)
         setData((previous) => previous ? updateSessionSummary(previous, current) : previous)
-        if (!isActive(current.status)) await refresh()
-      } catch (reason) {
-        if (reason instanceof APIError && reason.status === 401) { setAuthenticated(false); setData(null); setSession(null) }
-        else setError((reason as Error).message)
-      }
-    }, 800)
-    return () => window.clearInterval(timer)
+        if (!isActive(current.status)) { stream.close(); void refresh() }
+      } catch { setError('实时任务事件格式无效') }
+    }
+    stream.addEventListener('session', update as EventListener)
+    stream.onerror = () => {
+      // EventSource 会携带 Last-Event-ID 自动重连；短暂断网不打断服务器任务。
+      if (stream.readyState === EventSource.CLOSED) setError('实时连接已关闭，请重新打开会话')
+    }
+    return () => stream.close()
   }, [session?.id, session?.status, refresh, setCurrentSession])
 
   const newChat = () => { setSession(null); setPage('chat'); setTraceOpen(false); setError('') }
   const stopSession = async () => {
-    if (!session || !isActive(session.status)) return
+    if (!session || (!isActive(session.status) && session.status !== 'paused')) return
     try {
       const next = await api.cancelSession(session.id)
       setCurrentSession(next)
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
+  }
+
+  const pauseSession = async () => {
+    if (!session || session.status !== 'queued') return
+    try {
+      setCurrentSession(await api.pauseSession(session.id))
+      await refresh()
+    } catch (reason) { setError((reason as Error).message) }
+  }
+
+  const resumeSession = async () => {
+    if (!session || session.status !== 'paused') return
+    try {
+      setCurrentSession(await api.resumeSession(session.id))
+      await refresh()
+    } catch (reason) { setError((reason as Error).message) }
+  }
+
+  const forkSession = async () => {
+    if (!session || session.runtime !== 'codex' || isActive(session.status) || session.status === 'paused') return
+    try { setCurrentSession(await api.forkSession(session.id)); await refresh(); setTraceOpen(false) }
+    catch (reason) { setError((reason as Error).message) }
   }
 
   const resolveCodexRequest = async (value: unknown) => {
@@ -115,7 +144,13 @@ export default function App() {
       <header className="topbar">
         <div className="mobile-brand"><Logo /></div>
         <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : '设置'}</div>
-        <div className="topbar-actions">{page === 'chat' && session && isActive(session.status) && <button className="stop-button" onClick={stopSession}>停止</button>}{page === 'chat' && session && <button className="ghost-button trace-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}</div>
+        <div className="topbar-actions">
+          {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => void forkSession()}>创建分支</button>}
+          {page === 'chat' && session?.status === 'queued' && <button className="ghost-button" onClick={() => void pauseSession()}>暂停排队</button>}
+          {page === 'chat' && session?.status === 'running' && <button className="stop-button" onClick={stopSession}>中断</button>}
+          {page === 'chat' && session?.status === 'paused' && <><button className="ghost-button" onClick={() => void stopSession()}>取消任务</button><button className="primary-button" onClick={() => void resumeSession()}>继续</button></>}
+          {page === 'chat' && session && <button className="ghost-button trace-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}
+        </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
       {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} />}

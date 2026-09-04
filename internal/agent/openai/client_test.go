@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -121,6 +122,35 @@ func TestChatCompletionsStreamsTextAndUsage(t *testing.T) {
 	}
 	if !trace.Stream || trace.FinalResponse.Message.Content != "你好" || trace.FinalResponse.Usage.TotalTokens != 14 || len(trace.RawChunks) != 3 {
 		t.Fatalf("Trace 应同时保存聚合响应和原始 Delta: %+v", trace)
+	}
+}
+
+func TestChatCompletionsSurfacesEmbeddedStreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintln(response, `data: {"id":"chat-stream","model":"fixture","choices":[{"delta":{"reasoning":"checking"}}]}`)
+		fmt.Fprintln(response)
+		fmt.Fprintln(response, `data: {"error":{"message":"Tool call validation failed","type":"invalid_request_error","code":"tool_use_failed","failed_generation":"{\"name\":\"shell<|channel|>commentary\"}","status_code":400}}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Protocol: ChatCompletions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Generate(context.Background(), core.Request{
+		Model: "fixture", Messages: []core.Message{{Role: core.RoleUser, Content: "安装 git 了吗"}},
+		Tools: []core.ToolSpec{{Name: "shell"}}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAuto},
+		OnTextDelta: func(string) {},
+	})
+	var failure *core.ModelError
+	if !errors.As(err, &failure) || failure.StatusCode != http.StatusBadRequest || !failure.RetryWithoutStreaming {
+		t.Fatalf("SSE 尾部错误没有暴露为可兼容重试的 Provider 错误: err=%v failure=%+v", err, failure)
+	}
+	if result.Exchange.StatusCode != http.StatusBadRequest || !strings.Contains(result.Exchange.Response, `"raw_chunks"`) || !strings.Contains(result.Exchange.Response, `"code":"tool_use_failed"`) || !strings.Contains(result.Exchange.Response, `"status_code":400`) {
+		t.Fatalf("SSE 错误 Trace 没有保留真实状态和原始分片: %+v", result.Exchange)
+	}
+	if errors.Is(err, core.ErrEmptyModelResponse) {
+		t.Fatalf("SSE Provider 错误不应被误报为空响应: %v", err)
 	}
 }
 

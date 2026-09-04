@@ -35,7 +35,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const attachmentRef = useRef<PendingAttachment[]>([])
   const runtime = session?.runtime || data.model.runtime
   const isCodexRuntime = runtime === 'codex'
-  const capabilities = useMemo(() => isCodexRuntime ? [] : capabilityOptions(data), [data, isCodexRuntime])
+  const capabilities = useMemo(() => capabilityOptions(data).filter((item) => !isCodexRuntime || item.kind !== 'tool'), [data, isCodexRuntime])
   const visibleCapabilities = useMemo(() => {
     const keyword = capabilityQuery.trim().toLocaleLowerCase()
     return capabilities.filter((item) => !keyword || item.name.toLocaleLowerCase().includes(keyword) || item.description.toLocaleLowerCase().includes(keyword) || item.token.slice(1).toLocaleLowerCase().includes(keyword) || capabilityKindLabel(item.kind).toLocaleLowerCase().includes(keyword))

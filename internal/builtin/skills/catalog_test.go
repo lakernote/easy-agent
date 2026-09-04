@@ -7,17 +7,31 @@ func TestCatalogLoadsIndependentSkillFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 5 || catalog[0].Name == "" || catalog[4].Content == "" {
+	if len(catalog) != 10 {
 		t.Fatalf("内置 Skill 加载错误: %+v", catalog)
 	}
-	foundAPI := false
+	want := map[string]bool{
+		"api-design":            false,
+		"docs-maintenance":      false,
+		"git-worktree-workflow": false,
+		"incident-rca":          false,
+		"release-engineering":   false,
+		"test-and-e2e":          false,
+	}
 	for _, skill := range catalog {
 		if skill.Name == "general-assistant" {
 			t.Fatal("通用回答属于基础 Prompt，不应重复成为 Skill")
 		}
-		foundAPI = foundAPI || skill.Name == "api-design"
+		if skill.Name == "" || skill.Description == "" || skill.Content == "" {
+			t.Fatalf("内置 Skill 字段不完整: %+v", skill)
+		}
+		if _, ok := want[skill.Name]; ok {
+			want[skill.Name] = true
+		}
 	}
-	if !foundAPI {
-		t.Fatal("缺少高频 API 设计 Skill")
+	for name, found := range want {
+		if !found {
+			t.Fatalf("缺少内置 Skill %q", name)
+		}
 	}
 }

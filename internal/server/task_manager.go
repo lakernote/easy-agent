@@ -21,6 +21,7 @@ type taskManager struct {
 type taskHandle struct {
 	token    string
 	cancel   context.CancelFunc
+	done     chan struct{}
 	partial  string
 	progress string
 	usage    store.Usage
@@ -59,7 +60,7 @@ func (manager *taskManager) has(id string) bool {
 func (manager *taskManager) set(id, token string, cancel context.CancelFunc) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	manager.tasks[id] = taskHandle{token: token, cancel: cancel, progress: "任务排队中 · 等待本地执行槽"}
+	manager.tasks[id] = taskHandle{token: token, cancel: cancel, done: make(chan struct{}), progress: "任务排队中 · 等待本地执行槽"}
 }
 
 func (manager *taskManager) appendPartial(id, delta string) {
@@ -179,6 +180,7 @@ func (manager *taskManager) clear(id, token string) {
 	defer manager.mu.Unlock()
 	if current, ok := manager.tasks[id]; ok && current.token == token {
 		delete(manager.tasks, id)
+		close(current.done)
 	}
 }
 
@@ -188,5 +190,20 @@ func (manager *taskManager) cancel(id string) {
 	manager.mu.Unlock()
 	if current.cancel != nil {
 		current.cancel()
+	}
+}
+
+func (manager *taskManager) wait(ctx context.Context, id string) error {
+	manager.mu.Lock()
+	current, ok := manager.tasks[id]
+	manager.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	select {
+	case <-current.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

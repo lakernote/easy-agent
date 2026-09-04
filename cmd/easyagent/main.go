@@ -119,7 +119,9 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// 私有 MCP 首次安装和握手可能需要几分钟；安装与连接内部仍有更短超时。
-		WriteTimeout:   4 * time.Minute,
+		// SSE Trace 连接会跨越整个任务，不能使用全局 WriteTimeout；模型、
+		// MCP 和安装接口均由各自的 context 设置更精确的上限。
+		WriteTimeout:   0,
 		IdleTimeout:    90 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}

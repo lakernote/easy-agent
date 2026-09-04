@@ -49,12 +49,20 @@ func (server *Server) saveSkill(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "Skill 已保存，但同步 Codex 失败："+err.Error())
+		return
+	}
 	writeJSON(response, http.StatusOK, input)
 }
 
 func (server *Server) resetSkill(response http.ResponseWriter, request *http.Request) {
 	if err := server.store.DeleteSkill(request.PathValue("name")); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "Skill 已恢复，但同步 Codex 失败："+err.Error())
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)

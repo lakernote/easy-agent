@@ -18,4 +18,5 @@ export type Bootstrap = {
   codex: CodexRuntimeStatus
   codexConfig: CodexProviderConfig
   runtime: { home: string; workspace: string; runtime: string }
+  runtimeSettings: { maxConcurrentTasks: number; turnTimeoutSeconds: number; sseHeartbeatSeconds: number; gitWorktrees: boolean }
 }

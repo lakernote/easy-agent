@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
   profile_id TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL,
   workspace TEXT NOT NULL DEFAULT '',
+  source_workspace TEXT NOT NULL DEFAULT '',
+  worktree_branch TEXT NOT NULL DEFAULT '',
   response_id TEXT NOT NULL,
   provider_key TEXT NOT NULL,
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -148,6 +150,23 @@ CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_
 	if profileColumn == 0 {
 		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("迁移 ea_sessions.profile_id: %w", err)
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "source_workspace", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "worktree_branch", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		var exists int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name=?`, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+				return fmt.Errorf("迁移 ea_sessions.%s: %w", column.name, err)
+			}
 		}
 	}
 	var count int

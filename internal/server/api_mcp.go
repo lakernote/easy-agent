@@ -79,12 +79,20 @@ func (server *Server) saveMCP(response http.ResponseWriter, request *http.Reques
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "MCP 已保存，但同步 Codex 失败："+err.Error())
+		return
+	}
 	writeJSON(response, http.StatusOK, publicMCP(input))
 }
 
 func (server *Server) deleteMCP(response http.ResponseWriter, request *http.Request) {
 	if err := server.store.DeleteMCP(request.PathValue("id")); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "MCP 已删除，但同步 Codex 失败："+err.Error())
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)

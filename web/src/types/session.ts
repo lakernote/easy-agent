@@ -73,11 +73,14 @@ export type ContextInfo = {
 export type Session = {
   id: string
   title: string
-  status: 'idle' | 'queued' | 'running' | 'failed' | 'canceled'
+  status: 'idle' | 'queued' | 'paused' | 'running' | 'failed' | 'canceled'
   error?: string
   runtime: 'easyagent' | 'codex'
   model?: string
   workspace: string
+  sourceWorkspace?: string
+  worktreeBranch?: string
+  workspaceIsolation?: string
   createdAt: string
   updatedAt: string
   messages: Message[]

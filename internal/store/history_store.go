@@ -189,6 +189,36 @@ func (store *Store) ListEventsBefore(id string, before int64, limit int) ([]Even
 	return result, count, hasMore, err
 }
 
+// ListEventsAfter powers SSE reconnection. Event IDs are SQLite primary keys and
+// therefore remain stable across service restarts.
+func (store *Store) ListEventsAfter(id string, after int64, limit int) ([]Event, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 300
+	}
+	rows, err := store.db.Query(`SELECT id,event_json,created_at FROM ea_events WHERE session_id=? AND id>? ORDER BY id LIMIT ?`, id, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []Event{}
+	for rows.Next() {
+		var value Event
+		var databaseID int64
+		var data []byte
+		var created string
+		if err := rows.Scan(&databaseID, &data, &created); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(data, &value); err != nil {
+			return nil, err
+		}
+		value.ID = databaseID
+		value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
 func (store *Store) AppendMessage(id string, value Message) error {
 	return store.AppendMessages(id, []Message{value})
 }

@@ -28,8 +28,15 @@ func TestGitHubPresetLimitsToolsets(t *testing.T) {
 	}
 }
 
+func TestContext7PresetUsesOfficialRemoteEndpoint(t *testing.T) {
+	preset, found := Find("context7")
+	if !found || preset.Action != "configure" || preset.Transport != "http" || preset.Endpoint != "https://mcp.context7.com/mcp" {
+		t.Fatalf("Context7 预设应使用官方远端 MCP: %+v", preset)
+	}
+}
+
 func TestConfigurablePresetsAreNotAutoInstalled(t *testing.T) {
-	for _, id := range []string{"github"} {
+	for _, id := range []string{"context7", "github"} {
 		preset, found := Find(id)
 		if !found || preset.Action != "configure" {
 			t.Fatalf("%s 应要求用户先配置: %+v", id, preset)

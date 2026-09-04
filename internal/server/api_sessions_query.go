@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -65,7 +66,7 @@ func modelRules() modelRulesPayload {
 }
 
 func (server *Server) getSession(response http.ResponseWriter, request *http.Request) {
-	value, err := server.store.LoadSessionWindow(request.PathValue("id"), apiMessageWindow, apiEventWindow)
+	value, err := server.loadLiveSession(request.Context(), request.PathValue("id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(response, http.StatusNotFound, "会话不存在")
 		return
@@ -74,11 +75,19 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
+	writeJSON(response, http.StatusOK, server.sessionView(value))
+}
+
+func (server *Server) loadLiveSession(ctx context.Context, id string) (store.Session, error) {
+	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	if err != nil {
+		return store.Session{}, err
+	}
 	settings, _ := server.store.GetModelSettingsByProfileID(value.ProfileID)
 	if settings.Runtime == "" {
 		settings, _ = server.store.GetModelSettings()
 	}
-	settings = enrichOllamaContextWindow(request.Context(), settings)
+	settings = enrichOllamaContextWindow(ctx, settings)
 	decorateContext(&value, settings)
 	value.PartialOutput = server.tasks.partial(value.ID)
 	value.RunProgress = server.tasks.progress(value.ID)
@@ -96,7 +105,7 @@ func (server *Server) getSession(response http.ResponseWriter, request *http.Req
 			value.Context.ContextWindowTokens = live.ContextWindowTokens
 		}
 	}
-	writeJSON(response, http.StatusOK, server.sessionView(value))
+	return value, nil
 }
 
 // getSessionHistory 是页面的 keyset pagination 接口。kind 决定只读取消息或

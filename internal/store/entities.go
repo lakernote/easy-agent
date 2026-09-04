@@ -137,14 +137,18 @@ type ContextInfo struct {
 }
 
 type Session struct {
-	ID                string      `json:"id"`
-	Title             string      `json:"title"`
-	Status            string      `json:"status"`
-	Error             string      `json:"error,omitempty"`
-	Runtime           string      `json:"runtime"`
-	ProfileID         string      `json:"profileId,omitempty"`
-	Model             string      `json:"model,omitempty"`
-	Workspace         string      `json:"workspace"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	Runtime   string `json:"runtime"`
+	ProfileID string `json:"profileId,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Workspace string `json:"workspace"`
+	// SourceWorkspace 是用户选择的原始目录。Git 隔离开启时 Workspace 指向
+	// EasyAgent 创建的 worktree，SourceWorkspace 仍用于展示和追踪来源。
+	SourceWorkspace   string      `json:"sourceWorkspace,omitempty"`
+	WorktreeBranch    string      `json:"worktreeBranch,omitempty"`
 	CreatedAt         time.Time   `json:"createdAt"`
 	UpdatedAt         time.Time   `json:"updatedAt"`
 	Messages          []Message   `json:"messages"`
@@ -165,4 +169,13 @@ type Session struct {
 	Compactions []Compaction `json:"-"`
 	ResponseID  string       `json:"-"`
 	ProviderKey string       `json:"-"`
+}
+
+// RuntimeSettings 控制两个 Runtime 共用的任务调度层。这里不放模型参数，
+// 避免 EasyAgent/Codex 各维护一份并发与工作区隔离配置。
+type RuntimeSettings struct {
+	MaxConcurrentTasks  int  `json:"maxConcurrentTasks"`
+	TurnTimeoutSeconds  int  `json:"turnTimeoutSeconds"`
+	SSEHeartbeatSeconds int  `json:"sseHeartbeatSeconds"`
+	GitWorktrees        bool `json:"gitWorktrees"`
 }

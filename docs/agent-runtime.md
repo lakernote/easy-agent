@@ -53,7 +53,7 @@ Chat Completions 每轮发送完整历史。Responses 在 Provider 配置没有�
 
 页面的“上下文”使用 Provider 最近一次真实上报的 Input Token，而不是用字符数伪造精确 Token。模型窗口可在配置中填写；Ollama 会从 `/api/ps` 读取当前已加载模型真正使用的窗口，避免把理论上限误当成运行值。
 
-页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。消息区域滚动到顶部时，页面通过 `/api/v1/sessions/{id}/history?kind=messages&before=<id>` 按主键游标加载更早的一页并保持滚动位置；Trace 面板提供同样的早期事件加载。运行中的页面每 800ms 轮询也复用这个窗口，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent Runtime 只读取最新检查点之后的活跃消息，未压缩历史通过检查点摘要参与上下文。
+页面读取会话时使用有界窗口：默认只从 SQLite 查询最近 200 条消息和最近 300 条 Trace，响应同时返回全量消息数、事件数以及是否截断。消息区域滚动到顶部时，页面通过 `/api/v1/sessions/{id}/history?kind=messages&before=<id>` 按主键游标加载更早的一页并保持滚动位置；Trace 面板提供同样的早期事件加载。运行中页面使用 SSE 接收状态与 Trace 增量，断线后按 `Last-Event-ID` 续传，不会随着历史增长反复传输整条会话；数据库中的原始记录仍完整保留，Agent Runtime 只读取最新检查点之后的活跃消息，未压缩历史通过检查点摘要参与上下文。
 
 ### 从输入消息到新 Turn
 
@@ -108,7 +108,7 @@ Prompt 规则只能降低模型服从直接或间接注入的概率，不能替�
 
 Skill 默认使用渐进式加载：模型先看到简短元数据；任务相关时加载 `load_skill`，再读取指定 Skill 全文。用户明确 `@skill:name` 时，运行时直接把已选正文注入本轮 Prompt。
 
-内置 Tool 首轮常驻 `current_time`、`weather`、`calculate` 三个高频核心工具，同时注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露其余函数名。简单的时间、天气和计算任务因此可以直接进入真实工具调用；文件、Shell、网页和 Skill 仍由模型自主选出最少能力组，Runtime 动态注册组内 Schema。Loader 结果不是任务证据，下一轮会临时隐藏 Loader，并用 `tool_choice=required` 要求调用一个真实工具。`@tool:name` 是用户显式预加载，不是语义路由。MCP 默认同样先提供服务元数据；用户明确输入 `@mcp:id` 时，如果该 MCP 不超过 5 个工具且 Schema 体积较小，Runtime 直接预加载，否则仍调用 `search_mcp_tools(id, query)` 按需检索，一次最多注册 5 个最相关 Schema。检索器不判断 GitHub、浏览器等产品类型。这能降低小上下文模型的首轮 Token，同时保留模型选择权；Prompt Cache 依赖稳定的 System Prompt、工具排序与精简目录前缀。若 Provider 在保留工具时返回空响应，Runtime 只允许关闭流式重试一次；仍为空就明确失败，不会移除工具后让模型猜答案。
+内置 Tool 首轮常驻 `current_time`、`weather`、`calculate`、`shell` 四个高频核心工具，同时注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露其余函数名。简单的时间、天气、计算和命令任务可以直接进入真实工具调用；文件、网页和 Skill 仍由模型自主选出最少能力组，Runtime 动态注册组内 Schema。Loader 结果不是任务证据，下一轮会临时隐藏 Loader，使用 `tool_choice=auto` 并由 Runner 验证真实工具调用。`@tool:name` 是用户显式预加载，不是语义路由。当历史上下文仍包含某个内置 function call 时，Runtime 会恢复其 Schema，防止历史与本轮 `tools` 不一致。MCP 默认同样先提供服务元数据；用户明确输入 `@mcp:id` 时，如果该 MCP 不超过 5 个工具且 Schema 体积较小，Runtime 直接预加载，否则仍调用 `search_mcp_tools(id, query)` 按需检索，一次最多注册 5 个最相关 Schema。若 Provider 在 HTTP 200 的 SSE 尾部返回工具校验错误，Trace 会保留原始错误并关闭流式重试一次。空响应只在本轮已成功执行真实工具后才可进入 `none` 收敛；Loader 结果和历史工具结果不会触发收敛。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 
@@ -130,7 +130,7 @@ mcp__<server_id>__<remote_tool_name>
 
 ## 排队与取消
 
-单机默认只有一个执行槽。消息先进入 `queued`，拿到槽位后才进入 `running`；页面会分别展示这两个状态。用户停止任务时，Server 取消对应 `context.Context`，模型 HTTP 请求、内置 Tool 和 MCP Tool 会收到同一个取消信号，SQLite 保留 `canceled` 状态和已经发生的 Trace。
+单机执行槽可在“任务设置”页面配置（默认 4），两个 Runtime 共用 12 小时的整轮 turn 上限。消息先进入 SQLite 的 `queued`，拿到槽位后才进入 `running`；Git 工作区按会话创建独立 worktree，非 Git 目录或 worktree 创建失败时按工作区路径串行。排队任务可以安全暂停并继续；运行中任务只能中断，因为自动重放可能重复命令或文件写入。用户中断任务时，Server 取消对应 `context.Context`，模型 HTTP 请求、内置 Tool 和 MCP Tool 会收到同一个取消信号。服务重启后 queued 任务恢复排队，paused 保持暂停，running 标记中断而不自动重放。页面通过 SSE 接收实时 Session/Trace，SQLite 事件主键同时作为 `Last-Event-ID` 续传游标，心跳间隔也可在页面调整。
 
 整轮 Agent 不设置隐藏的固定总超时：每次模型请求使用页面配置的超时，每次 Tool 自己声明超时，Runner 还有最大循环步数，用户也能主动停止。这样长任务不会被一个与页面配置无关的总计时器提前杀掉。
 

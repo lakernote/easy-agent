@@ -33,6 +33,7 @@ export function TraceRow({ event }: { event: TraceEvent }) {
 
 function traceStatusLabel(status: Session['status'], progress?: string) {
   if (status === 'running' || status === 'queued') return progress || '正在处理…'
+  if (status === 'paused') return '排队任务已暂停'
   if (status === 'failed') return '本轮失败'
   if (status === 'canceled') return '本轮已停止'
   return '本轮已完成'

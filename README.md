@@ -11,11 +11,13 @@ EasyAgent 使用模型原生 Function Calling 决定是否调用工具，不引�
 
 ## 主要能力
 
-- 多轮对话、流式回答、会话搜索与运行中取消。
+- 多轮对话、流式回答、会话搜索、排队暂停/继续与运行中中断。
 - 支持 OpenAI、Ollama 及 OpenAI-compatible 模型服务。
 - EasyAgent Runtime 支持图片、UTF-8 文本/代码和 PDF 附件。
 - 内置文件、Shell、网页、时间、天气和计算工具，并可扩展 Skill 与 MCP。
 - Agent Trace 展示模型与工具调用、Token、缓存、耗时和错误。
+- 两种 Runtime 共用任务设置：默认并发 4、整轮上限 12 小时；Git 项目按会话创建 worktree，其他目录自动互斥。
+- 任务队列持久化，Trace 通过 SSE 实时推送并支持断线续传。
 - 长会话自动生成上下文检查点；原始消息完整保存在 SQLite。
 - 单管理员登录，模型配置和会话数据均在本机保存。
 
@@ -94,9 +96,10 @@ codex app-server --help
 Provider、Base URL、模型、推理强度和 API Key。`env_key` 应填写环境变量名（例如
 `GROQ_API_KEY`），不能填写密钥本身。
 
-Codex 的 thread、工具、Skill、MCP、沙箱和上下文由 app-server 管理；EasyAgent 的
-内置 Tools 与 MCP 不会注入 Codex。当前 Codex Runtime 只转发文本消息，不处理页面
-附件。
+Codex 的 thread、原生工具、沙箱和上下文由 app-server 管理；EasyAgent 页面维护的
+Skill 与 MCP 会转换为 Codex 的标准 Skill 输入和 `mcp_servers` 配置，因此两种 Runtime
+可以共用团队能力。Codex Runtime 支持 thread 继续、列表、只读详情和分支；当前只转发
+文本消息，不处理页面附件。
 
 > EasyAgent 以 `approvalPolicy=never` 和 `dangerFullAccess` 启动 Codex 任务。
 > Codex 因此拥有 EasyAgent 服务账号可用的文件和命令权限。请使用低权限系统账号，
@@ -109,6 +112,9 @@ Codex 的 thread、工具、Skill、MCP、沙箱和上下文由 app-server 管�
 | Tool | 文件、Shell、搜索等确定性操作 | 核心工具常驻，其余按需加载 |
 | Skill | 任务方法、团队规范和领域经验 | 页面管理，模型按需读取 |
 | MCP | GitHub、浏览器、数据库等外部能力 | 页面配置、验证并启用 |
+
+内置 MCP 预设包括 OpenAI Docs、Context7、Playwright 和 GitHub；Context7 使用官方远端
+Endpoint，无需本地安装，API Key 可选。内置 Skill 可在页面启停、编辑或恢复默认内容。
 
 ## 发布版本
 
@@ -129,9 +135,10 @@ amd64/arm64 压缩包与 `checksums.txt`。带 `-rc.1`、`-beta.1` 等后缀的�
 
 ## 当前边界
 
-EasyAgent 是单机、单进程、SQLite 应用，只提供一个管理员账号，没有 RBAC、
-多租户隔离或分布式任务队列。正在运行的任务保存在进程内；服务退出时会取消任务并
-清理其管理的 Codex/MCP 子进程，重启后不会恢复执行。
+EasyAgent 是单机、单进程、SQLite 应用，只提供一个共享管理员账号，没有 RBAC、
+多租户隔离或分布式任务队列。服务退出时会清理其管理的 Codex/MCP 子进程；尚未开始的
+排队任务会在重启后继续，手动暂停的任务保持暂停；已经运行的任务会标记为中断，避免
+自动重放命令或文件副作用。
 
 ## 许可证
 

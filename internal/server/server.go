@@ -25,11 +25,10 @@ type Server struct {
 	env    *appenv.Environment
 	mux    *http.ServeMux
 
-	context context.Context
-	cancel  context.CancelFunc
-	wait    sync.WaitGroup
-	// 单机版默认只同时运行一个模型任务，避免本地模型争抢内存。
-	semaphore   chan struct{}
+	context     context.Context
+	cancel      context.CancelFunc
+	wait        sync.WaitGroup
+	scheduler   *taskScheduler
 	tasks       *taskManager
 	runtimes    *runtimeRegistry
 	codexEnvMu  sync.RWMutex
@@ -37,6 +36,9 @@ type Server struct {
 	authMu      sync.Mutex
 	sessions    map[string]authSession
 	authEnabled bool
+	// externalCapabilitySync writes the shared catalog to the service user's
+	// Codex config/discovery directories. Tests keep it off to remain hermetic.
+	externalCapabilitySync bool
 }
 
 const authCookieName = "easyagent_session"
@@ -46,31 +48,40 @@ type authSession struct {
 }
 
 func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
-	return newServer(database, assets, environment, true)
+	return newServer(database, assets, environment, true, true)
 }
 
 // NewForTests keeps existing handler-focused tests independent from browser
 // cookie setup. Production always uses New and therefore always enables auth.
 func NewForTests(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
-	return newServer(database, assets, environment, false)
+	return newServer(database, assets, environment, false, false)
 }
 
-func newServer(database *store.Store, assets fs.FS, environment *appenv.Environment, authEnabled bool) *Server {
+func newServer(database *store.Store, assets fs.FS, environment *appenv.Environment, authEnabled, externalCapabilitySync bool) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	codexEnv, _ := codexruntime.LoadManagedEnvironment()
-	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, semaphore: make(chan struct{}, 1), tasks: newTaskManager(), codexEnv: codexEnv, sessions: make(map[string]authSession), authEnabled: authEnabled}
+	runtimeSettings, _ := database.GetRuntimeSettings()
+	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, scheduler: newTaskScheduler(runtimeSettings.MaxConcurrentTasks), tasks: newTaskManager(), codexEnv: codexEnv, sessions: make(map[string]authSession), authEnabled: authEnabled, externalCapabilitySync: externalCapabilitySync}
 	server.runtimes = newRuntimeRegistry(server)
 	server.routes()
+	server.resumeQueuedSessions()
 	return server
 }
 
 func (server *Server) codexEnvironment() []string {
+	return server.codexEnvironmentWith(nil)
+}
+
+func (server *Server) codexEnvironmentWith(extra map[string]string) []string {
 	server.codexEnvMu.RLock()
-	values := make(map[string]string, len(server.codexEnv))
+	values := make(map[string]string, len(server.codexEnv)+len(extra))
 	for key, value := range server.codexEnv {
 		values[key] = value
 	}
 	server.codexEnvMu.RUnlock()
+	for key, value := range extra {
+		values[key] = value
+	}
 	return server.env.Environ(values)
 }
 
@@ -104,7 +115,7 @@ func (server *Server) requiresAuthentication(request *http.Request) bool {
 	if !server.authEnabled {
 		return false
 	}
-	if request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/health" {
+	if request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/auth/me" || request.URL.Path == "/api/v1/health" {
 		return false
 	}
 	return strings.HasPrefix(request.URL.Path, "/api/v1/")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -327,5 +328,93 @@ func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	}
 	if stillCanceled.Usage.ModelCalls != 1 || stillCanceled.Usage.ModelDurationMS != 90000 {
 		t.Fatalf("取消后的调用统计未保存: %+v", stillCanceled.Usage)
+	}
+}
+
+func TestRecoverRunningKeepsQueuedTasks(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	for _, id := range []string{"queued", "running"} {
+		if _, err := value.CreateSession(id, id, "fixture", "", now); err != nil {
+			t.Fatal(err)
+		}
+		if err := value.QueueSession(id, "fixture", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := value.MarkRunning("running", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.RecoverRunning(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := value.ListQueuedSessions()
+	if err != nil || len(queued) != 1 || queued[0].ID != "queued" {
+		t.Fatalf("服务重启后 queued 应保留: values=%+v err=%v", queued, err)
+	}
+	interrupted, err := value.LoadSession("running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interrupted.Status != "failed" || !strings.Contains(interrupted.Error, "中断") {
+		t.Fatalf("运行中任务应标记中断且不自动重放: %+v", interrupted)
+	}
+}
+
+func TestPauseAndResumeQueuedSession(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	if _, err := value.CreateSession("paused", "任务", "fixture", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.QueueSession("paused", "fixture", now); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := value.PauseQueuedSession("paused", now.Add(time.Second))
+	if err != nil || !changed {
+		t.Fatalf("暂停排队任务失败: changed=%v err=%v", changed, err)
+	}
+	if err := value.FailSession("paused", context.Canceled, Usage{}, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	paused, _ := value.LoadSession("paused")
+	if paused.Status != "paused" {
+		t.Fatalf("后台队列退出不应覆盖暂停状态: %s", paused.Status)
+	}
+	changed, err = value.ResumePausedSession("paused", now.Add(3*time.Second))
+	if err != nil || !changed {
+		t.Fatalf("继续暂停任务失败: changed=%v err=%v", changed, err)
+	}
+	resumed, _ := value.LoadSession("paused")
+	if resumed.Status != "queued" {
+		t.Fatalf("继续后应回到 queued，实际为 %s", resumed.Status)
+	}
+}
+
+func TestRuntimeSettingsDefaultsAndNormalization(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	defaults, err := value.GetRuntimeSettings()
+	if err != nil || defaults.MaxConcurrentTasks != 4 || defaults.TurnTimeoutSeconds != 12*60*60 || defaults.SSEHeartbeatSeconds != 20 || !defaults.GitWorktrees {
+		t.Fatalf("运行设置默认值异常: value=%+v err=%v", defaults, err)
+	}
+	saved, err := value.SaveRuntimeSettings(RuntimeSettings{MaxConcurrentTasks: 99})
+	if err != nil || saved.MaxConcurrentTasks != 16 || saved.TurnTimeoutSeconds != DefaultTurnTimeoutSeconds || saved.SSEHeartbeatSeconds != DefaultSSEHeartbeatSeconds || saved.GitWorktrees {
+		t.Fatalf("运行设置归一化异常: value=%+v err=%v", saved, err)
+	}
+	loaded, err := value.GetRuntimeSettings()
+	if err != nil || loaded != saved {
+		t.Fatalf("运行设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
 	}
 }

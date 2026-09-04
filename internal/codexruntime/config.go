@@ -2,6 +2,7 @@ package codexruntime
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -23,7 +26,22 @@ const (
 var (
 	providerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	envKeyPattern     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	configWriteMu     sync.Mutex
 )
+
+type MCPServerConfig struct {
+	ID          string
+	Transport   string
+	Command     string
+	Args        []string
+	Endpoint    string
+	AuthType    string
+	Token       string
+	Username    string
+	Password    string
+	Headers     map[string]string
+	Environment map[string]string
+}
 
 // ProviderConfig 是 EasyAgent 能够管理的 Codex provider 配置。API Key 永远
 // 不放在这个结构体里返回；它只在 SaveProviderConfig 的入参中短暂出现。
@@ -129,6 +147,8 @@ func LoadManagedEnvironment() (map[string]string, error) {
 // 保存到独立的 0600 文件。这样 config.toml 不会泄漏密钥，app-server 仍可通过
 // env_key 读取对应环境变量。
 func SaveProviderConfig(input ProviderConfigInput) (ProviderConfig, error) {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
 	input, err := normalizeProviderInput(input)
 	if err != nil {
 		return ProviderConfig{}, err
@@ -183,6 +203,110 @@ func SaveProviderConfig(input ProviderConfigInput) (ProviderConfig, error) {
 		return ProviderConfig{}, err
 	}
 	return LoadProviderConfig()
+}
+
+// SyncMCPServers mirrors EasyAgent's enabled MCP catalog into a namespaced part
+// of Codex config.toml. Existing MCP entries not owned by EasyAgent are kept.
+// Secrets are returned as environment variables and never written to TOML.
+func SyncMCPServers(configs []MCPServerConfig) (map[string]string, error) {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+	configPath, _, err := configPaths()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		return nil, err
+	}
+	document, err := readDocument(configPath)
+	if err != nil {
+		return nil, err
+	}
+	environment := syncMCPServersDocument(document, configs)
+	if err := writeDocument(configPath, document); err != nil {
+		return nil, err
+	}
+	return environment, nil
+}
+
+func syncMCPServersDocument(document configDocument, configs []MCPServerConfig) map[string]string {
+	servers := providerDocumentMap(document, "mcp_servers")
+	for id := range servers {
+		if strings.HasPrefix(id, "easyagent_") {
+			delete(servers, id)
+		}
+	}
+	environment := map[string]string{}
+	for _, config := range configs {
+		id := managedMCPID(config.ID)
+		entry := map[string]any{"enabled": true}
+		if config.Transport == "stdio" {
+			entry["command"] = config.Command
+			entry["args"] = append([]string(nil), config.Args...)
+			keys := make([]string, 0, len(config.Environment))
+			for key, value := range config.Environment {
+				if !envKeyPattern.MatchString(key) {
+					continue
+				}
+				keys = append(keys, key)
+				environment[key] = value
+			}
+			sort.Strings(keys)
+			if len(keys) > 0 {
+				entry["env_vars"] = keys
+			}
+		} else {
+			entry["url"] = config.Endpoint
+			envHeaders := map[string]string{}
+			for header, value := range config.Headers {
+				envName := managedMCPEnv(id, header)
+				environment[envName] = value
+				envHeaders[header] = envName
+			}
+			if config.AuthType == "bearer" && strings.TrimSpace(config.Token) != "" {
+				envName := managedMCPEnv(id, "token")
+				environment[envName] = config.Token
+				entry["bearer_token_env_var"] = envName
+			}
+			if config.AuthType == "basic" {
+				envName := managedMCPEnv(id, "authorization")
+				environment[envName] = "Basic " + base64.StdEncoding.EncodeToString([]byte(config.Username+":"+config.Password))
+				envHeaders["Authorization"] = envName
+			}
+			if len(envHeaders) > 0 {
+				entry["env_http_headers"] = envHeaders
+			}
+		}
+		servers[id] = entry
+	}
+	document["mcp_servers"] = servers
+	return environment
+}
+
+func providerDocumentMap(document configDocument, key string) map[string]any {
+	if value, ok := document[key].(map[string]any); ok {
+		return value
+	}
+	return map[string]any{}
+}
+
+func managedMCPID(value string) string {
+	var result strings.Builder
+	result.WriteString("easyagent_")
+	for _, char := range strings.ToLower(value) {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+			result.WriteRune(char)
+		} else {
+			result.WriteByte('_')
+		}
+	}
+	return strings.TrimRight(result.String(), "_")
+}
+
+func managedMCPEnv(id, field string) string {
+	value := strings.ToUpper(id + "_" + field)
+	value = regexp.MustCompile(`[^A-Z0-9_]`).ReplaceAllString(value, "_")
+	return value
 }
 
 func normalizeProviderInput(input ProviderConfigInput) (ProviderConfigInput, error) {

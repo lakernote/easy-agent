@@ -18,9 +18,10 @@ var ErrEmptyModelResponse = errors.New("模型没有返回回答或工具调用"
 // ModelError 保存 Provider 返回的 HTTP 失败。Runner 只重试 429 和 5xx；
 // 认证、参数和不存在的模型等 4xx 属于确定性错误，不应浪费 Token 重放。
 type ModelError struct {
-	StatusCode int
-	Message    string
-	RetryAfter time.Duration
+	StatusCode            int
+	Message               string
+	RetryAfter            time.Duration
+	RetryWithoutStreaming bool
 }
 
 func (failure *ModelError) Error() string {
@@ -86,7 +87,7 @@ type ToolSpec struct {
 	Group            string
 	GroupDescription string
 	// Loader 表示这个工具只负责把真实工具加入下一轮，成功本身不构成任务证据。
-	// Runner 会在下一步临时隐藏 Loader，并要求模型至少调用一个真实工具。
+	// Runner 会在下一步临时隐藏 Loader，并验证模型至少调用一个真实工具。
 	Loader bool
 }
 
@@ -230,8 +231,8 @@ type Observer func(Event)
 type RunRequest struct {
 	Messages []Message
 	// RequiredToolNames 是用户通过 @tool:name 明确指定的工具。首轮请求只暴露
-	// 这些工具并使用 required tool_choice；如果 Provider 忽略该约束，Runner
-	// 也不会把未执行工具的正文当成成功回答。
+	// 这些工具并使用 auto；Runner 会验证真实调用，不会把未执行
+	// 工具的正文当成成功回答。
 	RequiredToolNames []string
 	// NewMessages 是已有会话在本轮新增的消息。Responses 使用它配合
 	// PreviousResponseID 续接服务端上下文；首次运行可留空。

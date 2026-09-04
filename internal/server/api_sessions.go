@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/store"
 )
 
 type messageRequest struct {
@@ -42,7 +45,14 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		return
 	}
 	id := newID()
-	if _, err := server.store.CreateSessionWithProfile(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, runEnvironment.Workspace(), time.Now()); err != nil {
+	runtimeSettings, _ := server.store.GetRuntimeSettings()
+	workspace := server.prepareSessionWorkspace(request.Context(), id, runEnvironment.Workspace(), runtimeSettings)
+	if _, err := server.store.CreateSessionWithProfile(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, workspace.Execution, time.Now()); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := server.store.SetSessionWorkspace(id, workspace.Execution, workspace.Source, workspace.Branch); err != nil {
+		_ = server.store.DeleteSession(id)
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -143,4 +153,75 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 	decorateContext(&value, settings)
 	value.RunProgress = server.tasks.progress(id)
 	writeJSON(response, http.StatusOK, server.sessionView(value))
+}
+
+func (server *Server) pauseSession(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	changed, err := server.store.PauseQueuedSession(id, time.Now())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !changed {
+		writeError(response, http.StatusConflict, "只有仍在排队、尚未开始执行的任务可以安全暂停")
+		return
+	}
+	server.tasks.cancel(id)
+	settleContext, settleCancel := context.WithTimeout(request.Context(), 2*time.Second)
+	_ = server.tasks.wait(settleContext, id)
+	settleCancel()
+	server.writeSession(response, request, id, http.StatusOK)
+}
+
+func (server *Server) resumeSession(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if server.tasks.has(id) {
+		writeError(response, http.StatusConflict, "暂停操作正在完成，请稍后再继续")
+		return
+	}
+	value, err := server.store.LoadSessionWindow(id, 1, 1)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, "会话不存在")
+		} else {
+			writeError(response, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	model, err := server.store.GetModelSettingsByProfileID(value.ProfileID)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	changed, err := server.store.ResumePausedSession(id, time.Now())
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !changed {
+		writeError(response, http.StatusConflict, "任务当前不在暂停状态")
+		return
+	}
+	if err := server.startQueuedTurn(id, model); err != nil {
+		_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
+		writeError(response, http.StatusConflict, err.Error())
+		return
+	}
+	server.writeSession(response, request, id, http.StatusAccepted)
+}
+
+func (server *Server) writeSession(response http.ResponseWriter, request *http.Request, id string, status int) {
+	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	settings, _ := server.store.GetModelSettingsByProfileID(value.ProfileID)
+	if settings.Runtime == "" {
+		settings, _ = server.store.GetModelSettings()
+	}
+	settings = enrichOllamaContextWindow(request.Context(), settings)
+	decorateContext(&value, settings)
+	value.RunProgress = server.tasks.progress(id)
+	writeJSON(response, status, server.sessionView(value))
 }

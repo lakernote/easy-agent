@@ -16,7 +16,7 @@ const (
 	DefaultRequestTimeoutSeconds       = 300
 	MinRequestTimeoutSeconds           = 30
 	MaxRequestTimeoutSeconds           = 600
-	DefaultCodexTurnTimeoutSeconds     = 7200
+	DefaultCodexTurnTimeoutSeconds     = DefaultTurnTimeoutSeconds
 	MinCodexTurnTimeoutSeconds         = 300
 	MaxCodexTurnTimeoutSeconds         = 86400
 	DefaultCompressionThresholdPercent = 75

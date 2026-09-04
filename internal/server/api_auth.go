@@ -46,7 +46,7 @@ func (server *Server) logout(response http.ResponseWriter, request *http.Request
 
 func (server *Server) me(response http.ResponseWriter, request *http.Request) {
 	if !server.isAuthenticated(request) {
-		writeError(response, http.StatusUnauthorized, "需要登录")
+		writeJSON(response, http.StatusOK, map[string]any{"authenticated": false, "username": ""})
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"authenticated": true, "username": "admin"})

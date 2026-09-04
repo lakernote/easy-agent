@@ -201,3 +201,10 @@ func TestTruncateUTF8KeepsTraceBounded(t *testing.T) {
 		t.Fatalf("unexpected truncated value: bytes=%d valid=%v", len(result), utf8.ValidString(result))
 	}
 }
+
+func TestCodexCapabilityTextUsesNativeSkillAndManagedMCPNames(t *testing.T) {
+	got := codexCapabilityText("@skill:review-code 检查并使用 @mcp:openai.docs")
+	if got != "$review-code 检查并使用 [优先使用 MCP server easyagent_openai_docs]" {
+		t.Fatalf("Codex 能力引用转换错误: %q", got)
+	}
+}

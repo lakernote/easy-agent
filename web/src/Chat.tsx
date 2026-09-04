@@ -73,6 +73,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
       {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
+      {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以从顶部继续或取消。</span></div></div>}
       {session?.status === 'running' && (session.partialOutput
         ? <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>
         : <div className="assistant-row"><Avatar /><div className="thinking" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 正在处理任务`}</span></div></div>)}

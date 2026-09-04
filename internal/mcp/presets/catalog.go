@@ -25,6 +25,16 @@ type Preset struct {
 func Catalog() []Preset {
 	return []Preset{
 		{
+			ID: "openai-docs", Name: "OpenAI Docs", Description: "搜索并读取 OpenAI、Codex 和 API 官方文档",
+			Transport: "http", Endpoint: "https://developers.openai.com/mcp",
+			Action: "configure", Requirement: "OpenAI 官方远端 MCP · 无需本地安装",
+		},
+		{
+			ID: "context7", Name: "Context7", Description: "查询最新的开源库与框架文档和代码示例",
+			Transport: "http", Endpoint: "https://mcp.context7.com/mcp",
+			Action: "configure", Requirement: "Context7 官方远端 MCP · API Key 可选，配置后可提高额度",
+		},
+		{
 			ID: "playwright", Name: "Playwright", Description: "复现网页问题，操作页面并检查结构与请求",
 			Transport: "stdio", Command: "@runtime/mcp/playwright/node_modules/.bin/playwright-mcp", Args: []string{"--headless", "--isolated"},
 			Action: "install", Requirement: "宿主机 Node.js 20+ / npm · MCP 包私有安装 · 固定版本 0.0.79", RequiredCommands: []string{"node", "npm"}, MinimumNodeMajor: 20,

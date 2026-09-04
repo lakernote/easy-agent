@@ -26,6 +26,7 @@ type bootstrapPayload struct {
 	Codex                codexRuntimeStatus          `json:"codex"`
 	CodexConfig          codexruntime.ProviderConfig `json:"codexConfig"`
 	Runtime              runtimeInfoPayload          `json:"runtime"`
+	RuntimeSettings      store.RuntimeSettings       `json:"runtimeSettings"`
 }
 
 type runtimeInfoPayload struct {
@@ -87,11 +88,13 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	}
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
+	runtimeSettings, _ := server.store.GetRuntimeSettings()
 	writeJSON(response, http.StatusOK, bootstrapPayload{
 		Sessions: server.sessionViews(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
 		Runtime:     runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
+		RuntimeSettings: runtimeSettings,
 		Codex:       server.detectCodex(request.Context()),
 		CodexConfig: server.loadCodexConfig(),
 	})

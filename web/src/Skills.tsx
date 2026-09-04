@@ -100,7 +100,7 @@ export function Skills({ data, onRefresh, onError }: { data: Bootstrap; onRefres
   }
 
   return <section className="settings-page">
-    <div className="page-intro"><p className="eyebrow">按需加载</p><h1>Skills</h1><p>默认只向模型提供名称和简介，由 Agent 按需调用 <code>load_skill</code>；在输入框用 <code>@skill:name</code> 明确选择时，本轮会直接使用完整说明。</p></div>
+    <div className="page-intro"><p className="eyebrow">按需加载</p><h1>Skills</h1><p>同一份 <code>SKILL.md</code> 同时供两个 Runtime 使用；输入 <code>@skill:name</code> 后，EasyAgent 注入说明，Codex 发送标准 skill input。</p></div>
     <div className="skills-overview"><div><p className="eyebrow">能力库</p><strong>{data.skills.length} 项能力</strong><span>按需加载，不把完整正文塞进每一轮上下文</span></div><div><p className="eyebrow">已启用</p><strong>{enabledCount} / {data.skills.length}</strong><span>当前可被 Agent 自动选择</span></div><div><p className="eyebrow">自定义</p><strong>{customCount} 项</strong><span>自定义内容保存在本地</span></div></div>
     <div className="split-settings">
       <div className="settings-list">

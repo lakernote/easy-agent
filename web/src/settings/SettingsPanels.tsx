@@ -1,8 +1,57 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Bootstrap, CodexProviderConfig, MCPConfig, ModelSettings } from '../types'
 
 export type Notice = { ready: boolean; title: string; message: string }
+
+export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
+  const [settings, setSettings] = useState({ ...data.runtimeSettings })
+  const [saving, setSaving] = useState(false)
+  useEffect(() => setSettings({ ...data.runtimeSettings }), [data.runtimeSettings])
+  const save = async () => {
+    setSaving(true); onError('')
+    try { await api.saveRuntimeSettings(settings); await onRefresh() }
+    catch (reason) { onError((reason as Error).message) }
+    finally { setSaving(false) }
+  }
+  const dirty = JSON.stringify(settings) !== JSON.stringify(data.runtimeSettings)
+  const turnHours = Number((settings.turnTimeoutSeconds / 3600).toFixed(2))
+  return <div className="section-block runtime-operations task-settings-panel">
+    <div className="section-heading"><div><p className="eyebrow">共享调度层</p><h2>任务与恢复</h2><p>以下设置同时作用于 EasyAgent Runtime 和 Codex Runtime，不跟随模型配置重复保存。</p></div><span className="tag">全局</span></div>
+    <div className="task-settings-grid">
+      <section>
+        <div className="task-setting-heading"><span>01</span><div><strong>执行容量</strong><small>修改后立即影响排队任务，不中断已运行任务。</small></div></div>
+        <label>最大并发任务
+          <input type="number" min="1" max="16" value={settings.maxConcurrentTasks} onChange={(event) => setSettings({ ...settings, maxConcurrentTasks: Number(event.target.value) })} />
+          <small>默认 4，允许范围 1–16。</small>
+        </label>
+      </section>
+      <section>
+        <div className="task-setting-heading"><span>02</span><div><strong>整轮任务上限</strong><small>覆盖模型思考、工具调用、命令、MCP 与审批等待。</small></div></div>
+        <label>最长运行时间（小时）
+          <input type="number" min={5 / 60} max="24" step="0.5" value={turnHours} onChange={(event) => setSettings({ ...settings, turnTimeoutSeconds: Math.round(Number(event.target.value) * 3600) })} />
+          <small>默认 12 小时；到期后中断当前 turn，会话历史仍保留。</small>
+        </label>
+      </section>
+      <section>
+        <div className="task-setting-heading"><span>03</span><div><strong>实时连接</strong><small>浏览器断线后会携带事件序号自动续传 Trace。</small></div></div>
+        <label>SSE 心跳间隔（秒）
+          <input type="number" min="5" max="60" value={settings.sseHeartbeatSeconds} onChange={(event) => setSettings({ ...settings, sseHeartbeatSeconds: Number(event.target.value) })} />
+          <small>默认 20 秒；通常无需调小。</small>
+        </label>
+      </section>
+      <section>
+        <div className="task-setting-heading"><span>04</span><div><strong>项目冲突控制</strong><small>让并发任务写入相互隔离的 Git 分支。</small></div></div>
+        <label className="task-toggle"><span><strong>自动创建 Git worktree</strong><small>Git 项目使用 <code>easyagent/…</code> 分支；非 Git 目录仍按原目录串行。</small></span><input type="checkbox" checked={settings.gitWorktrees} onChange={(event) => setSettings({ ...settings, gitWorktrees: event.target.checked })} /></label>
+      </section>
+    </div>
+    <div className="recovery-policy">
+      <div><span className="service-dot" /><p><strong>服务重启恢复</strong><small>未开始的排队任务自动恢复；手动暂停的任务保持暂停。</small></p></div>
+      <div><span className="service-dot warning" /><p><strong>运行中任务保护</strong><small>重启后标记为中断，不自动重放可能已经执行的命令或写文件操作。</small></p></div>
+    </div>
+    <div className="form-actions"><button className="primary-button" type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? '保存中…' : '保存任务设置'}</button></div>
+  </div>
+}
 
 type CodexStatusProps = {
   data: Bootstrap
@@ -12,7 +61,9 @@ type CodexStatusProps = {
 }
 
 export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStatusProps) {
-  const [inspection, setInspection] = useState<{ account?: unknown; models?: unknown } | null>(null)
+  const [inspection, setInspection] = useState<{ account?: unknown; models?: unknown; threads?: unknown } | null>(null)
+  const [thread, setThread] = useState<unknown>(null)
+  const [readingThread, setReadingThread] = useState('')
   const [inspecting, setInspecting] = useState(false)
   const ready = data.codex.installed && data.codex.appServerAvailable
   const title = ready
@@ -24,10 +75,16 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
   const inspect = async () => {
     setInspecting(true)
     try {
-      const [account, models] = await Promise.all([api.codexAccount(), api.codexModels()])
-      setInspection({ account, models })
+      const [account, models, threads] = await Promise.all([api.codexAccount(), api.codexModels(), api.codexThreads()])
+      setInspection({ account, models, threads })
     } finally { setInspecting(false) }
   }
+  const readThread = async (id: string) => {
+    setReadingThread(id)
+    try { setThread(await api.codexThread(id)) }
+    finally { setReadingThread('') }
+  }
+  const threads = codexThreadSummaries(inspection?.threads)
 
   return (
     <div className={`runtime-status ${ready ? 'ready' : 'missing'}`} role="status" aria-live="polite">
@@ -39,12 +96,19 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
         {!data.codex.installed && <button className="primary-button" type="button" disabled={installing} onClick={onInstall}>{installing ? '安装中…' : '在服务器安装 Codex CLI'}</button>}
         {!data.codex.installed && <a className="ghost-button" href={data.codex.installUrl} target="_blank" rel="noreferrer">安装说明</a>}
         <button className="ghost-button" type="button" onClick={onDetect}>重新检测</button>
-        {ready && <button className="ghost-button" type="button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? '读取中…' : '读取账号 / 模型'}</button>}
+        {ready && <button className="ghost-button" type="button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? '读取中…' : '读取账号 / 模型 / Threads'}</button>}
       </div>
       {!data.codex.installed && <code className="runtime-install-command">{data.codex.installCommand}</code>}
-      {inspection && <div className="codex-inspection"><div><span>账号信息</span><pre>{JSON.stringify(inspection.account, null, 2)}</pre></div><div><span>模型目录</span><pre>{JSON.stringify(inspection.models, null, 2)}</pre></div></div>}
+      {inspection && <div className="codex-inspection"><div><span>账号信息</span><pre>{JSON.stringify(inspection.account, null, 2)}</pre></div><div><span>模型目录</span><pre>{JSON.stringify(inspection.models, null, 2)}</pre></div><div className="codex-thread-inspection"><span>最近 Threads</span>{threads.length === 0 ? <small>没有可读取的 Codex thread</small> : <div>{threads.map((item) => <button type="button" key={item.id} disabled={!!readingThread} onClick={() => void readThread(item.id)}><strong>{item.name || item.preview || item.id}</strong><small>{item.status?.type || 'stored'} · {item.id}</small>{readingThread === item.id && <em>读取中…</em>}</button>)}</div>}</div>{thread !== null && <div className="codex-thread-detail"><span>Thread 详情（只读）</span><pre>{JSON.stringify(thread, null, 2)}</pre></div>}</div>}
     </div>
   )
+}
+
+function codexThreadSummaries(value: unknown): { id: string; name?: string; preview?: string; status?: { type?: string } }[] {
+  if (!value || typeof value !== 'object') return []
+  const data = (value as { data?: unknown }).data
+  if (!Array.isArray(data)) return []
+  return data.filter((item): item is { id: string; name?: string; preview?: string; status?: { type?: string } } => Boolean(item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'))
 }
 
 export function ModelNotice({ notice }: { notice: Notice | null }) {
@@ -127,10 +191,7 @@ export function CodexSettings({ data, config, setConfig, model, setModel, notice
           <input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} placeholder="留空：使用上面的默认模型" />
           <small>多个 Codex 配置可以用不同 override；留空时使用 config.toml 默认模型。</small>
         </label>
-        <label>整轮任务上限（秒）
-          <input type="number" min={data.modelRules.minCodexTurnTimeoutSeconds} max={data.modelRules.maxCodexTurnTimeoutSeconds} value={model.turnTimeoutSeconds} onChange={(event) => setModel({ ...model, turnTimeoutSeconds: Number(event.target.value) })} />
-          <small>覆盖思考、命令、文件变更、MCP 和审批等待；默认 2 小时，最长 24 小时。</small>
-        </label>
+        <div className="runtime-boundary-note wide"><strong>任务时间</strong><span>Codex 与 EasyAgent 的整轮上限已统一到“任务设置”，当前为 {Number((data.runtimeSettings.turnTimeoutSeconds / 3600).toFixed(2))} 小时。</span></div>
       </div>
       <ModelNotice notice={notice} />
       <div className="form-actions">
@@ -240,9 +301,9 @@ export function MCPSettings({ data, mcpNotice, installingPreset, checkingPreset,
 
   return (
     <div className="section-block">
-      <div className="section-heading"><div><h2>MCP 连接</h2><p>只属于 EasyAgent Runtime；Codex 的 MCP/Apps 由 Codex 配置和 app-server 管理。</p></div><button className="ghost-button" type="button" onClick={onCreate}>＋ 自定义</button></div>
+      <div className="section-heading"><div><h2>MCP 连接</h2><p>一处配置，同时同步给 EasyAgent Runtime 和 Codex app-server。</p></div><button className="ghost-button" type="button" onClick={onCreate}>＋ 自定义</button></div>
       <div className="mcp-overview"><div><p className="eyebrow">连接数</p><strong>{data.mcps.length} 个 MCP</strong><span>配置保存在 EasyAgent 私有目录</span></div><div><p className="eyebrow">已就绪</p><strong>{enabledMCPCount} 个</strong><span>已验证并暴露给 Agent</span></div><div><p className="eyebrow">加载方式</p><strong>按需</strong><span>任务需要时才读取工具清单</span></div></div>
-      <div className="capability-note"><strong>能力边界</strong><span>EasyAgent 只管理自己的 MCP 包和连接，不会全局安装或升级 Node、Python、Java 等宿主运行时。</span></div>
+      <div className="capability-note"><strong>共享方式</strong><span>EasyAgent 直接连接 MCP；Codex 使用同一配置生成标准 <code>mcp_servers</code>，密钥只通过环境变量传递。</span></div>
       {mcpNotice && <MCPNotice notice={mcpNotice} onClose={onCloseNotice} />}
       <MCPList data={data} dataPresets={dataPresets} installingPreset={installingPreset} checkingPreset={checkingPreset} togglingMCP={togglingMCP} onInstall={onInstall} onCheck={onCheck} onTest={onTest} onToggle={onToggle} onCreate={onCreate} onEdit={onEdit} />
       <MCPPresets data={data} dataPresets={dataPresets} installingPreset={installingPreset} checkingPreset={checkingPreset} onInstall={onInstall} onCheck={onCheck} />

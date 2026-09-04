@@ -98,12 +98,17 @@ func (server *Server) installMCPPreset(response http.ResponseWriter, request *ht
 			writeError(response, http.StatusInternalServerError, saveErr.Error())
 			return
 		}
+		_, _, _ = server.syncCodexCapabilities()
 		writeJSON(response, http.StatusOK, mcpInstallResult{Ready: false, Status: "connect_failed", Message: "安装命令已执行，但连接测试失败：" + err.Error(), MCP: publicMCP(config), Tools: []mcpclient.ToolInfo{}})
 		return
 	}
 	defer connection.Close()
 	if err := server.store.SaveMCP(candidate); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "MCP 已安装，但同步 Codex 失败："+err.Error())
 		return
 	}
 	writeJSON(response, http.StatusOK, mcpInstallResult{Ready: true, Status: "ready", Message: "依赖检查、安装和连接测试均已通过", MCP: publicMCP(candidate), Tools: connection.Info})
@@ -127,6 +132,10 @@ func (server *Server) uninstallMCPPreset(response http.ResponseWriter, request *
 	}
 	if err := server.store.DeleteMCP(preset.ID); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, _, err := server.syncCodexCapabilities(); err != nil {
+		writeError(response, http.StatusInternalServerError, "MCP 已卸载，但同步 Codex 失败："+err.Error())
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)

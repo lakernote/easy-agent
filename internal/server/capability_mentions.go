@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -39,6 +40,17 @@ func selectedSkills(messages []store.Message, catalog *skillCatalog) []prompt.Se
 	return selected
 }
 
+func selectedSkillNames(messages []store.Message) map[string]struct{} {
+	matches := capabilityMentionPattern.FindAllStringSubmatch(latestUserMessage(messages), -1)
+	result := make(map[string]struct{})
+	for _, match := range matches {
+		if strings.EqualFold(match[1], "skill") {
+			result[match[2]] = struct{}{}
+		}
+	}
+	return result
+}
+
 // selectedToolNames 返回 UI 通过 @tool:name 明确选择的工具。它不分析自然语言，
 // 只把用户的显式选择转换成首轮预加载和首轮工具约束。
 func selectedToolNames(messages []store.Message) []string {
@@ -67,6 +79,31 @@ func stripToolMentions(text string) string {
 		}
 		return value
 	}))
+}
+
+// historicalToolNames 恢复仍在当前协议历史中的内置工具 Schema。
+// 否则模型能看到旧 function call，却在本轮 request.tools 中找不到
+// 同名函数，一些 Provider 会直接拒绝生成。Loader 本身不是业务工具。
+func historicalToolNames(messages []agent.Message) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, message := range messages {
+		if message.Role != agent.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			name := strings.TrimSpace(call.Name)
+			if name == "" || name == "load_tools" || name == "search_mcp_tools" {
+				continue
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 // selectedMCPIDs 返回用户通过 @mcp:id 明确选择的小型 MCP。它只做精确选择，

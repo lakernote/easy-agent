@@ -32,7 +32,7 @@ func TestLoaderRegistersOnlySelectedTools(t *testing.T) {
 	if !strings.Contains(loader.Tool().Spec.Description, "execution：命令执行") || !strings.Contains(loader.Tool().Spec.Description, "files：文件操作") {
 		t.Fatalf("精简目录没有提供稳定的能力组: %s", loader.Tool().Spec.Description)
 	}
-	if !strings.Contains(loader.Tool().Spec.Description, "唯一可调用函数是 load_tools") || !strings.Contains(loader.Tool().Spec.Description, "groups 中的值") || !strings.Contains(loader.Tool().Spec.Description, "原生 function call") {
+	if !strings.Contains(loader.Tool().Spec.Description, "已在 request.tools 中的工具应直接调用") || !strings.Contains(loader.Tool().Spec.Description, "groups 中的值") || !strings.Contains(loader.Tool().Spec.Description, "原生 function call") {
 		t.Fatalf("工具目录没有说明两阶段加载方式: %s", loader.Tool().Spec.Description)
 	}
 }
@@ -41,12 +41,14 @@ func TestLoaderPreloadsCoreTools(t *testing.T) {
 	loader, err := NewLoader([]agent.Tool{
 		{Spec: agent.ToolSpec{Name: "current_time", Group: "information", Description: "读取时间", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
 		{Spec: agent.ToolSpec{Name: "calculate", Group: "execution", Description: "计算", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
+		{Spec: agent.ToolSpec{Name: "shell", Group: "execution", Description: "执行命令", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
+		{Spec: agent.ToolSpec{Name: "weather", Group: "information", Description: "查询天气", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	tools := loader.PreloadCore()
-	if len(tools) != 2 || tools[0].Spec.Name != "calculate" || tools[1].Spec.Name != "current_time" {
+	if len(tools) != 4 || tools[0].Spec.Name != "calculate" || tools[1].Spec.Name != "current_time" || tools[2].Spec.Name != "shell" || tools[3].Spec.Name != "weather" {
 		t.Fatalf("核心工具应直接预加载且稳定排序: tools=%+v", tools)
 	}
 }

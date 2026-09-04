@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -310,6 +311,49 @@ func TestGetSessionUsesBoundedHistoryWindow(t *testing.T) {
 	}
 }
 
+func TestSessionStreamResumesTraceAfterLastEventID(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.CreateSession("stream", "SSE", "fixture", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AppendEvent("stream", store.Event{Kind: "trace", Detail: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AppendEvent("stream", store.Event{Kind: "trace", Detail: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := database.ListEventsAfter("stream", 0, 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("准备 SSE 事件失败: values=%+v err=%v", events, err)
+	}
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+	request, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/api/v1/sessions/stream/stream", nil)
+	request.Header.Set("Last-Event-ID", fmt.Sprint(events[0].ID))
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(text, "event: session") {
+		t.Fatalf("SSE 初始快照异常: HTTP=%d body=%s", response.StatusCode, text)
+	}
+	if strings.Count(text, "event: trace") != 1 || !strings.Contains(text, fmt.Sprintf("id: %d\n", events[1].ID)) || !strings.Contains(text, "second") {
+		t.Fatalf("SSE 应只续传 Last-Event-ID 之后的 Trace: %s", text)
+	}
+}
+
 func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	workingDirectory := t.TempDir()
 	workingDirectory, _ = filepath.EvalSymlinks(workingDirectory)
@@ -321,25 +365,22 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 			t.Fatal(err)
 		}
 		if callCount == 1 {
-			toolName := "load_tools"
-			arguments := `{"groups":["execution"]}`
 			tools, _ := body["tools"].([]any)
-			hasLoader := false
+			hasShell := false
 			for _, rawTool := range tools {
 				if item, ok := rawTool.(map[string]any); ok {
-					if function, ok := item["function"].(map[string]any); ok && function["name"] == "load_tools" {
-						hasLoader = true
+					if function, ok := item["function"].(map[string]any); ok && function["name"] == "shell" {
+						hasShell = true
 					}
 				}
 			}
-			if !hasLoader {
-				toolName = "shell"
-				arguments = `{"command":"pwd"}`
+			if !hasShell {
+				t.Fatalf("Shell 应在首轮默认工具中: %+v", body["tools"])
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"id": "load-call", "model": "fixture",
+				"id": "shell-call", "model": "fixture",
 				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-					map[string]any{"id": "call-load", "type": "function", "function": map[string]any{"name": toolName, "arguments": arguments}},
+					map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
 				}}}},
 			})
 			return
@@ -347,28 +388,6 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 		messages := body["messages"].([]any)
 		toolMessage := messages[len(messages)-1].(map[string]any)
 		toolOutput, _ := toolMessage["content"].(string)
-		if callCount == 2 {
-			if strings.Contains(toolOutput, `"loaded_groups":["execution"]`) {
-				if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, `"shell"`) {
-					t.Fatalf("模型没有收到工具加载结果: %+v", toolMessage)
-				}
-				_ = json.NewEncoder(response).Encode(map[string]any{
-					"id": "shell-call", "model": "fixture",
-					"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
-						map[string]any{"id": "call-shell", "type": "function", "function": map[string]any{"name": "shell", "arguments": `{"command":"pwd"}`}},
-					}}}},
-				})
-				return
-			}
-			if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, workingDirectory) || strings.Contains(toolOutput, "<workspace>") {
-				t.Fatalf("模型没有收到 Shell 原始路径: %+v", toolMessage)
-			}
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"id": "shell-answer", "model": "fixture",
-				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "目录是 " + workingDirectory}}},
-			})
-			return
-		}
 		if toolMessage["role"] != "tool" || !strings.Contains(toolOutput, workingDirectory) || strings.Contains(toolOutput, "<workspace>") {
 			t.Fatalf("模型没有收到 Shell 原始路径: %+v", toolMessage)
 		}
@@ -422,8 +441,8 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 			t.Fatalf("Shell Trace 没有保留真实路径: %s", event.Output)
 		}
 	}
-	if modelResponses != 3 {
-		t.Fatalf("Shell 任务应有加载工具、执行工具和最终回答三次模型响应，实际 %d", modelResponses)
+	if modelResponses != 2 {
+		t.Fatalf("Shell 任务应直接执行工具后回答，共两次模型响应，实际 %d", modelResponses)
 	}
 }
 
@@ -1016,6 +1035,24 @@ func TestCompactOversizedRecentToolResultKeepsProtocolAndBounds(t *testing.T) {
 	}
 	if !strings.Contains(compacted[3].Content, "头") || !strings.Contains(compacted[3].Content, "尾") || !utf8.ValidString(compacted[3].Content) {
 		t.Fatal("工具结果截断没有保留头尾或破坏 UTF-8")
+	}
+}
+
+func TestHistoricalToolNamesRestoreVisibleBuiltinCalls(t *testing.T) {
+	messages := []agent.Message{
+		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
+			{ID: "loader", Name: "load_tools"},
+			{ID: "shell-1", Name: "shell"},
+		}},
+		{Role: agent.RoleTool, ToolCallID: "shell-1", Name: "shell", Content: "ok"},
+		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
+			{ID: "read-1", Name: "read"},
+			{ID: "shell-2", Name: "shell"},
+			{ID: "mcp-loader", Name: "search_mcp_tools"},
+		}},
+	}
+	if got, want := historicalToolNames(messages), []string{"shell", "read"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("历史工具恢复应去重并排除 Loader: got=%v want=%v", got, want)
 	}
 }
 

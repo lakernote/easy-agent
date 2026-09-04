@@ -1,6 +1,7 @@
 package codexruntime
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,5 +69,30 @@ func TestLoadProviderConfigDoesNotEchoMisplacedSecret(t *testing.T) {
 	}
 	if value.EnvKey != defaultEnvKey || strings.Contains(value.EnvKey, "gsk_") || !strings.Contains(value.Warning, "API Key") {
 		t.Fatalf("misplaced secret should be hidden and explained: %+v", value)
+	}
+}
+
+func TestSyncMCPServersDocumentPreservesUnmanagedAndKeepsSecretsInEnvironment(t *testing.T) {
+	document := configDocument{"mcp_servers": map[string]any{
+		"personal":        map[string]any{"url": "https://personal.example/mcp"},
+		"easyagent_stale": map[string]any{"url": "https://stale.example/mcp"},
+	}}
+	environment := syncMCPServersDocument(document, []MCPServerConfig{
+		{ID: "docs", Transport: "http", Endpoint: "https://docs.example/mcp", AuthType: "bearer", Token: "secret-token", Headers: map[string]string{"X-Team": "alpha"}},
+		{ID: "local", Transport: "stdio", Command: "/usr/bin/local-mcp", Args: []string{"serve"}, Environment: map[string]string{"LOCAL_TOKEN": "local-secret", "bad-key": "ignored"}},
+	})
+	servers := providerDocumentMap(document, "mcp_servers")
+	if _, ok := servers["personal"]; !ok {
+		t.Fatal("不属于 EasyAgent 的 MCP 配置不应被删除")
+	}
+	if _, ok := servers["easyagent_stale"]; ok {
+		t.Fatal("已失效的 EasyAgent MCP 配置应被清理")
+	}
+	encoded, _ := json.Marshal(document)
+	if strings.Contains(string(encoded), "secret-token") || strings.Contains(string(encoded), "local-secret") {
+		t.Fatalf("MCP 密钥不应写入 Codex TOML 文档: %s", encoded)
+	}
+	if environment["LOCAL_TOKEN"] != "local-secret" || environment["EASYAGENT_DOCS_TOKEN"] != "secret-token" {
+		t.Fatalf("MCP 密钥应通过进程环境传递: %+v", environment)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -136,6 +137,7 @@ type Config struct {
 	ThreadID  string
 	Timeout   time.Duration
 	Env       []string
+	Skills    []SkillRef
 	OnDelta   func(string)
 	OnEvent   func(Event)
 	OnUsage   func(Usage)
@@ -143,6 +145,11 @@ type Config struct {
 	// 未设置时，RunMessage 会回复标准 JSON-RPC 方法未实现错误，避免把
 	// “服务器请求”误判成协议损坏并直接断开连接。
 	OnServerRequest func(ServerRequest) (any, error)
+}
+
+type SkillRef struct {
+	Name string
+	Path string
 }
 
 type ServerRequest struct {
@@ -442,8 +449,15 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		return Result{}, errors.New("Codex app-server 没有返回 thread id")
 	}
 	threadID = thread.Thread.ID
+	input := []map[string]string{{"type": "text", "text": codexCapabilityText(userMessage)}}
+	for _, skill := range config.Skills {
+		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Path) == "" {
+			continue
+		}
+		input = append(input, map[string]string{"type": "skill", "name": skill.Name, "path": skill.Path})
+	}
 	turnResult, err := request("turn/start", 3, map[string]any{
-		"threadId": threadID, "input": []map[string]string{{"type": "text", "text": userMessage}},
+		"threadId": threadID, "input": input,
 		"cwd": config.Workspace, "approvalPolicy": "never",
 		"sandboxPolicy": map[string]any{"type": "dangerFullAccess"},
 	})
@@ -505,6 +519,20 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		}
 		consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
 	}
+}
+
+func codexCapabilityText(value string) string {
+	pattern := regexp.MustCompile(`(?i)@(skill|mcp):([a-z0-9][a-z0-9._-]*)`)
+	return strings.TrimSpace(pattern.ReplaceAllStringFunc(value, func(token string) string {
+		match := pattern.FindStringSubmatch(token)
+		if len(match) != 3 {
+			return token
+		}
+		if strings.EqualFold(match[1], "skill") {
+			return "$" + match[2]
+		}
+		return "[优先使用 MCP server easyagent_" + strings.ReplaceAll(match[2], ".", "_") + "]"
+	}))
 }
 
 func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder, timers *eventTimers, latestUsage *Usage) {

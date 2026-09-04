@@ -114,6 +114,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	consecutiveFailedToolSteps := 0
 	forceConverge := false
 	requireLoadedToolCall := false
+	hasCurrentRealToolResult := false
 	requiredToolNames := availableRequiredTools(runner.modelToolSpecs, input.RequiredToolNames)
 	failedCalls := make(map[string]failedToolCall)
 
@@ -135,10 +136,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 		if requireLoadedToolCall {
 			// Loader 的结果只代表“能力已可用”，不是用户任务的证据。下一轮临时
-			// 隐藏所有 Loader，并要求模型从真实工具中选择至少一个调用。
+			// 隐藏所有 Loader。仍使用 auto 兼容不同 Provider，再由下面的 Runner
+			// 校验保证模型必须从真实工具中选择至少一个调用。
 			tools = nonLoaderTools(tools)
 			if len(tools) > 0 {
-				toolChoice = ToolChoice{Mode: ToolChoiceRequired}
+				toolChoice = ToolChoice{Mode: ToolChoiceAuto}
 			}
 		}
 		if forceConverge {
@@ -193,14 +195,17 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			}
 			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
-		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理并返回空正文。
-		// 首次调用已经完整进入 Trace；关闭流式重试一次，避免把空回答伪装成成功。
-		// 如果本轮已经取得真实工具结果，则同时进入无工具收敛轮，明确要求模型把
-		// 结论写入可见 content。不能直接展示 reasoning 字段，因为它可能包含模型
-		// 的隐藏推理过程，而不只是最终答案。
-		if err != nil && errors.Is(err, ErrEmptyModelResponse) && request.OnTextDelta != nil {
+		// 少数兼容 Provider 会在 stream + tools 组合下只生成隐藏推理，或把工具
+		// 校验错误放进 HTTP 200 的 SSE 尾部。首次调用已经完整进入 Trace；关闭
+		// 流式重试一次。只有当前 Run 已成功执行真实工具时，空正文重试才进入
+		// 无工具收敛；Loader、失败结果和旧轮次工具结果都不能触发收敛。
+		if err != nil && request.OnTextDelta != nil && (errors.Is(err, ErrEmptyModelResponse) || retryWithoutStreaming(err)) {
 			addUsage(&totalUsage, response.Usage)
-			request = prepareEmptyResponseRetry(request)
+			if errors.Is(err, ErrEmptyModelResponse) {
+				request = prepareEmptyResponseRetry(request, hasCurrentRealToolResult)
+			} else {
+				request.OnTextDelta = nil
+			}
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
@@ -308,6 +313,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 					calledLoader = true
 				} else {
 					calledRealTool = true
+					hasCurrentRealToolResult = true
 				}
 			}
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
@@ -341,11 +347,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 
 const visibleAnswerReminder = "上一响应没有可展示的最终正文。不要重复调用已经成功的工具；请根据已有工具结果，在 assistant content 中直接给出最终答案。"
 
-// prepareEmptyResponseRetry 只在已有工具结果时强制收敛。首次工具选择轮如果
-// 返回空消息，仍保留原工具集并失败关闭，避免模型跳过用户要求的真实执行。
-func prepareEmptyResponseRetry(request Request) Request {
+// prepareEmptyResponseRetry 只在当前 Run 已成功执行真实工具时强制收敛。
+// Loader、失败结果和历史消息都不是本轮已经取得事实证据的证明。
+func prepareEmptyResponseRetry(request Request, hasCurrentRealToolResult bool) Request {
 	request.OnTextDelta = nil
-	if !containsToolResult(request.Messages) {
+	if !hasCurrentRealToolResult {
 		return request
 	}
 	request.Tools = nil
@@ -354,15 +360,6 @@ func prepareEmptyResponseRetry(request Request) Request {
 	request.Messages = append(append([]Message(nil), request.Messages...), reminder)
 	request.NewMessages = append(append([]Message(nil), request.NewMessages...), reminder)
 	return request
-}
-
-func containsToolResult(messages []Message) bool {
-	for _, message := range messages {
-		if message.Role == RoleTool {
-			return true
-		}
-	}
-	return false
 }
 
 func nonLoaderTools(tools []ToolSpec) []ToolSpec {
@@ -506,6 +503,11 @@ func retryableModelError(err error) bool {
 	}
 	var network net.Error
 	return errors.As(err, &network) && (network.Timeout() || network.Temporary())
+}
+
+func retryWithoutStreaming(err error) bool {
+	var failure *ModelError
+	return errors.As(err, &failure) && failure.RetryWithoutStreaming
 }
 
 func modelRetryDelay(err error, attempt int) time.Duration {

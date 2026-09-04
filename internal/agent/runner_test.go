@@ -213,6 +213,34 @@ func TestRunnerDoesNotRetryDeterministicProviderError(t *testing.T) {
 	}
 }
 
+func TestRunnerRetriesStreamToolValidationErrorWithoutChangingTools(t *testing.T) {
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Exchange: Exchange{StatusCode: 400}}, &ModelError{
+				StatusCode: 400, Message: "tool validation failed", RetryWithoutStreaming: true,
+			}
+		}
+		if request.OnTextDelta != nil || request.ToolChoice.Mode != ToolChoiceAuto || len(request.Tools) != 1 || request.Tools[0].Name != "shell" {
+			t.Fatalf("流式工具校验错误重试应只关闭流式: %+v", request)
+		}
+		return Response{Message: Message{Content: "已恢复"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "shell"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return "ok", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "查询"}}, OnTextDelta: func(string) {},
+	})
+	if err != nil || result.Answer != "已恢复" || calls != 2 {
+		t.Fatalf("流式工具校验错误恢复异常: calls=%d result=%+v err=%v", calls, result, err)
+	}
+}
+
 func TestRunnerKeepsToolsAndFailsClosedAfterEmptyCompatibilityResponses(t *testing.T) {
 	calls := 0
 	var requests []Request
@@ -246,6 +274,81 @@ func TestRunnerKeepsToolsAndFailsClosedAfterEmptyCompatibilityResponses(t *testi
 	}
 	if len(events) != 4 || events[1].Err == nil || events[3].Err == nil {
 		t.Fatalf("空响应 Trace 不完整: %+v", events)
+	}
+}
+
+func TestRunnerDoesNotConvergeAfterLoaderOnlyResult(t *testing.T) {
+	calls := 0
+	var runner *Runner
+	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		switch calls {
+		case 1:
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "load-1", Name: "load_tools", Arguments: json.RawMessage(`{}`)}}}}, nil
+		case 2:
+			if request.ToolChoice.Mode != ToolChoiceAuto || len(request.Tools) != 1 || request.Tools[0].Name != "shell" || request.OnTextDelta == nil {
+				t.Fatalf("Loader 后首次真实工具请求应使用 auto 和流式: %+v", request)
+			}
+			return Response{Exchange: Exchange{Model: "fixture"}}, ErrEmptyModelResponse
+		case 3:
+			if request.ToolChoice.Mode != ToolChoiceAuto || len(request.Tools) != 1 || request.Tools[0].Name != "shell" || request.OnTextDelta != nil {
+				t.Fatalf("Loader-only 空响应重试必须保留真实工具和 auto: %+v", request)
+			}
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "shell-1", Name: "shell", Arguments: json.RawMessage(`{"command":"git --version"}`)}}}}, nil
+		default:
+			return Response{Message: Message{Content: "git version 2.51.0"}}, nil
+		}
+	})
+	loader := Tool{
+		Spec: ToolSpec{Name: "load_tools", Loader: true},
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			return `{"ok":true}`, runner.AddTools([]Tool{{
+				Spec: ToolSpec{Name: "shell"},
+				Run:  func(context.Context, json.RawMessage) (string, error) { return `{"stdout":"git version 2.51.0"}`, nil },
+			}})
+		},
+	}
+	var err error
+	runner, err = NewRunner(model, "fixture", []Tool{loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "安装 git 了吗"}}, OnTextDelta: func(string) {},
+	})
+	if err != nil || result.Answer != "git version 2.51.0" || calls != 4 {
+		t.Fatalf("Loader-only 空响应恢复异常: calls=%d result=%+v err=%v", calls, result, err)
+	}
+}
+
+func TestRunnerIgnoresHistoricalToolResultsWhenRetryingEmptyResponse(t *testing.T) {
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Exchange: Exchange{Model: "fixture"}}, ErrEmptyModelResponse
+		}
+		if request.OnTextDelta != nil || len(request.Tools) != 1 || request.Tools[0].Name != "shell" || request.ToolChoice.Mode != ToolChoiceAuto {
+			t.Fatalf("旧轮次工具结果不能让本轮重试进入 none: %+v", request)
+		}
+		return Response{Message: Message{Content: "本轮回答"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "shell"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return "ok", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages: []Message{
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "old-shell", Name: "shell", Arguments: json.RawMessage(`{}`)}}},
+			{Role: RoleTool, ToolCallID: "old-shell", Name: "shell", Content: "old result"},
+			{Role: RoleUser, Content: "新问题"},
+		},
+		OnTextDelta: func(string) {},
+	})
+	if err != nil || result.Answer != "本轮回答" || calls != 2 {
+		t.Fatalf("历史工具结果隔离异常: calls=%d result=%+v err=%v", calls, result, err)
 	}
 }
 
@@ -378,7 +481,7 @@ func TestRunnerCanAddToolsAfterCreation(t *testing.T) {
 	}
 }
 
-func TestRunnerRequiresRealToolAfterLoader(t *testing.T) {
+func TestRunnerValidatesRealToolAfterLoaderWithAuto(t *testing.T) {
 	modelCalls := 0
 	var runner *Runner
 	model := modelFunc(func(_ context.Context, request Request) (Response, error) {
@@ -387,8 +490,8 @@ func TestRunnerRequiresRealToolAfterLoader(t *testing.T) {
 		case 1:
 			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "load-1", Name: "load_tools", Arguments: json.RawMessage(`{}`)}}}}, nil
 		case 2:
-			if request.ToolChoice.Mode != ToolChoiceRequired || len(request.Tools) != 1 || request.Tools[0].Name != "current_time" {
-				t.Fatalf("Loader 后必须隐藏 Loader 并要求调用真实工具: choice=%+v tools=%+v", request.ToolChoice, request.Tools)
+			if request.ToolChoice.Mode != ToolChoiceAuto || len(request.Tools) != 1 || request.Tools[0].Name != "current_time" {
+				t.Fatalf("Loader 后必须隐藏 Loader，使用 auto 并由 Runner 验证真实调用: choice=%+v tools=%+v", request.ToolChoice, request.Tools)
 			}
 			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "time-1", Name: "current_time", Arguments: json.RawMessage(`{}`)}}}}, nil
 		default:

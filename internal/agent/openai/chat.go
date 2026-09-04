@@ -106,8 +106,15 @@ type chatStreamDelta struct {
 }
 
 type chatStreamChunk struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	Error *struct {
+		Message          string `json:"message"`
+		Type             string `json:"type"`
+		Code             string `json:"code"`
+		FailedGeneration string `json:"failed_generation"`
+		StatusCode       int    `json:"status_code"`
+	} `json:"error,omitempty"`
 	Choices []struct {
 		Delta        chatStreamDelta `json:"delta"`
 		FinishReason string          `json:"finish_reason"`
@@ -250,6 +257,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	responseID, model := "", payload.Model
 	finishReason := ""
 	usage := chatUsage{}
+	var streamFailure error
 	scanner := bufio.NewScanner(httpResponse.Body)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -275,6 +283,24 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		var chunk chatStreamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			return core.Response{Exchange: exchange}, err
+		}
+		if chunk.Error != nil {
+			statusCode := chunk.Error.StatusCode
+			if statusCode <= 0 {
+				statusCode = httpResponse.StatusCode
+				if statusCode < 400 {
+					statusCode = http.StatusInternalServerError
+				}
+			}
+			exchange.StatusCode = statusCode
+			streamFailure = &core.ModelError{
+				StatusCode: statusCode,
+				Message:    fmt.Sprintf("模型返回 %d: %s", statusCode, strings.TrimSpace(string(data))),
+				// Groq 等兼容服务可能把一次模型生成的工具格式错误放进 SSE
+				// 尾部。关闭流式并保留原工具重试一次，常可避开通道标记泄漏。
+				RetryWithoutStreaming: chunk.Error.Code == "tool_use_failed",
+			}
+			break
 		}
 		if chunk.ID != "" {
 			responseID = chunk.ID
@@ -362,10 +388,14 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	exchange.Duration = time.Since(startedAt)
 	exchange.Model = model
 	exchange.Usage = normalizedUsage
-	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
-		return core.Response{ID: responseID, Usage: normalizedUsage, Exchange: exchange}, core.ErrEmptyModelResponse
+	result := core.Response{ID: responseID, Message: message, Usage: normalizedUsage, Exchange: exchange}
+	if streamFailure != nil {
+		return result, streamFailure
 	}
-	return core.Response{ID: responseID, Message: message, Usage: normalizedUsage, Exchange: exchange}, nil
+	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
+		return result, core.ErrEmptyModelResponse
+	}
+	return result, nil
 }
 
 func argumentFragment(raw json.RawMessage) string {
