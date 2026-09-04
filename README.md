@@ -32,7 +32,7 @@
 
 ### 内置 Skills
 
-- **分析与研发**：`problem-analysis`、`code-review`、`api-design`
+- **理解与研发**：`project-onboarding`、`problem-analysis`、`code-review`、`api-design`
 - **测试与验证**：`test-and-e2e`、`browser-validation`
 - **运维与交付**：`incident-rca`、`release-engineering`、`docs-maintenance`
 - **协作与研究**：`git-worktree-workflow`、`web-research`
@@ -46,7 +46,7 @@
 | Playwright | 浏览器复现与 E2E 验证 | Node.js 20+，页面一键安装 |
 | OpenAI Docs | OpenAI API 与 Codex 官方文档 | 可直接连接 |
 
-文件、Shell、网页、时间、天气和计算由 EasyAgent Runtime 内置；Codex Runtime 保留自己的原生工具。不会默认接入与研发交付无关的办公类 MCP。
+EasyAgent Runtime 首轮提供当前时间、Shell、只读文件检索和网页检索，文件写入、Skill、天气与计算按需加载；Codex Runtime 保留自己的原生工具。默认 MCP 聚焦代码、依赖文档和浏览器验证，不接入与研发交付无关的办公服务。
 
 <p align="center">
   <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />

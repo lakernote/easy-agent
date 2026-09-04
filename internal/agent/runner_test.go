@@ -48,6 +48,41 @@ func TestRunnerFeedsToolResultBackAsToolMessage(t *testing.T) {
 	}
 }
 
+func TestRunnerAttachesActivityMetadataToToolCalls(t *testing.T) {
+	calls := 0
+	var saved []Message
+	runner, err := NewRunner(modelFunc(func(_ context.Context, _ Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "mcp-1", Name: "mcp__context7__query-docs", Arguments: json.RawMessage(`{"query":"Go"}`)}}}}, nil
+		}
+		return Response{Message: Message{Content: "完成"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "mcp__context7__query-docs", ActivityKind: "mcp", ActivitySource: "context7", DisplayName: "query-docs"},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return "docs", nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "查文档"}},
+		OnTurnMessages: func(messages []Message) error {
+			saved = append(saved, messages...)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) < 1 || len(saved[0].ToolCalls) != 1 {
+		t.Fatalf("工具调用没有保存: %+v", saved)
+	}
+	call := saved[0].ToolCalls[0]
+	if call.ActivityKind != "mcp" || call.ActivitySource != "context7" || call.DisplayName != "query-docs" {
+		t.Fatalf("能力元数据丢失: %+v", call)
+	}
+}
+
 func TestRunnerForcesUserSelectedTool(t *testing.T) {
 	requests := make([]Request, 0, 2)
 	toolCalls := 0

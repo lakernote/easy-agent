@@ -65,6 +65,13 @@ func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
 		tool := item.tool
 		tool.Spec.Group = item.group
 		tool.Spec.GroupDescription = groupDescriptions[item.group]
+		tool.Spec.ActivityKind = "tool"
+		tool.Spec.ActivitySource = "builtin"
+		tool.Spec.DisplayName = tool.Spec.Name
+		if tool.Spec.Name == "load_skill" {
+			tool.Spec.ActivityKind = "skill"
+			tool.Spec.DisplayName = "Skill"
+		}
 		result = append(result, tool)
 	}
 	return result

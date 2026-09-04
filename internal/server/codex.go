@@ -48,9 +48,17 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	if err != nil {
 		return err
 	}
+	selectedSkillsForTurn := selectedCodexSkills(session.Messages, skillRefs)
+	selectedSkillNamesForTurn := make([]string, 0, len(selectedSkillsForTurn))
+	for _, skill := range selectedSkillsForTurn {
+		selectedSkillNamesForTurn = append(selectedSkillNamesForTurn, skill.Name)
+	}
 	server.tasks.setProgress(session.ID, "Codex · 启动 app-server")
 	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_start", Turn: session.UserTurnCount, Status: "started", Name: settings.Model, Detail: "由 Codex app-server 接管工具、Skill、沙箱和会话历史", CreatedAt: startedAt}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
+	}
+	if err := server.appendSelectedCapabilityEvents(session.ID, session.UserTurnCount, selectedSkillNamesForTurn, selectedMCPIDs(session.Messages)); err != nil {
+		return err
 	}
 	turnTimeoutSeconds := settings.TurnTimeoutSeconds
 	if turnTimeoutSeconds <= 0 {
@@ -62,7 +70,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		Path: status.Path, Workspace: workspace, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout: time.Duration(turnTimeoutSeconds) * time.Second,
 		Env:     server.codexEnvironmentWith(capabilityEnv),
-		Skills:  selectedCodexSkills(session.Messages, skillRefs),
+		Skills:  selectedSkillsForTurn,
 		OnDelta: func(delta string) { server.tasks.appendPartial(session.ID, delta) },
 		OnUsage: func(value codexruntime.Usage) {
 			server.tasks.setUsage(session.ID, store.Usage{
@@ -78,14 +86,14 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 			// persisting every one of them makes the trace noisy and grows SQLite
 			// much faster than the user can inspect it. Keep a responsive status
 			// while sampling repeated progress events.
-			if event.Kind == "codex_progress" && event.Name == lastProgressName && !lastProgressAt.IsZero() && time.Since(lastProgressAt) < time.Second {
+			if event.Kind == "codex_progress" && event.Name != "plan" && event.Name == lastProgressName && !lastProgressAt.IsZero() && time.Since(lastProgressAt) < time.Second {
 				return
 			}
 			if event.Kind == "codex_progress" {
 				lastProgressAt = time.Now()
 				lastProgressName = event.Name
 			}
-			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
+			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, ActivityID: event.ActivityID, ActivityKind: event.ActivityKind, ActivitySource: event.ActivitySource, DisplayName: event.DisplayName, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
 		},
 		OnServerRequest: func(request codexruntime.ServerRequest) (any, error) {
 			return server.awaitCodexRequest(ctx, session.ID, request)

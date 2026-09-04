@@ -31,9 +31,12 @@ type SkillOverride struct {
 }
 
 type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Arguments      string `json:"arguments"`
+	ActivityKind   string `json:"activityKind,omitempty"`
+	ActivitySource string `json:"activitySource,omitempty"`
+	DisplayName    string `json:"displayName,omitempty"`
 }
 
 // Attachment 是一条用户消息携带的文件或图片。Data 只在 Agent 运行和附件
@@ -80,6 +83,10 @@ type Event struct {
 	Step                int       `json:"step"`
 	Attempt             int       `json:"attempt,omitempty"`
 	Name                string    `json:"name,omitempty"`
+	ActivityID          string    `json:"activityId,omitempty"`
+	ActivityKind        string    `json:"activityKind,omitempty"`
+	ActivitySource      string    `json:"activitySource,omitempty"`
+	DisplayName         string    `json:"displayName,omitempty"`
 	Status              string    `json:"status"`
 	Detail              string    `json:"detail,omitempty"`
 	Input               string    `json:"input,omitempty"`

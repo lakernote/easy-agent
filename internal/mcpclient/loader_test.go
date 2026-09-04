@@ -41,6 +41,12 @@ func TestLoaderSearchesAndRegistersOnlyMatchingTools(t *testing.T) {
 	if err != nil || len(direct) != 2 || direct[0].Spec.Name != "mcp__demo__greet" || direct[1].Spec.Name != "mcp__demo__read_issue" {
 		t.Fatalf("显式选择的小 MCP 应直接预加载且稳定排序: tools=%+v err=%v", direct, err)
 	}
+	if direct[0].Spec.ActivityKind != "mcp" || direct[0].Spec.ActivitySource != "demo" || direct[0].Spec.DisplayName != "greet" {
+		t.Fatalf("MCP 展示身份没有保留: %+v", direct[0].Spec)
+	}
+	if spec := loader.Tool().Spec; spec.ActivityKind != "mcp_loader" || spec.Loader != true {
+		t.Fatalf("MCP Loader 没有标记为能力编排: %+v", spec)
+	}
 	if len(registered) != 0 {
 		t.Fatal("search_mcp_tools 调用前不应注册远端工具")
 	}

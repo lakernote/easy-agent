@@ -29,6 +29,11 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	for _, skill := range skills {
 		skillMeta = append(skillMeta, prompt.SkillMeta{Name: skill.Name, Description: skill.Description})
 	}
+	selectedSkillsForTurn := selectedSkills(session.Messages, catalog)
+	selectedSkillNamesForTurn := make([]string, 0, len(selectedSkillsForTurn))
+	for _, skill := range selectedSkillsForTurn {
+		selectedSkillNamesForTurn = append(selectedSkillNamesForTurn, skill.Name)
+	}
 
 	toolCatalog := builtintools.Catalog(runEnvironment, catalog)
 	toolLoader, err := builtintools.NewLoader(toolCatalog)
@@ -47,7 +52,8 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	}
 	mcpLoader := mcpclient.NewLoader(runEnvironment, mcpClientConfigs(mcps))
 	defer mcpLoader.Close()
-	selectedMCPTools, err := mcpLoader.Preload(ctx, selectedMCPIDs(session.Messages))
+	selectedMCPIDsForTurn := selectedMCPIDs(session.Messages)
+	selectedMCPTools, err := mcpLoader.Preload(ctx, selectedMCPIDsForTurn)
 	if err != nil {
 		return err
 	}
@@ -73,8 +79,11 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		return err
 	}
 	systemPrompt := prompt.Render(prompt.Context{
-		Now: time.Now(), Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkills(session.Messages, catalog), SelectedTools: selectedToolNamesForTurn,
+		Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkillsForTurn, SelectedTools: selectedToolNamesForTurn,
 	})
+	if err := server.appendSelectedCapabilityEvents(id, turn, selectedSkillNamesForTurn, selectedMCPIDsForTurn); err != nil {
+		return err
+	}
 	coreMessages := coreMessagesForSession(session, systemPrompt)
 	// 会话跨轮时，保持历史 function call 与当前 tools Schema 一致。
 	// Preload 只会恢复仍在内置目录中的工具，且会自动去重。

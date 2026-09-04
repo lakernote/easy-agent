@@ -11,7 +11,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/agent"
 )
 
-var coreToolNames = []string{"calculate", "current_time", "shell", "weather"}
+var coreToolNames = []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch"}
 
 // Loader 只把一个精简的工具组目录放进首轮请求。模型确认需要某类能力后，调用
 // load_tools 按组加载真实 Tool Schema；下一轮即可调用这些工具。
@@ -82,8 +82,8 @@ func (loader *Loader) Preload(names []string) []agent.Tool {
 	return result
 }
 
-// PreloadCore 常驻少量高频工具。时间、天气、计算和 Shell 可直接调用；
-// 文件、网页和 Skill 等 Schema 较大的能力仍按需加载。
+// PreloadCore 常驻研发、测试和运维任务最高频的当前时间、Shell、只读文件检索和网页工具。
+// 写文件、Skill、天气和计算等低频能力仍按需加载，兼顾首轮执行成功率与 Token。
 func (loader *Loader) PreloadCore() []agent.Tool {
 	return loader.Preload(coreToolNames)
 }
@@ -103,9 +103,12 @@ func (loader *Loader) Tool() agent.Tool {
 	}
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name:        "load_tools",
-			Description: "加载当前任务需要但 request.tools 中尚未提供的内置能力组，下一轮再调用组内真实工具。已在 request.tools 中的工具应直接调用，不要重复加载；groups 中的值只是能力组，不是函数名。必须发起原生 function call，不能在正文中输出组名或能力标签。能力组：" + strings.Join(directory, "；") + "。",
-			Loader:      true,
+			Name:           "load_tools",
+			ActivityKind:   "loader",
+			ActivitySource: "builtin",
+			DisplayName:    "内置能力",
+			Description:    "加载当前任务需要但 request.tools 中尚未提供的内置能力组，下一轮再调用组内真实工具。已在 request.tools 中的工具应直接调用，不要重复加载；groups 中的值只是能力组，不是函数名。必须发起原生 function call，不能在正文中输出组名或能力标签。能力组：" + strings.Join(directory, "；") + "。",
+			Loader:         true,
 			Parameters: objectSchema(map[string]any{
 				"groups": map[string]any{
 					"type": "array", "description": "只选择当前任务需要的最少能力组",

@@ -91,15 +91,10 @@ func (server *Server) loadLiveSession(ctx context.Context, id string) (store.Ses
 	decorateContext(&value, settings)
 	value.PartialOutput = server.tasks.partial(value.ID)
 	value.RunProgress = server.tasks.progress(value.ID)
-	if live := server.tasks.usage(value.ID); live.ModelCalls > 0 || live.InputTokens > 0 || live.OutputTokens > 0 || live.TotalTokens > 0 {
-		value.Usage.InputTokens += live.InputTokens
-		value.Usage.OutputTokens += live.OutputTokens
-		value.Usage.CachedTokens += live.CachedTokens
-		value.Usage.CacheWriteTokens += live.CacheWriteTokens
-		value.Usage.TotalTokens += live.TotalTokens
-		value.Usage.ModelCalls += live.ModelCalls
-		value.Usage.CacheReported = value.Usage.CacheReported || live.CacheReported
-		value.Usage.CacheInputTokens += live.InputTokens
+	// 任务结束后最终 Usage 已写入 SQLite；此时不能再叠加尚未来得及清理的
+	// 进程内快照，否则完成瞬间页面会短暂显示双倍统计。
+	if live := server.tasks.usage(value.ID); (value.Status == "running" || value.Status == "queued") && (live.ModelCalls > 0 || live.ToolCalls > 0 || live.TotalTokens > 0) {
+		addStoreUsage(&value.Usage, live)
 		if live.ContextWindowTokens > 0 {
 			value.Usage.ContextWindowTokens = live.ContextWindowTokens
 			value.Context.ContextWindowTokens = live.ContextWindowTokens

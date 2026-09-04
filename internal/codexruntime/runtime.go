@@ -171,13 +171,17 @@ type Usage struct {
 }
 
 type Event struct {
-	Kind     string
-	Name     string
-	Status   string
-	Detail   string
-	Input    string
-	Output   string
-	Duration time.Duration
+	Kind           string
+	Name           string
+	Status         string
+	Detail         string
+	Input          string
+	Output         string
+	ActivityID     string
+	ActivityKind   string
+	ActivitySource string
+	DisplayName    string
+	Duration       time.Duration
 }
 
 type eventTimers struct {
@@ -618,7 +622,8 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 	if reported := itemDuration(payload.Item); reported > 0 {
 		duration = reported
 	}
-	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), Duration: duration})
+	activityKind, activitySource, displayName := itemActivity(payload.Item)
+	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), ActivityID: itemID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName, Duration: duration})
 }
 
 // progressEvent maps high-volume app-server notifications into bounded Trace
@@ -626,6 +631,7 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 // observable even before EasyAgent gets a dedicated UI renderer for them.
 func progressEvent(message rpcMessage) (Event, bool) {
 	progressNames := map[string]string{
+		"turn/plan/updated":                 "plan",
 		"item/plan/delta":                   "plan",
 		"item/commandExecution/outputDelta": "commandExecution",
 		"item/fileChange/outputDelta":       "fileChange",
@@ -644,8 +650,17 @@ func progressEvent(message rpcMessage) (Event, bool) {
 	if json.Unmarshal(message.Params, &payload) != nil {
 		return Event{}, false
 	}
+	if message.Method == "turn/plan/updated" {
+		detail, displayName := planProgressSummary(payload)
+		return Event{
+			Kind: "codex_progress", Name: "plan", Status: "updated", Detail: detail,
+			Output:     marshalItemValue(map[string]any{"explanation": payload["explanation"], "plan": payload["plan"]}),
+			ActivityID: firstString(payload, "turnId"), ActivityKind: "plan", ActivitySource: "codex", DisplayName: displayName,
+		}, true
+	}
 	detail := firstString(payload, "delta", "outputDelta", "text", "status", "message")
 	output := firstString(payload, "patch", "output", "delta", "outputDelta")
+	input := ""
 	status := "progress"
 	if message.Method == "thread/status/changed" {
 		status = "updated"
@@ -653,7 +668,76 @@ func progressEvent(message rpcMessage) (Event, bool) {
 	if message.Method == "serverRequest/resolved" {
 		status = "resolved"
 	}
-	return Event{Kind: "codex_progress", Name: name, Status: status, Detail: detail, Output: output}, true
+	activityID := firstString(payload, "itemId")
+	activityKind := ""
+	activitySource := ""
+	displayName := ""
+	if name == "mcpToolCall" {
+		activityKind = "mcp"
+	} else if name == "commandExecution" || name == "fileChange" {
+		activityKind, activitySource = "tool", "codex"
+		if name == "commandExecution" {
+			displayName = "Shell"
+		} else {
+			displayName = "文件修改"
+			if changes, exists := payload["changes"]; exists {
+				input = marshalItemValue(changes)
+			}
+		}
+	}
+	return Event{Kind: "codex_progress", Name: name, Status: status, Detail: detail, Input: input, Output: output, ActivityID: activityID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName}, true
+}
+
+func planProgressSummary(payload map[string]any) (string, string) {
+	items, _ := payload["plan"].([]any)
+	if len(items) == 0 {
+		return "更新计划", "计划"
+	}
+	current := len(items) - 1
+	for index, raw := range items {
+		item, _ := raw.(map[string]any)
+		if status, _ := item["status"].(string); status == "inProgress" {
+			current = index
+			break
+		}
+		if status, _ := item["status"].(string); status == "pending" {
+			current = index
+			break
+		}
+	}
+	item, _ := items[current].(map[string]any)
+	step, _ := item["step"].(string)
+	step = truncateUTF8(strings.TrimSpace(step), maxProgressValueBytes/2)
+	if step == "" {
+		step = "处理任务"
+	}
+	return fmt.Sprintf("第 %d/%d 步 · %s", current+1, len(items), step), step
+}
+
+func itemActivity(item map[string]any) (kind, source, displayName string) {
+	typeName, _ := item["type"].(string)
+	switch typeName {
+	case "mcpToolCall":
+		source, _ = item["server"].(string)
+		displayName, _ = item["tool"].(string)
+		return "mcp", strings.TrimSpace(source), strings.TrimSpace(displayName)
+	case "commandExecution":
+		return "tool", "codex", "Shell"
+	case "fileChange":
+		return "tool", "codex", "文件修改"
+	case "webSearch":
+		return "tool", "codex", "Web Search"
+	case "imageView":
+		return "tool", "codex", "图片查看"
+	case "dynamicToolCall":
+		displayName, _ = item["tool"].(string)
+		if strings.TrimSpace(displayName) == "" {
+			displayName, _ = item["name"].(string)
+		}
+		return "tool", "codex", strings.TrimSpace(displayName)
+	default:
+		return "", "", ""
+	}
 }
 
 func firstString(value map[string]any, keys ...string) string {
@@ -741,7 +825,14 @@ func itemDetail(item map[string]any) string {
 			return actionType
 		}
 	}
-	for _, key := range []string{"reason", "cwd", "phase", "serverName"} {
+	if item["type"] == "mcpToolCall" {
+		server, _ := item["server"].(string)
+		tool, _ := item["tool"].(string)
+		if server != "" || tool != "" {
+			return strings.Trim(strings.TrimSpace(server)+" / "+strings.TrimSpace(tool), " / ")
+		}
+	}
+	for _, key := range []string{"reason", "cwd", "phase", "serverName", "server"} {
 		if value, ok := item[key].(string); ok && strings.TrimSpace(value) != "" {
 			return value
 		}

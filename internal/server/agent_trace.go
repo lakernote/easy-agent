@@ -24,6 +24,10 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 		if event.ToolCall != nil {
 			value.Name = event.ToolCall.Name
 			value.Input = string(event.ToolCall.Arguments)
+			value.ActivityID = event.ToolCall.ID
+			value.ActivityKind = event.ToolCall.ActivityKind
+			value.ActivitySource = event.ToolCall.ActivitySource
+			value.DisplayName = event.ToolCall.DisplayName
 		}
 		if event.Kind == agent.EventModelStart || event.Kind == agent.EventToolStart {
 			// start 事件是一条已经发生的事实，不代表页面轮询时仍然运行。
@@ -52,8 +56,10 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 			value.HistoryMode, value.RequestMessages, value.ToolDefinitions = modelRequestShape(event.Exchange)
 		}
 		if event.Kind == agent.EventToolEnd {
-			usage.ToolCalls++
-			usage.ToolDurationMS += event.Duration.Milliseconds()
+			if isBusinessToolActivity(value.ActivityKind, value.Name) {
+				usage.ToolCalls++
+				usage.ToolDurationMS += event.Duration.Milliseconds()
+			}
 			value.Output = event.Output
 		}
 		if event.Err != nil {
@@ -66,6 +72,28 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 		if err := server.store.AppendEvent(id, value); err != nil && onTraceError != nil {
 			onTraceError(err)
 		}
+		if event.Kind == agent.EventModelEnd || event.Kind == agent.EventToolEnd {
+			// SQLite 只在整轮结束时保存累计 Usage；运行中的指标由 taskManager
+			// 提供。每个完成事件后同步一次，避免 Trace 已经出现而顶部仍显示 0。
+			server.tasks.setUsage(id, *usage)
+		}
+	}
+}
+
+// Loader、Skill 注入和 MCP 工具发现属于能力编排，不是用户关心的业务工具
+// 调用。它们仍完整保留在 Trace 中，但不抬高首页和用量页的 Tool 指标。
+func isBusinessToolActivity(kind, name string) bool {
+	switch strings.TrimSpace(kind) {
+	case "loader", "skill", "mcp_loader", "mcp_selected":
+		return false
+	case "tool", "mcp":
+		return true
+	}
+	switch strings.TrimSpace(name) {
+	case "load_tools", "load_skill", "search_mcp_tools":
+		return false
+	default:
+		return true
 	}
 }
 

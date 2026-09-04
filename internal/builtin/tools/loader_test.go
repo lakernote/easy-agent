@@ -38,18 +38,24 @@ func TestLoaderRegistersOnlySelectedTools(t *testing.T) {
 }
 
 func TestLoaderPreloadsCoreTools(t *testing.T) {
-	loader, err := NewLoader([]agent.Tool{
-		{Spec: agent.ToolSpec{Name: "current_time", Group: "information", Description: "读取时间", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
-		{Spec: agent.ToolSpec{Name: "calculate", Group: "execution", Description: "计算", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
-		{Spec: agent.ToolSpec{Name: "shell", Group: "execution", Description: "执行命令", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
-		{Spec: agent.ToolSpec{Name: "weather", Group: "information", Description: "查询天气", Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
-	})
+	names := []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch", "weather"}
+	expected := []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch"}
+	catalog := make([]agent.Tool, 0, len(names))
+	for _, name := range names {
+		catalog = append(catalog, agent.Tool{Spec: agent.ToolSpec{Name: name, Group: "test", Description: name, Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }})
+	}
+	loader, err := NewLoader(catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tools := loader.PreloadCore()
-	if len(tools) != 4 || tools[0].Spec.Name != "calculate" || tools[1].Spec.Name != "current_time" || tools[2].Spec.Name != "shell" || tools[3].Spec.Name != "weather" {
+	if len(tools) != len(expected) {
 		t.Fatalf("核心工具应直接预加载且稳定排序: tools=%+v", tools)
+	}
+	for index, name := range expected {
+		if tools[index].Spec.Name != name {
+			t.Fatalf("核心工具顺序错误: got %q at %d, want %q", tools[index].Spec.Name, index, name)
+		}
 	}
 }
 

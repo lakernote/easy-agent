@@ -72,9 +72,12 @@ type Attachment struct {
 // ToolCall 是模型希望运行的一次函数调用。Arguments 保留原始 JSON，直到真正
 // 执行工具时才解析，既避免丢失字段，也便于 Trace 展示模型的原始输入。
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments json.RawMessage
+	ID             string
+	Name           string
+	Arguments      json.RawMessage
+	ActivityKind   string
+	ActivitySource string
+	DisplayName    string
 }
 
 // ToolSpec 是暴露给模型的工具契约。Parameters 使用 JSON Schema。
@@ -82,6 +85,12 @@ type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
+	// ActivityKind、ActivitySource 和 DisplayName 只用于 Trace 与页面展示，
+	// 不发送给 Provider。它们让内置 Tool、Loader、Skill 和 MCP 在两个
+	// Runtime 中使用同一套可观测语义。
+	ActivityKind   string
+	ActivitySource string
+	DisplayName    string
 	// Group 和 GroupDescription 是 EasyAgent 渐进加载用的本地元数据。
 	// Provider 适配器只编码上面三个标准字段，因此它们不会污染 Function Schema。
 	Group            string

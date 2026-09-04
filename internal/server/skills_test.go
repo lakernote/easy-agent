@@ -8,6 +8,7 @@ import (
 
 func TestCoreSkillsFollowDevelopmentWorkflow(t *testing.T) {
 	want := []string{
+		"project-onboarding",
 		"problem-analysis",
 		"code-review",
 		"api-design",

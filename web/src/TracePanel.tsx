@@ -24,11 +24,69 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
 export function TraceRow({ event }: { event: TraceEvent }) {
   const isModelResult = event.kind === 'model_end' || event.kind === 'compaction_end' || event.kind === 'codex_end' || event.kind === 'codex_usage'
   const showsUsage = event.kind === 'model_end' || event.kind === 'compaction_end' || event.kind === 'codex_usage'
-  const title = event.kind === 'model_start' ? '模型请求开始' : event.kind === 'model_end' ? `模型响应 · ${event.name || '模型'}` : event.kind === 'compaction_start' ? '准备压缩上下文' : event.kind === 'compaction_end' ? `上下文检查点 · ${event.name || '模型'}` : event.kind === 'codex_start' ? 'Codex Runtime 开始' : event.kind === 'codex_end' ? `Codex Runtime 响应 · ${event.name || 'Codex'}` : event.kind === 'codex_usage' ? 'Codex · 本轮用量' : event.kind === 'codex_turn' ? `Codex Turn · ${event.status === 'started' ? '开始' : '完成'}` : event.kind === 'tool_start' ? `工具开始 · ${event.name}` : event.kind === 'tool_end' ? `工具结果 · ${event.name}` : event.kind === 'codex_item' ? `Codex · ${codexItemLabel(event.name || '')}` : event.kind === 'codex_progress' ? `Codex · ${codexProgressLabel(event.name || '')}` : `MCP · ${event.name}`
+  const title = traceEventTitle(event)
   const cacheRate = event.cacheReported && event.inputTokens ? Math.round((event.cachedTokens || 0) / event.inputTokens * 100) : 0
   const tokenMissing = event.status === 'error' && !event.totalTokens && !event.inputTokens && !event.outputTokens
   const location = `${event.turn ? `第 ${event.turn} 轮 · ` : ''}${event.step ? `第 ${event.step} 步` : '独立阶段'}${event.attempt ? ` · 尝试 ${event.attempt}` : ''}`
-  return <details className={`trace-row ${event.status}`} open={isModelResult && event.status === 'error'}><summary><span className="trace-node" /><div><strong>{title}</strong><small>{location} {event.statusCode ? `· HTTP ${event.statusCode} ` : ''}{eventDurationLabel(event)} {event.totalTokens ? `· ${event.totalTokens} tokens` : tokenMissing ? '· Token 未上报' : ''}{showsUsage ? ` · ${event.cacheReported ? `缓存 ${cacheRate}%` : '缓存未上报'}` : ''}</small></div><em>{eventStatusLabel(event.status)}</em></summary>{event.detail && <p className={event.status === 'error' ? 'event-error' : 'event-detail'}>{event.detail}</p>}{showsUsage && <div className="event-usage"><span>输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>历史 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span></div>}{event.input && <div><p className="trace-label">{isModelResult ? '模型请求 · 实际发送' : '工具输入'}</p><Payload value={event.input} /></div>}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <div><p className="trace-label">工具响应 · 原始返回</p><Payload value={event.output} /></div>)}</details>
+  return <details className={`trace-row ${event.status} ${event.activityKind || ''}`} open={isModelResult && event.status === 'error'}><summary><span className="trace-node" /><div><strong>{title}</strong><small>{location} {event.statusCode ? `· HTTP ${event.statusCode} ` : ''}{eventDurationLabel(event)} {event.totalTokens ? `· ${event.totalTokens} tokens` : tokenMissing ? '· Token 未上报' : ''}{showsUsage ? ` · ${event.cacheReported ? `缓存 ${cacheRate}%` : '缓存未上报'}` : ''}</small></div><em>{eventStatusLabel(event.status)}</em></summary>{event.detail && <p className={event.status === 'error' ? 'event-error' : 'event-detail'}>{event.detail}</p>}{showsUsage && <div className="event-usage"><span>输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>历史 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span></div>}{event.input && <div><p className="trace-label">{isModelResult ? '模型请求 · 实际发送' : '能力输入'}</p><Payload value={event.input} /></div>}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <div><p className="trace-label">能力响应 · 原始返回</p><Payload value={event.output} /></div>)}</details>
+}
+
+function traceEventTitle(event: TraceEvent) {
+  if (event.kind === 'model_start') return '模型请求开始'
+  if (event.kind === 'model_end') return `模型响应 · ${event.name || '模型'}`
+  if (event.kind === 'compaction_start') return '准备压缩上下文'
+  if (event.kind === 'compaction_end') return `上下文检查点 · ${event.name || '模型'}`
+  if (event.kind === 'codex_start') return 'Codex Runtime 开始'
+  if (event.kind === 'codex_end') return `Codex Runtime 响应 · ${event.name || 'Codex'}`
+  if (event.kind === 'codex_usage') return 'Codex · 本轮用量'
+  if (event.kind === 'codex_turn') return `Codex Turn · ${event.status === 'started' ? '开始' : '完成'}`
+  if (event.kind === 'capability') {
+    if (event.activityKind === 'skill') return `应用 Skill · ${event.displayName || event.name}`
+    return `选择 MCP · ${formatActivitySource(event.activitySource || event.name || 'MCP')}`
+  }
+  if (event.kind === 'tool_start' || event.kind === 'tool_end') return toolEventTitle(event)
+  if (event.kind === 'codex_item') {
+    if (event.activityKind === 'mcp' || event.name === 'mcpToolCall') return `Codex · MCP · ${activityIdentity(event)}`
+    return `Codex · ${codexItemLabel(event.name || '')}${event.displayName ? ` · ${event.displayName}` : ''}`
+  }
+  if (event.kind === 'codex_progress') {
+    if (event.activityKind === 'plan') return `Codex · 计划更新${event.detail ? ` · ${event.detail}` : ''}`
+    return `Codex · ${codexProgressLabel(event.name || '')}${event.displayName ? ` · ${event.displayName}` : ''}`
+  }
+  return `MCP · ${event.name}`
+}
+
+function toolEventTitle(event: TraceEvent) {
+  const completed = event.kind === 'tool_end'
+  const input = parseEventInput(event.input)
+  if (event.activityKind === 'loader' || event.name === 'load_tools') {
+    const labels: Record<string, string> = { execution: '执行', files: '文件', information: '信息', skills: 'Skills', web: 'Web' }
+    const groups = Array.isArray(input.groups) ? input.groups.map((item) => labels[String(item)] || String(item)).join(' / ') : '内置能力'
+    return `${completed ? '能力加载结果' : '加载能力'} · ${groups}`
+  }
+  if (event.activityKind === 'skill' || event.name === 'load_skill') return `${completed ? 'Skill 加载结果' : '加载 Skill'} · ${String(input.name || event.displayName || 'Skill')}`
+  if (event.activityKind === 'mcp_loader' || event.name === 'search_mcp_tools') return `${completed ? 'MCP 发现结果' : '发现 MCP 工具'} · ${formatActivitySource(String(input.id || event.activitySource || 'MCP'))}`
+  if (event.activityKind === 'mcp' || event.name?.startsWith('mcp__')) return `MCP ${completed ? '返回' : '调用'} · ${activityIdentity(event)}`
+  return `Tool ${completed ? '结果' : '调用'} · ${event.displayName || event.name || '工具'}`
+}
+
+function activityIdentity(event: TraceEvent) {
+  const legacy = event.name ? /^mcp__(.+?)__(.+)$/.exec(event.name) : null
+  const source = formatActivitySource(event.activitySource || legacy?.[1] || event.detail?.split('/')[0]?.trim() || 'MCP')
+  const name = event.displayName || legacy?.[2] || event.detail?.split('/').slice(1).join('/').trim() || event.name || '工具'
+  return `${source} / ${name}`
+}
+
+function parseEventInput(value?: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch { return {} }
+}
+
+function formatActivitySource(value: string) {
+  const labels: Record<string, string> = { context7: 'Context7', github: 'GitHub', playwright: 'Playwright', 'openai-docs': 'OpenAI Docs' }
+  return labels[value.toLowerCase()] || value.replaceAll('_', '-')
 }
 
 function traceStatusLabel(status: Session['status'], progress?: string) {

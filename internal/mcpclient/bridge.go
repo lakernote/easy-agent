@@ -77,7 +77,7 @@ func Connect(ctx context.Context, environment *appenv.Environment, config Config
 		schema := normalizeSchema(remote.InputSchema)
 		connection.Info = append(connection.Info, ToolInfo{Name: name, Description: remote.Description})
 		connection.Tools = append(connection.Tools, agent.Tool{
-			Spec: agent.ToolSpec{Name: name, Description: remote.Description, Parameters: schema},
+			Spec: agent.ToolSpec{Name: name, Description: remote.Description, Parameters: schema, ActivityKind: "mcp", ActivitySource: config.ID, DisplayName: remote.Name},
 			Run: func(callContext context.Context, raw json.RawMessage) (string, error) {
 				var arguments any = map[string]any{}
 				if len(raw) > 0 && string(raw) != "null" {

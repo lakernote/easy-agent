@@ -1,14 +1,14 @@
 // Package prompt 管理 EasyAgent 唯一的基础 System Prompt。
 //
-// 基础行为放在 Markdown，而不是散落在 Go 字符串中；Go 代码只负责注入每轮
-// 运行时事实和 Skill 元数据。
+// 基础行为放在 Markdown，而不是散落在 Go 字符串中；Go 代码只负责注入工作区、
+// Skill 和 MCP 元数据。日期与时间属于实时事实，由 current_time 工具提供，避免
+// 动态值污染可缓存的 System Prompt 前缀。
 package prompt
 
 import (
 	_ "embed"
 	"fmt"
 	"strings"
-	"time"
 )
 
 //go:embed system.md
@@ -42,7 +42,6 @@ type SelectedSkill struct {
 }
 
 type Context struct {
-	Now            time.Time
 	Workspace      string
 	Skills         []SkillMeta
 	MCPs           []MCPMeta
@@ -50,19 +49,12 @@ type Context struct {
 	SelectedTools  []string
 }
 
-// Render 生成一轮会话使用的 System Prompt。日期、星期和时区是稳定运行时事实；
-// 精确到秒的时间仍由模型选择信息能力核验。这里不写具体函数名，避免渐进加载时
-// 小模型把尚未加载的工具误认为当前可调用函数。
+// Render 生成一轮会话使用的 System Prompt。System Prompt 不注入日期与时间，
+// 这类会变化的实时事实由首轮常驻的 current_time 工具按需提供。
 func Render(context Context) string {
-	now := context.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	zone, offset := now.Zone()
-	runtime := fmt.Sprintf("当前日期：%s；星期：%s；时区：%s（UTC%+03d:%02d）。需要精确到时分秒时使用信息能力核验。",
-		now.Format("2006-01-02"), weekday(now.Weekday()), zone, offset/3600, abs(offset%3600)/60)
+	runtime := "当前会话使用默认工作区。"
 	if strings.TrimSpace(context.Workspace) != "" {
-		runtime += fmt.Sprintf(" 当前会话工作区：%q。文件和命令默认在该目录中运行。", context.Workspace)
+		runtime = fmt.Sprintf("当前会话工作区：%q。文件和命令默认在该目录中运行。", context.Workspace)
 	}
 	var skills strings.Builder
 	if len(context.Skills) == 0 {
@@ -101,15 +93,4 @@ func Render(context Context) string {
 	}
 	result = strings.ReplaceAll(result, "{{SELECTED_TOOLS}}", strings.TrimSpace(selectedTools.String()))
 	return strings.TrimSpace(result)
-}
-
-func weekday(day time.Weekday) string {
-	return [...]string{"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"}[day]
-}
-
-func abs(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
 }

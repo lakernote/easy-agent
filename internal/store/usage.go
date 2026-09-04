@@ -100,8 +100,10 @@ ORDER BY e.created_at`, formatTime(since), formatTime(until))
 			item.ModelDurationMS += event.DurationMS
 			item.CacheReported = item.CacheReported || event.CacheReported
 		case "tool_end":
-			item.ToolCalls++
-			item.ToolDurationMS += event.DurationMS
+			if isBusinessToolEvent(event) {
+				item.ToolCalls++
+				item.ToolDurationMS += event.DurationMS
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -113,6 +115,21 @@ ORDER BY e.created_at`, formatTime(since), formatTime(until))
 	}
 	sortUsageAggregates(result)
 	return result, nil
+}
+
+func isBusinessToolEvent(event Event) bool {
+	switch strings.TrimSpace(event.ActivityKind) {
+	case "loader", "skill", "mcp_loader", "mcp_selected":
+		return false
+	case "tool", "mcp":
+		return true
+	}
+	switch strings.TrimSpace(event.Name) {
+	case "load_tools", "load_skill", "search_mcp_tools":
+		return false
+	default:
+		return true
+	}
 }
 
 func isUsageEvent(kind string) bool {

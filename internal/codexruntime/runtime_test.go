@@ -178,6 +178,32 @@ func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
 	}
 }
 
+func TestConsumeNotificationPreservesMCPIdentity(t *testing.T) {
+	var events []Event
+	config := Config{OnEvent: func(event Event) { events = append(events, event) }}
+	message := rpcMessage{Method: "item/completed", Params: json.RawMessage(`{"item":{"id":"mcp-1","type":"mcpToolCall","status":"completed","server":"context7","tool":"query-docs","arguments":{"libraryId":"/reactjs/react.dev"},"result":{"content":[]}}}`)}
+	consumeNotificationWithAnswer(message, config, &strings.Builder{}, &eventTimers{itemStartedAt: make(map[string]time.Time)}, nil)
+	if len(events) != 1 || events[0].ActivityID != "mcp-1" || events[0].ActivityKind != "mcp" || events[0].ActivitySource != "context7" || events[0].DisplayName != "query-docs" || events[0].Detail != "context7 / query-docs" {
+		t.Fatalf("MCP identity was not preserved: %+v", events)
+	}
+}
+
+func TestConsumeNotificationMapsPlanAndFileProgress(t *testing.T) {
+	var events []Event
+	config := Config{OnEvent: func(event Event) { events = append(events, event) }}
+	consumeNotificationWithAnswer(rpcMessage{Method: "turn/plan/updated", Params: json.RawMessage(`{"turnId":"turn-1","explanation":"开始实现","plan":[{"step":"检查代码","status":"completed"},{"step":"修改 UI","status":"inProgress"},{"step":"运行测试","status":"pending"}]}`)}, config, &strings.Builder{}, nil, nil)
+	consumeNotificationWithAnswer(rpcMessage{Method: "item/fileChange/patchUpdated", Params: json.RawMessage(`{"itemId":"file-1","changes":[{"path":"web/src/App.tsx","kind":"update","diff":"@@ -1 +1 @@\n-old\n+new"}]}`)}, config, &strings.Builder{}, nil, nil)
+	if len(events) != 2 {
+		t.Fatalf("计划和文件进度没有进入事件流: %+v", events)
+	}
+	if events[0].Name != "plan" || events[0].ActivityKind != "plan" || events[0].ActivityID != "turn-1" || events[0].DisplayName != "修改 UI" || !strings.Contains(events[0].Detail, "第 2/3 步") || !strings.Contains(events[0].Output, "运行测试") {
+		t.Fatalf("计划进度映射错误: %+v", events[0])
+	}
+	if events[1].Name != "fileChange" || events[1].ActivityKind != "tool" || events[1].ActivityID != "file-1" || !strings.Contains(events[1].Input, "web/src/App.tsx") {
+		t.Fatalf("文件变更进度映射错误: %+v", events[1])
+	}
+}
+
 func TestCodexStatusAndItemDuration(t *testing.T) {
 	if codexStatus("in_progress") != "started" || codexStatus("cancelled") != "error" || codexStatus("completed") != "success" {
 		t.Fatal("unexpected Codex status mapping")

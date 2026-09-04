@@ -244,8 +244,9 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		assistant.Role = RoleAssistant
 		for index, call := range assistant.ToolCalls {
 			if strings.TrimSpace(call.ID) == "" {
-				assistant.ToolCalls[index].ID = fmt.Sprintf("call_%d_%d", step, index+1)
+				call.ID = fmt.Sprintf("call_%d_%d", step, index+1)
 			}
+			assistant.ToolCalls[index] = runner.describeToolCall(call)
 		}
 		messages = append(messages, assistant)
 		turnMessages := []Message{assistant}
@@ -343,6 +344,17 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		}
 	}
 	return RunResult{}, errors.New("Agent 达到最大步数")
+}
+
+func (runner *Runner) describeToolCall(call ToolCall) ToolCall {
+	tool, ok := runner.toolsByName[call.Name]
+	if !ok {
+		return call
+	}
+	call.ActivityKind = tool.Spec.ActivityKind
+	call.ActivitySource = tool.Spec.ActivitySource
+	call.DisplayName = tool.Spec.DisplayName
+	return call
 }
 
 const visibleAnswerReminder = "上一响应没有可展示的最终正文。不要重复调用已经成功的工具；请根据已有工具结果，在 assistant content 中直接给出最终答案。"

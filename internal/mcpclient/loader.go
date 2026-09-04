@@ -124,9 +124,12 @@ func (loader *Loader) Preload(ctx context.Context, ids []string) ([]agent.Tool, 
 func (loader *Loader) Tool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name:        "search_mcp_tools",
-			Description: "在一个已启用的 MCP Server 中按任务语义搜索工具，并让最相关的少量工具在下一步可用。query 应描述要执行的操作；如果服务使用英文工具名，优先使用简短英文操作词。不要无目的搜索全部 MCP。",
-			Loader:      true,
+			Name:           "search_mcp_tools",
+			ActivityKind:   "mcp_loader",
+			ActivitySource: "mcp",
+			DisplayName:    "MCP 工具发现",
+			Description:    "在一个已启用的 MCP Server 中按任务语义搜索工具，并让最相关的少量工具在下一步可用。query 应描述要执行的操作；如果服务使用英文工具名，优先使用简短英文操作词。不要无目的搜索全部 MCP。",
+			Loader:         true,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

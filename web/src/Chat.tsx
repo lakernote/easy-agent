@@ -6,6 +6,7 @@ import { Logo } from './ui'
 import { RunError } from './dialogs'
 import { ChatComposer } from './chat/ChatComposer'
 import { useChatComposer } from './chat/useChatComposer'
+import { CodexActivity, ExecutionProgress, codexConversationActivities } from './chat/CapabilityActivity'
 
 export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
   const endRef = useRef<HTMLDivElement>(null)
@@ -15,6 +16,11 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const previousSessionIDRef = useRef<string | undefined>(undefined)
   const composer = useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities })
   const { isCodexRuntime, sending, send, startSuggestion } = composer
+  const callsByID = new Map(session?.messages.flatMap((message) => message.toolCalls.map((call) => [call.id, call] as const)) || [])
+  const conversationItems = session ? [
+    ...session.messages.map((message) => ({ kind: 'message' as const, createdAt: message.createdAt, id: message.id, message })),
+    ...(session.runtime === 'codex' ? codexConversationActivities(session.events).map((event) => ({ kind: 'activity' as const, createdAt: event.createdAt, id: event.id, event })) : []),
+  ].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id - right.id) : []
 
   // 只有用户当前就在底部时才跟随新消息/流式输出；用户向上阅读历史时不抢夺滚动位置。
   useEffect(() => {
@@ -71,12 +77,11 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">自托管 Agent · 在服务器持续执行</p><h1>今天要交付什么？</h1><p>选择服务器项目，直接交代代码、测试、发布或故障排查任务；输入 <code>@</code> 可指定 Skill、Tool 或 MCP。</p><div className="suggestion-heading"><strong>常用研发工作流</strong><span>点击立即创建任务</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
-      {session?.messages.map((message) => <MessageView key={message.id} message={message} />)}
+      {conversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : <CodexActivity key={`activity-${item.id}`} event={item.event} />)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
       {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以从顶部继续或取消。</span></div></div>}
-      {session?.status === 'running' && (session.partialOutput
-        ? <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>
-        : <div className="assistant-row"><Avatar /><div className="thinking" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 正在处理任务`}</span></div></div>)}
+      {session?.status === 'running' && <ExecutionProgress session={session} />}
+      {session?.status === 'running' && session.partialOutput && <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>}
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
         const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
         if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)

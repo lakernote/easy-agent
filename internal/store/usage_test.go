@@ -24,6 +24,8 @@ func TestUsageAggregatesByPeriodAndModel(t *testing.T) {
 	}{
 		{"s1", Event{Kind: "model_end", Name: "qwen", InputTokens: 100, OutputTokens: 20, TotalTokens: 120, DurationMS: 50, CreatedAt: now.Add(-90 * time.Minute)}},
 		{"s1", Event{Kind: "tool_end", Name: "calculate", DurationMS: 12, CreatedAt: now.Add(-80 * time.Minute)}},
+		{"s1", Event{Kind: "tool_end", Name: "load_tools", ActivityKind: "loader", DurationMS: 4, CreatedAt: now.Add(-79 * time.Minute)}},
+		{"s1", Event{Kind: "tool_end", Name: "load_skill", DurationMS: 3, CreatedAt: now.Add(-78 * time.Minute)}},
 		{"s2", Event{Kind: "codex_usage", Name: "gpt-5", InputTokens: 300, OutputTokens: 40, TotalTokens: 340, CacheReported: true, CreatedAt: now.Add(-50 * time.Minute)}},
 	} {
 		if err := database.AppendEvent(value.session, value.event); err != nil {

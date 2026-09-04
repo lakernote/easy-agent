@@ -32,6 +32,52 @@ func TestTraceOmitsAttachmentBase64(t *testing.T) {
 	}
 }
 
+func TestTraceObserverPublishesLiveUsageAndSeparatesLoaders(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.CreateSession("live-usage", "实时用量", "fixture", t.TempDir(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueueSession("live-usage", "fixture", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.MarkRunning("live-usage", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	application.tasks.set("live-usage", "token", func() {})
+	usage := store.Usage{}
+	observe := application.newTraceObserver("live-usage", 1, &usage, func(err error) { t.Fatal(err) })
+	observe(agent.Event{Kind: agent.EventModelEnd, Exchange: agent.Exchange{Model: "fixture", Usage: agent.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120}}, Duration: 2 * time.Second})
+	observe(agent.Event{Kind: agent.EventToolEnd, ToolCall: &agent.ToolCall{ID: "loader", Name: "load_tools", ActivityKind: "loader"}, Duration: 5 * time.Millisecond})
+	observe(agent.Event{Kind: agent.EventToolEnd, ToolCall: &agent.ToolCall{ID: "shell", Name: "shell", ActivityKind: "tool", ActivitySource: "builtin", DisplayName: "shell"}, Duration: 12 * time.Millisecond})
+
+	live, err := application.loadLiveSession(context.Background(), "live-usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Usage.ModelCalls != 1 || live.Usage.TotalTokens != 120 || live.Usage.ModelDurationMS != 2000 || live.Usage.ToolCalls != 1 || live.Usage.ToolDurationMS != 12 {
+		t.Fatalf("实时 Usage 未正确同步或 Loader 被计入业务工具: %+v", live.Usage)
+	}
+	if err := database.FinishSession("live-usage", "", "", usage, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := application.loadLiveSession(context.Background(), "live-usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Usage.ModelCalls != 1 || finished.Usage.ToolCalls != 1 || finished.Usage.TotalTokens != 120 {
+		t.Fatalf("任务完成后进程快照被重复累计: %+v", finished.Usage)
+	}
+	if len(finished.Events) != 3 || finished.Events[2].ActivitySource != "builtin" || finished.Events[2].DisplayName != "shell" {
+		t.Fatalf("Trace 能力元数据未持久化: %+v", finished.Events)
+	}
+}
+
 func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
 	if err != nil {

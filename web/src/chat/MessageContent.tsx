@@ -7,15 +7,16 @@ import { formatBytes } from '../attachments'
 import { FileIcon, Logo } from '../ui'
 import { markdownComponents } from '../markdownComponents'
 import { Payload } from './Payload'
+import { capabilityResultLabel, describeToolCall, SelectedCapabilities } from './CapabilityActivity'
 
 const MathMarkdown = lazy(() => import('../MathMarkdown'))
 const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
 
-export function MessageView({ message }: { message: Session['messages'][number] }) {
-  if (message.role === 'tool') return <details className="tool-result" open={message.name === 'weather'}><summary><span>⌁</span>{message.name === 'weather' ? '天气预报' : message.name || '工具'} 返回结果</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
-  if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}{message.content && <div>{message.content}</div>}</div></div>
+export function MessageView({ message, relatedCall }: { message: Session['messages'][number]; relatedCall?: Session['messages'][number]['toolCalls'][number] }) {
+  if (message.role === 'tool') return <details className={`tool-result ${relatedCall ? describeToolCall(relatedCall).kind : ''}`} open={message.name === 'weather'}><summary><span>⌁</span>{message.name === 'weather' ? '天气预报' : capabilityResultLabel(relatedCall, message.name || '工具')}</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
+  if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}<SelectedCapabilities message={message} />{message.content && <div>{message.content}</div>}</div></div>
   if (message.role !== 'assistant') return null
-  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => <span key={call.id}>调用 {call.name}</span>)}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
+  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => { const item = describeToolCall(call); return <span className={item.kind} key={call.id}><b>{item.label}</b>{item.name}</span> })}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
 }
 
 type WeatherResult = {

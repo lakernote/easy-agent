@@ -1,4 +1,11 @@
-export type ToolCall = { id: string; name: string; arguments: string }
+export type ToolCall = {
+  id: string
+  name: string
+  arguments: string
+  activityKind?: string
+  activitySource?: string
+  displayName?: string
+}
 
 export type Attachment = {
   id: string
@@ -33,6 +40,10 @@ export type TraceEvent = {
   step: number
   attempt?: number
   name?: string
+  activityId?: string
+  activityKind?: string
+  activitySource?: string
+  displayName?: string
   status: string
   detail?: string
   input?: string

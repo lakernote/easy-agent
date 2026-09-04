@@ -14,7 +14,7 @@ func toCoreMessage(value store.Message) agent.Message {
 		message.Attachments = append(message.Attachments, agent.Attachment{Name: attachment.Name, MIMEType: attachment.MIMEType, Kind: attachment.Kind, Data: attachment.Data})
 	}
 	for _, call := range value.ToolCalls {
-		message.ToolCalls = append(message.ToolCalls, agent.ToolCall{ID: call.ID, Name: call.Name, Arguments: json.RawMessage(call.Arguments)})
+		message.ToolCalls = append(message.ToolCalls, agent.ToolCall{ID: call.ID, Name: call.Name, Arguments: json.RawMessage(call.Arguments), ActivityKind: call.ActivityKind, ActivitySource: call.ActivitySource, DisplayName: call.DisplayName})
 	}
 	return message
 }
@@ -22,7 +22,7 @@ func toCoreMessage(value store.Message) agent.Message {
 func fromCoreMessage(value agent.Message) store.Message {
 	message := store.Message{Role: string(value.Role), Content: value.Content, Attachments: []store.Attachment{}, ToolCallID: value.ToolCallID, Name: value.Name, ToolCalls: []store.ToolCall{}, CreatedAt: time.Now()}
 	for _, call := range value.ToolCalls {
-		message.ToolCalls = append(message.ToolCalls, store.ToolCall{ID: call.ID, Name: call.Name, Arguments: string(call.Arguments)})
+		message.ToolCalls = append(message.ToolCalls, store.ToolCall{ID: call.ID, Name: call.Name, Arguments: string(call.Arguments), ActivityKind: call.ActivityKind, ActivitySource: call.ActivitySource, DisplayName: call.DisplayName})
 	}
 	return message
 }

@@ -207,6 +207,10 @@ body { overflow: hidden; background: #f7f7f5; }
   .suggestions { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; overflow-x: visible; }
   .conversation { padding-bottom: 24px; }
   .conversation-content { padding-bottom: 10px; }
+  .conversation-activity { max-width: calc(100% - 43px); grid-template-columns: auto minmax(0, 1fr); }
+  .conversation-activity > small { grid-column: 2; white-space: normal; }
+  .execution-progress { width: 100%; max-width: 100%; grid-template-columns: 18px auto minmax(0, 1fr); border-radius: 12px; }
+  .execution-progress > em { grid-column: 2 / -1; padding: 6px 0 0; border-top: 1px solid #e1e7e3; border-left: 0; }
   .composer-wrap { padding-top: 16px; }
   .composer-context { flex-wrap: wrap; min-height: 40px; padding-top: 4px; }
   .composer-workspace { max-width: calc(100% - 95px); }
