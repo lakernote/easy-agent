@@ -99,6 +99,25 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
   created_at TEXT NOT NULL,
   UNIQUE(session_id, seq)
 );
+CREATE TABLE IF NOT EXISTS ea_weixin_accounts (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  user_id TEXT NOT NULL UNIQUE,
+  token TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sync_buf TEXT NOT NULL DEFAULT '',
+  current_session_id TEXT NOT NULL DEFAULT '',
+  ignore_before TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL DEFAULT '',
+  last_message_at TEXT NOT NULL DEFAULT '',
+  last_sequence INTEGER NOT NULL DEFAULT 0,
+  pending_message_id INTEGER NOT NULL DEFAULT 0,
+  delivered_message_id INTEGER NOT NULL DEFAULT 0,
+  pending_context_token TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 	CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session_id ON ea_messages(session_id, id);
@@ -107,6 +126,7 @@ CREATE TABLE IF NOT EXISTS ea_compactions (
 	CREATE INDEX IF NOT EXISTS idx_ea_events_session_id ON ea_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_ea_events_created ON ea_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(enabled, updated_at);
 `
 	_, err := store.db.Exec(schema)
 	if err != nil {

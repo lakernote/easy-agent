@@ -5,6 +5,7 @@ import type { Page } from './sessionState'
 import { Capabilities, type SettingsSection } from './CapabilitiesPage'
 import { Skills } from './Skills'
 import { UsagePage } from './UsagePage'
+import { WeixinPage } from './WeixinPage'
 
 type SettingsShellProps = {
   page: Page
@@ -22,15 +23,21 @@ const sections: { id: SettingsSection; label: string; description: string }[] = 
   { id: 'skills', label: 'Skills', description: '按需加载能力' },
   { id: 'tools', label: '工具与 MCP', description: '共享工具与连接' },
   { id: 'usage', label: '用量', description: '调用统计' },
+  { id: 'weixin', label: '微信远程', description: '扫码绑定与停用' },
   { id: 'security', label: '账户安全', description: '修改登录密码' },
 ]
 
 function activeSection(page: Page): SettingsSection {
-  return page === 'tasks' || page === 'models' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'security' ? page : 'runtime'
+  return page === 'tasks' || page === 'models' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'weixin' || page === 'security' ? page : 'runtime'
 }
 
 export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout }: SettingsShellProps) {
   const selected = activeSection(page)
+  const pageDescription = selected === 'security'
+    ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。'
+    : selected === 'weixin'
+      ? '管理团队微信绑定与远程启停；微信只回传必要状态和最终任务结果。'
+      : '选择运行时，并管理共享任务策略、模型、Skills、工具与用量。新会话会固定创建时的运行环境。'
   const [showPassword, setShowPassword] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -71,7 +78,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
       <div>
         <p className="settings-kicker">配置中心</p>
         <h1>设置</h1>
-        <p>{selected === 'security' ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。' : '选择运行时，并管理共享任务策略、模型、Skills、工具与用量。新会话会固定创建时的运行环境。'}</p>
+        <p>{pageDescription}</p>
       </div>
       <div className="settings-hub-context">
         <span className="service-dot" />
@@ -91,6 +98,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
       <main className="settings-hub-content">
         {selected === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'usage' && <UsagePage data={data} />}
+        {selected === 'weixin' && <WeixinPage onError={onError} />}
         {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'security' && <section className="account-panel account-security-page" aria-labelledby="account-title">
           <div><p className="settings-kicker">账户安全</p><h2 id="account-title">管理员账号</h2><p>当前登录用户：<code>admin</code>。服务重启、12 小时后或修改密码后需要重新登录。</p></div>

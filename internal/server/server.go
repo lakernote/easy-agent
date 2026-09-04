@@ -17,6 +17,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
+	"github.com/lakernote/easy-agent/internal/weixin"
 )
 
 type Server struct {
@@ -31,6 +32,7 @@ type Server struct {
 	scheduler   *taskScheduler
 	tasks       *taskManager
 	runtimes    *runtimeRegistry
+	weixin      *weixinManager
 	codexEnvMu  sync.RWMutex
 	codexEnv    map[string]string
 	authMu      sync.Mutex
@@ -65,6 +67,8 @@ func newServer(database *store.Store, assets fs.FS, environment *appenv.Environm
 	server.runtimes = newRuntimeRegistry(server)
 	server.routes()
 	server.resumeQueuedSessions()
+	server.weixin = newWeixinManager(server, weixin.NewHTTPGateway(nil))
+	server.weixin.start()
 	return server
 }
 

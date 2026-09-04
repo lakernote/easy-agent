@@ -23,6 +23,7 @@
 - 内置文件、Shell、网页、时间、天气和计算工具。
 - 页面管理 Skills 与 MCP；内置 Context7、Playwright、GitHub、OpenAI Docs 等 MCP 预设。
 - 支持 Codex thread 列表、详情、继续和分支。
+- 可选微信 ClawBot 通道：默认停用，支持多人扫码绑定、全局/单人停用；微信只接收任务确认和最终结果，不发送 Trace。
 - SQLite 本地保存会话、配置、任务和完整 Trace。
 
 <p align="center">

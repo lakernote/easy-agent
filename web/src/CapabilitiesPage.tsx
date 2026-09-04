@@ -8,7 +8,7 @@ import { UsagePage } from './UsagePage'
 import { CodexSettings, CodexStatus, EasyAgentSettings, MCPSettings, RuntimeOperationsSettings } from './settings/SettingsPanels'
 import { useModelConfiguration } from './settings/useModelConfiguration'
 
-export type SettingsSection = 'runtime' | 'tasks' | 'models' | 'skills' | 'tools' | 'usage' | 'security'
+export type SettingsSection = 'runtime' | 'tasks' | 'models' | 'skills' | 'tools' | 'usage' | 'weixin' | 'security'
 type CapabilitiesSection = 'runtime' | 'tools' | 'settings'
 
 export function Capabilities({ section, initialSection, data, onRefresh, onError }: { section: CapabilitiesSection; initialSection?: SettingsSection; data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {

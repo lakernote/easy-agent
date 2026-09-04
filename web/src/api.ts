@@ -1,4 +1,4 @@
-import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport } from './types'
+import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
 
 export class APIError extends Error {
   status: number
@@ -29,6 +29,14 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) => request<{ authenticated: boolean; message: string }>('/api/v1/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
   saveRuntimeSettings: (settings: Bootstrap['runtimeSettings']) => request<Bootstrap['runtimeSettings']>('/api/v1/runtime/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  weixin: () => request<WeixinState>('/api/v1/channels/weixin'),
+  saveWeixinSettings: (enabled: boolean) => request<WeixinState>('/api/v1/channels/weixin', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  startWeixinLogin: (label: string) => request<WeixinLogin>('/api/v1/channels/weixin/login', { method: 'POST', body: JSON.stringify({ label }) }),
+  weixinLogin: (id: string) => request<WeixinLogin>(`/api/v1/channels/weixin/login/${encodeURIComponent(id)}`),
+  cancelWeixinLogin: (id: string) => request<void>(`/api/v1/channels/weixin/login/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  verifyWeixinLogin: (id: string, code: string) => request<WeixinLogin>(`/api/v1/channels/weixin/login/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({ code }) }),
+  updateWeixinAccount: (id: string, label: string, enabled: boolean) => request<WeixinState>(`/api/v1/channels/weixin/accounts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ label, enabled }) }),
+  deleteWeixinAccount: (id: string) => request<void>(`/api/v1/channels/weixin/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   usage: (period: UsageReport['period'], days?: number) => request<UsageReport>(`/api/v1/usage?period=${period}${days ? `&days=${days}` : ''}`),
   olderSessions: (beforeUpdatedAt: string, beforeID: string) => request<{ sessions: Session[]; hasMore: boolean }>(`/api/v1/sessions/history?beforeUpdatedAt=${encodeURIComponent(beforeUpdatedAt)}&beforeID=${encodeURIComponent(beforeID)}`),
   session: (id: string) => request<Session>(`/api/v1/sessions/${id}`),

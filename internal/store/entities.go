@@ -179,3 +179,33 @@ type RuntimeSettings struct {
 	SSEHeartbeatSeconds int  `json:"sseHeartbeatSeconds"`
 	GitWorktrees        bool `json:"gitWorktrees"`
 }
+
+// WeixinSettings controls the shared WeChat remote channel. IgnoreBefore keeps
+// messages accumulated while the channel was intentionally disabled from being
+// executed when it is enabled again.
+type WeixinSettings struct {
+	Enabled      bool      `json:"enabled"`
+	IgnoreBefore time.Time `json:"ignoreBefore"`
+}
+
+// WeixinAccount is one QR-bound WeChat identity. Token and protocol cursors are
+// server-only values and must never be serialized to the browser.
+type WeixinAccount struct {
+	ID                  string    `json:"id"`
+	Label               string    `json:"label"`
+	UserID              string    `json:"-"`
+	Token               string    `json:"-"`
+	BaseURL             string    `json:"-"`
+	Enabled             bool      `json:"enabled"`
+	SyncBuffer          string    `json:"-"`
+	CurrentSessionID    string    `json:"currentSessionId,omitempty"`
+	IgnoreBefore        time.Time `json:"-"`
+	LastSeenAt          time.Time `json:"lastSeenAt,omitempty"`
+	LastMessageAt       time.Time `json:"lastMessageAt,omitempty"`
+	LastSequence        int64     `json:"-"`
+	PendingMessageID    int64     `json:"-"`
+	DeliveredMessageID  int64     `json:"-"`
+	PendingContextToken string    `json:"-"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
+}
