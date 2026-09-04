@@ -1,18 +1,15 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Version tag to create, for example v0.2.0"
+      version:
+        description: "Version to publish, for example v2.0.1"
         required: true
         type: string
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ inputs.version }}
   cancel-in-progress: false
 
 permissions:
@@ -34,20 +31,16 @@ jobs:
         id: release
         shell: bash
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            tag="${INPUT_TAG}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
+          tag="${INPUT_VERSION}"
           if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
             echo "Tag must look like v1.2.3 or v1.2.3-rc.1" >&2
             exit 1
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]] && git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
-            echo "Tag ${tag} already exists; push that tag to trigger its release instead." >&2
+          if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists; choose a new version." >&2
             exit 1
           fi
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
@@ -130,9 +123,5 @@ jobs:
           if [[ "${VERSION}" == *-* ]]; then
             release_flags+=(--prerelease)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            release_flags+=(--target "${GITHUB_SHA}")
-          else
-            release_flags+=(--verify-tag)
-          fi
+          release_flags+=(--target "${GITHUB_SHA}")
           gh release create "${TAG}" release/* "${release_flags[@]}"

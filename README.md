@@ -111,16 +111,11 @@ profile，之后修改或删除其他 profile 不会改变已有会话；仍被�
 ## 发布版本
 
 仓库的 `Release` GitHub Action 会构建 Windows、macOS 和 Linux 的 amd64/arm64
-压缩包，并生成 SHA-256 校验文件。正常发布只需创建并推送语义化版本 tag：
-
-```bash
-git tag -a v0.2.0 -m "EasyAgent v0.2.0"
-git push origin v0.2.0
-```
-
-也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入一个尚未存在的
-`vX.Y.Z` tag；Action 会基于所选分支提交创建 tag 和 Release。包含 `-rc.1`、
-`-beta.1` 等后缀的版本会自动标记为预发布。
+压缩包，并生成 SHA-256 校验文件。发布时进入 GitHub 的
+**Actions → Release → Run workflow**，选择要发布的分支并输入一个尚未存在的
+版本号，例如 `v2.0.1`。Action 会基于该分支的当前提交自动创建 tag 和 Release；
+不需要在本地创建或推送 tag。包含 `-rc.1`、`-beta.1` 等后缀的版本会自动标记为
+预发布。
 
 每个 Release 包含：
 
