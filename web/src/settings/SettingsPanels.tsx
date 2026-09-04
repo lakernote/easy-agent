@@ -211,11 +211,14 @@ type EasyAgentSettingsProps = {
   testing: boolean
   saving: boolean
   onTest: () => void
-  onSave: () => void
+  onSave: (clearAPIKey?: boolean) => void
   onActivateOllama: (name: string) => Promise<void>
 }
 
 export function EasyAgentSettings({ data, model, setModel, notice, testing, saving, onTest, onSave, onActivateOllama }: EasyAgentSettingsProps) {
+  const [clearAPIKey, setClearAPIKey] = useState(false)
+  useEffect(() => setClearAPIKey(false), [model.profileId])
+
   return (
     <div className="section-block easyagent-config">
       <div className="section-heading">
@@ -245,13 +248,14 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
           <small>0 表示未知；Ollama 运行后会读取实际窗口。</small>
         </label>
         <label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label>
-        <label>API Key<input type="password" placeholder={model.secretConfigured ? '已配置，留空不修改' : '可留空'} value={model.apiKey || ''} onChange={(event) => setModel({ ...model, apiKey: event.target.value })} /></label>
+        <label>API Key<input type="password" autoComplete="new-password" disabled={clearAPIKey} placeholder={model.secretConfigured ? '已配置，留空保持不变' : '可留空'} value={model.apiKey || ''} onChange={(event) => { setClearAPIKey(false); setModel({ ...model, apiKey: event.target.value }) }} /></label>
         <label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(event) => setModel({ ...model, apiKeyEnv: event.target.value })} /></label>
+        {model.secretConfigured && <label className="check-label wide"><input type="checkbox" checked={clearAPIKey} onChange={(event) => { setClearAPIKey(event.target.checked); if (event.target.checked) setModel({ ...model, apiKey: '' }) }} />清除这套配置已保存的 API Key</label>}
       </div>
       <ModelNotice notice={notice} />
       <div className="form-actions">
         <button className="ghost-button" type="button" disabled={testing} onClick={onTest}>{testing ? '正在验证 Function Calling…' : '测试 EasyAgent 模型'}</button>
-        <button className="primary-button" type="button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存 EasyAgent 配置'}</button>
+        <button className="primary-button" type="button" disabled={saving} onClick={() => onSave(clearAPIKey)}>{saving ? '保存中…' : '保存 EasyAgent 配置'}</button>
       </div>
     </div>
   )

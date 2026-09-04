@@ -42,8 +42,6 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }, [capabilities, capabilityQuery])
   const selectedCapabilities = useMemo(() => capabilities.filter((item) => hasCapabilityToken(draft, item.token)), [capabilities, draft])
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
-  const enabledSkillCount = data.skills.filter((item) => item.enabled).length
-  const enabledMCPCount = data.mcps.filter((item) => item.enabled).length
   const profileOptions = useMemo(() => data.modelProfiles.filter((item) => item.settings.runtime === runtime), [data.modelProfiles, runtime])
   const workspace = session?.workspace || data.runtime.workspace
   const selectedProfile = profileOptions.find((item) => item.id === selectedProfileId)
@@ -202,7 +200,6 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     draft, setDraft, sending, attachments, attachmentError, dragging, setDragging,
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
-    enabledSkillCount, enabledMCPCount,
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
     workspace, profileOptions, selectedProfileId, setSelectedProfileId, displayedModel,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,

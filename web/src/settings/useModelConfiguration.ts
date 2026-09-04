@@ -26,11 +26,22 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   useEffect(() => setModel({ ...data.model }), [data.model])
   useEffect(() => setCodexConfig({ ...data.codexConfig }), [data.codexConfig])
 
-  const saveModel = async () => {
+  const saveModel = async (clearAPIKey = false) => {
     if (savingModel) return
     setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel(model); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false); onError('') }
+    try { await api.saveModel({ ...model, clearApiKey: clearAPIKey }); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false); onError('') }
     catch (reason) { onError((reason as Error).message) }
+    finally { setSavingModel(false) }
+  }
+
+  const enableRuntime = async () => {
+    if (savingModel || !model.profileId) return
+    setSavingModel(true); setModelNotice(null); onError('')
+    try {
+      if (!currentProfileSaved) await api.saveModel(model)
+      await api.activateModelProfile(model.profileId)
+      await onRefresh()
+    } catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
 
@@ -100,7 +111,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     if (savingModel || profile.id === data.activeModelProfileId) { selectProfile(profile); return }
     setModel({ ...profile.settings, profileId: profile.id, profileName: profile.name })
     setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel({ ...profile.settings, profileId: profile.id, profileName: profile.name }); await onRefresh() }
+    try { await api.activateModelProfile(profile.id); await onRefresh() }
     catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
@@ -110,7 +121,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     if (existing) { await activateProfile(existing); return }
     const next: ModelSettings = { ...data.model, profileId: `easyagent-${Date.now()}`, profileName: `Ollama · ${name}`, runtime: 'easyagent', provider: 'ollama', protocol: 'chat_completions', baseUrl: `${data.ollama.baseUrl}/v1`, model: name }
     setModel(next); setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel(next); await onRefresh() }
+    try { await api.saveModel(next); await api.activateModelProfile(next.profileId!); await onRefresh() }
     catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
@@ -138,5 +149,5 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     finally { setSavingCodexConfig(false) }
   }
 
-  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig, savingCodexConfig, installingCodex, currentProfileSaved, saveModel, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, installCodex, saveCodexConfig }
+  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig, savingCodexConfig, installingCodex, currentProfileSaved, saveModel, enableRuntime, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, installCodex, saveCodexConfig }
 }

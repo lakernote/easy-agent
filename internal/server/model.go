@@ -27,8 +27,11 @@ type modelTestResult struct {
 
 // prepareModelInput 统一保存和连接测试的默认值、旧密钥恢复及校验逻辑。
 // 不允许两个入口各自解释“空 API Key”，否则容易再次跨 Provider 复用旧密钥。
-func prepareModelInput(input, current store.ModelSettings) (store.ModelSettings, error) {
+func prepareModelInput(input, current store.ModelSettings, clearAPIKey bool) (store.ModelSettings, error) {
 	input = input.WithDefaults()
+	if clearAPIKey && input.APIKey != "" {
+		return store.ModelSettings{}, errors.New("不能同时填写新 API Key 和清除已保存的 API Key")
+	}
 	if input.Runtime == store.RuntimeCodex {
 		// Codex app-server 自己读取 ~/.codex 配置并负责认证、Provider 和协议。
 		// 清掉 EasyAgent/Ollama 字段，避免切换 Runtime 后旧配置继续显示或被误用。
@@ -41,8 +44,16 @@ func prepareModelInput(input, current store.ModelSettings) (store.ModelSettings,
 		input.ContextWindowTokens = 0
 		input.CompressionThresholdPercent = 0
 	}
-	if input.Runtime != store.RuntimeCodex && input.APIKey == "" && sameModelEndpoint(input, current) {
-		input.APIKey = current.APIKey
+	if input.Runtime != store.RuntimeCodex && input.APIKey == "" {
+		switch {
+		case clearAPIKey:
+			input.APIKey = ""
+		case current.APIKey == "":
+		case sameModelEndpoint(input, current):
+			input.APIKey = current.APIKey
+		default:
+			return store.ModelSettings{}, errors.New("Provider 或 Base URL 已改变；请填写新 API Key，或勾选清除已保存的 API Key")
+		}
 	}
 	if input.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(input.APIKeyEnv)) == "" {
 		return store.ModelSettings{}, errors.New("环境变量 " + input.APIKeyEnv + " 不存在或为空")
@@ -61,8 +72,8 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	current, _ := server.store.GetModelSettings()
-	settings, err := prepareModelInput(input, current)
+	current := server.modelSettingsForInput(input)
+	settings, err := prepareModelInput(input, current, false)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return

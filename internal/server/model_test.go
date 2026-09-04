@@ -63,17 +63,106 @@ func TestRunModelTestRejectsTextThatPretendsToBeToolCall(t *testing.T) {
 	}
 }
 
-func TestPrepareModelInputDoesNotMoveSecretAcrossProviders(t *testing.T) {
+func TestPrepareModelInputRequiresExplicitSecretDecisionAcrossProviders(t *testing.T) {
 	current := store.ModelSettings{Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "private"}
-	input, err := prepareModelInput(store.ModelSettings{
+	candidate := store.ModelSettings{
 		Provider: "openrouter", Protocol: "chat_completions", BaseURL: "https://openrouter.ai/api/v1", Model: "openrouter/free",
 		MaxOutputTokens: 100, RequestTimeoutSeconds: 30, CompressionThresholdPercent: 75,
-	}, current)
+	}
+	if _, err := prepareModelInput(candidate, current, false); err == nil || !strings.Contains(err.Error(), "填写新 API Key") {
+		t.Fatalf("切换端点且留空时应要求明确处理密钥: %v", err)
+	}
+	cleared, err := prepareModelInput(candidate, current, true)
+	if err != nil || cleared.APIKey != "" {
+		t.Fatalf("显式清除旧密钥应允许切换端点: value=%+v err=%v", cleared, err)
+	}
+	candidate.APIKey = "replacement"
+	replaced, err := prepareModelInput(candidate, current, false)
+	if err != nil || replaced.APIKey != "replacement" {
+		t.Fatalf("填写新密钥应允许切换端点: value=%+v err=%v", replaced, err)
+	}
+}
+
+func TestPrepareModelInputKeepsSecretForSameProfileEndpoint(t *testing.T) {
+	current := store.ModelSettings{Provider: "groq", BaseURL: "https://api.groq.com/openai/v1", APIKey: "private"}
+	input, err := prepareModelInput(store.ModelSettings{
+		Provider: "groq", Protocol: "chat_completions", BaseURL: "https://api.groq.com/openai/v1/", Model: "changed-model",
+		MaxOutputTokens: 200, RequestTimeoutSeconds: 30, CompressionThresholdPercent: 75,
+	}, current, false)
+	if err != nil || input.APIKey != "private" {
+		t.Fatalf("修改普通属性时应保留本配置密钥: value=%+v err=%v", input, err)
+	}
+}
+
+func TestSaveModelPreservesEditedProfileSecretWithoutActivating(t *testing.T) {
+	database, err := store.Open(t.TempDir() + "/easyagent.db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.APIKey != "" {
-		t.Fatal("切换 Provider 后错误继承了旧密钥")
+	defer database.Close()
+
+	first := store.DefaultModelSettings()
+	first.ProfileID, first.ProfileName = "first", "First"
+	first.Provider, first.BaseURL, first.Model, first.APIKey = "openai", "https://api.openai.com/v1", "gpt-first", "first-secret"
+	second := first
+	second.ProfileID, second.ProfileName = "second", "Second"
+	second.Provider, second.BaseURL, second.Model, second.APIKey = "groq", "https://api.groq.com/openai/v1", "gpt-second", "second-secret"
+	if err := database.SaveModelSettings(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveModelSettings(second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SetActiveModelProfile(first.ProfileID); err != nil {
+		t.Fatal(err)
+	}
+
+	application := &Server{store: database}
+	second.APIKey = ""
+	second.MaxOutputTokens = 321
+	payload, _ := json.Marshal(second)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/model", strings.NewReader(string(payload)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	application.saveModel(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("保存非默认配置失败: HTTP %d %s", response.Code, response.Body.String())
+	}
+	saved, err := database.GetModelSettingsByProfileID(second.ProfileID)
+	if err != nil || saved.APIKey != "second-secret" || saved.MaxOutputTokens != 321 {
+		t.Fatalf("非默认配置没有保留自己的密钥: value=%+v err=%v", saved, err)
+	}
+	active, err := database.GetModelSettings()
+	if err != nil || active.ProfileID != first.ProfileID || active.APIKey != "first-secret" {
+		t.Fatalf("普通保存不应切换默认配置: value=%+v err=%v", active, err)
+	}
+	if strings.Contains(response.Body.String(), "second-secret") || !strings.Contains(response.Body.String(), `"secretConfigured":true`) {
+		t.Fatalf("响应必须遮蔽密钥并报告已配置: %s", response.Body.String())
+	}
+
+	activateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/model/second/active", strings.NewReader(`{}`))
+	activateRequest.SetPathValue("id", second.ProfileID)
+	activateResponse := httptest.NewRecorder()
+	application.activateModelProfile(activateResponse, activateRequest)
+	if activateResponse.Code != http.StatusOK {
+		t.Fatalf("设为默认失败: HTTP %d %s", activateResponse.Code, activateResponse.Body.String())
+	}
+	active, err = database.GetModelSettings()
+	if err != nil || active.ProfileID != second.ProfileID || active.APIKey != "second-secret" {
+		t.Fatalf("设为默认不应改写配置或密钥: value=%+v err=%v", active, err)
+	}
+
+	clearPayload, _ := json.Marshal(modelSettingsInput{ModelSettings: second, ClearAPIKey: true})
+	clearRequest := httptest.NewRequest(http.MethodPut, "/api/v1/model", strings.NewReader(string(clearPayload)))
+	clearRequest.Header.Set("Content-Type", "application/json")
+	clearResponse := httptest.NewRecorder()
+	application.saveModel(clearResponse, clearRequest)
+	if clearResponse.Code != http.StatusOK {
+		t.Fatalf("显式清除密钥失败: HTTP %d %s", clearResponse.Code, clearResponse.Body.String())
+	}
+	cleared, err := database.GetModelSettingsByProfileID(second.ProfileID)
+	if err != nil || cleared.APIKey != "" {
+		t.Fatalf("显式清除后仍存在密钥: value=%+v err=%v", cleared, err)
 	}
 }
 
@@ -81,7 +170,7 @@ func TestCodexTurnTimeoutIsIndependentFromRequestTimeout(t *testing.T) {
 	input, err := prepareModelInput(store.ModelSettings{
 		Runtime:         store.RuntimeCodex,
 		MaxOutputTokens: 100,
-	}, store.ModelSettings{})
+	}, store.ModelSettings{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,8 +37,8 @@ body { overflow: hidden; background: #f7f7f5; }
 .topbar-actions .model-name { max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-canvas { background: #fff; }
 .chat-page { height: calc(100vh - 60px); background: #fff; }
-.conversation { padding-top: 28px; background: #fff; }
-.conversation-content { scrollbar-color: #c9ccc8 transparent; }
+.conversation { padding-top: 28px; padding-bottom: 32px; background: #fff; }
+.conversation-content { padding-bottom: 18px; scrollbar-color: #c9ccc8 transparent; }
 .welcome { padding-top: clamp(56px, 12vh, 132px); }
 .welcome h1 { font-size: clamp(28px, 3.5vw, 38px); font-weight: 650; }
 .welcome > p:not(.eyebrow) { color: #6d746e; }
@@ -48,8 +48,10 @@ body { overflow: hidden; background: #f7f7f5; }
 .user-message { color: #2f3431; background: #f0f0ee; }
 .assistant-row { margin-top: 31px; margin-bottom: 31px; }
 .assistant-message { color: #2d332f; }
-.composer-wrap { padding-top: 13px; background: linear-gradient(transparent, #fff 28%); }
-.composer { border-color: #d4d6d1; border-radius: 16px; box-shadow: 0 4px 16px #1f251f12; }
+.composer-wrap { padding-top: 20px; background: linear-gradient(transparent, #fff 28%); }
+.composer, .composer-hint { width: min(760px, 100%); }
+.composer { padding: 7px; border-color: #d4d6d1; border-radius: 16px; box-shadow: 0 4px 16px #1f251f12; }
+.composer textarea { min-height: 44px; padding: 8px 9px 4px; }
 .composer:focus-within { border-color: #9ca39d; box-shadow: 0 0 0 3px #eceeeb, 0 4px 16px #1f251f12; }
 .send-button { background: #2f7d56; }
 .send-button:hover:not(:disabled) { background: #266a48; }
@@ -141,15 +143,15 @@ body { overflow: hidden; background: #f7f7f5; }
 .suggestions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .suggestions button { min-height: 60px; }
 
-/* 输入区只展示不可变的会话上下文；模型仍可在新会话时切换。 */
-.composer-context { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(140px, .75fr) minmax(180px, 1fr) auto; align-items: center; gap: 0; margin: 0 2px 3px; padding: 2px 0 5px; border-bottom: 1px solid #e5eae6; }
-.composer-context-item { display: grid; min-width: 0; gap: 4px; padding: 5px 10px; border-right: 1px solid #edf0ed; }
-.composer-context-item > span { color: #7b857e; font-size: 8px; font-weight: 600; }
-.composer-context-item > strong, .composer-context-item > select { min-width: 0; overflow: hidden; color: #39483e; font-family: var(--mono); font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.composer-context-item > strong { display: block; }
-.composer-context-item > select { width: 100%; height: 20px; padding: 0; border: 0; outline: 0; background: transparent; cursor: pointer; }
-.composer-workspace > strong { color: #536159; }
-.composer-context > em { padding: 0 9px; color: #89958d; font-size: 8px; font-style: normal; line-height: 1.35; text-align: right; white-space: nowrap; }
+/* 输入区只保留一行必要上下文；完整工作区与统计信息放在上方上下文详情。 */
+.composer-context { display: flex; min-height: 29px; align-items: center; gap: 8px; margin: 0 3px 2px; padding: 0 7px 5px; border-bottom: 1px solid #e8ebe8; color: #78827b; font-family: var(--mono); font-size: 8px; }
+.composer-runtime { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; color: #3d5a48; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.composer-runtime::before { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #55a275; box-shadow: 0 0 0 3px #e4f0e8; content: ''; }
+.composer-workspace { max-width: 150px; overflow: hidden; padding-left: 8px; border-left: 1px solid #e5e9e6; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model { min-width: 0; flex: 1 1 auto; overflow: hidden; padding-left: 8px; border-left: 1px solid #e5e9e6; }
+.composer-model > strong, .composer-model > select { display: block; width: 100%; min-width: 0; overflow: hidden; border: 0; outline: 0; color: #59655d; background: transparent; font-family: var(--mono); font-size: 8px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model > select { height: 23px; cursor: pointer; }
+.composer-context > em { flex: 0 0 auto; color: #969e98; font-size: 8px; font-style: normal; white-space: nowrap; }
 
 @media (max-width: 860px) {
   body { overflow: hidden; }
@@ -178,9 +180,10 @@ body { overflow: hidden; background: #f7f7f5; }
   .settings-hub-content .runtime-rail-head { grid-column: 1 / -1; }
   .suggestion-heading, .suggestions { max-width: none; }
   .suggestions { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; overflow-x: visible; }
-  .composer-context { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; }
-  .composer-workspace, .composer-context > em { grid-column: 1 / -1; }
-  .composer-context > em { padding: 3px 10px 0; text-align: left; }
+  .conversation { padding-bottom: 24px; }
+  .conversation-content { padding-bottom: 10px; }
+  .composer-wrap { padding-top: 16px; }
+  .composer-workspace { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

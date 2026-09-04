@@ -22,6 +22,17 @@ func (store *Store) GetModelSettings() (ModelSettings, error) {
 }
 
 func (store *Store) SaveModelSettings(value ModelSettings) error {
+	return store.saveModelProfile(value, true)
+}
+
+// SaveModelProfile updates one reusable profile without changing which profile
+// is used for new sessions. Activation is a separate operation so selecting a
+// profile never has to resubmit redacted settings or secrets.
+func (store *Store) SaveModelProfile(value ModelSettings) error {
+	return store.saveModelProfile(value, false)
+}
+
+func (store *Store) saveModelProfile(value ModelSettings, activate bool) error {
 	value = value.WithDefaults()
 	profiles, activeID, err := store.ListModelProfiles()
 	if err != nil {
@@ -54,7 +65,10 @@ func (store *Store) SaveModelSettings(value ModelSettings) error {
 	if !updated {
 		profiles = append(profiles, ModelProfile{ID: value.ProfileID, Name: name, Settings: value})
 	}
-	return store.saveModelProfiles(profiles, value.ProfileID, value)
+	if activate || activeID == "" {
+		activeID = value.ProfileID
+	}
+	return store.saveModelProfiles(profiles, activeID, filteredModelSettings(profiles, activeID))
 }
 
 // ListModelProfiles 返回所有模型配置以及当前用于创建新会话的配置 ID。
@@ -108,6 +122,26 @@ func (store *Store) GetModelSettingsByProfileID(id string) (ModelSettings, error
 		if profile.ID == id {
 			return withProfile(profile), nil
 		}
+	}
+	return ModelSettings{}, fmt.Errorf("模型配置不存在: %s", id)
+}
+
+// SetActiveModelProfile only changes the default selection. It intentionally
+// leaves the selected profile payload untouched, especially its API key.
+func (store *Store) SetActiveModelProfile(id string) (ModelSettings, error) {
+	profiles, _, err := store.ListModelProfiles()
+	if err != nil {
+		return ModelSettings{}, err
+	}
+	for _, profile := range profiles {
+		if profile.ID != id {
+			continue
+		}
+		active := withProfile(profile)
+		if err := store.saveModelProfiles(profiles, id, active); err != nil {
+			return ModelSettings{}, err
+		}
+		return active, nil
 	}
 	return ModelSettings{}, fmt.Errorf("模型配置不存在: %s", id)
 }
@@ -189,13 +223,19 @@ func (store *Store) saveModelProfiles(profiles []ModelProfile, activeID string, 
 	if err != nil {
 		return err
 	}
-	_, err = store.db.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model_profiles',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, data)
+	tx, err := store.db.Begin()
 	if err != nil {
 		return err
 	}
-	if _, err = store.db.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model_active_profile',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, activeData); err != nil {
+	defer tx.Rollback()
+	if _, err = tx.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model_profiles',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, data); err != nil {
 		return err
 	}
-	_, err = store.db.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, legacyData)
-	return err
+	if _, err = tx.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model_active_profile',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, activeData); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO ea_settings(key,value_json) VALUES('model',?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, legacyData); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

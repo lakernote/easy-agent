@@ -3,30 +3,43 @@ package server
 import (
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
+type modelSettingsInput struct {
+	store.ModelSettings
+	ClearAPIKey bool `json:"clearApiKey,omitempty"`
+}
+
 func (server *Server) saveModel(response http.ResponseWriter, request *http.Request) {
-	var input store.ModelSettings
-	if !decodeJSON(response, request, &input) {
+	var payload modelSettingsInput
+	if !decodeJSON(response, request, &payload) {
 		return
 	}
-	current, _ := server.store.GetModelSettings()
-	input, err := prepareModelInput(input, current)
+	current := server.modelSettingsForInput(payload.ModelSettings)
+	input, err := prepareModelInput(payload.ModelSettings, current, payload.ClearAPIKey)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
 	input.SecretConfigured = false
-	if err := server.store.SaveModelSettings(input); err != nil {
+	if err := server.store.SaveModelProfile(input); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(response, http.StatusOK, publicModel(enrichOllamaContextWindow(request.Context(), input)))
+}
+
+func (server *Server) activateModelProfile(response http.ResponseWriter, request *http.Request) {
+	value, err := server.store.SetActiveModelProfile(strings.TrimSpace(request.PathValue("id")))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, publicModel(enrichOllamaContextWindow(request.Context(), value)))
 }
 
 func (server *Server) deleteModelProfile(response http.ResponseWriter, request *http.Request) {
@@ -42,8 +55,22 @@ func sameModelEndpoint(left, right store.ModelSettings) bool {
 		strings.EqualFold(strings.TrimRight(strings.TrimSpace(left.BaseURL), "/"), strings.TrimRight(strings.TrimSpace(right.BaseURL), "/"))
 }
 
+func (server *Server) modelSettingsForInput(input store.ModelSettings) store.ModelSettings {
+	if strings.TrimSpace(input.ProfileID) != "" {
+		value, err := server.store.GetModelSettingsByProfileID(input.ProfileID)
+		if err == nil {
+			return value
+		}
+		return store.ModelSettings{}
+	}
+	value, _ := server.store.GetModelSettings()
+	return value
+}
+
 func publicModel(value store.ModelSettings) store.ModelSettings {
-	value.SecretConfigured = value.APIKey != "" || (value.APIKeyEnv != "" && os.Getenv(value.APIKeyEnv) != "")
+	// This flag belongs to the redacted direct-key field. APIKeyEnv is already
+	// visible by name and must not make the direct-key input claim a saved value.
+	value.SecretConfigured = value.APIKey != ""
 	value.APIKey = ""
 	return value
 }

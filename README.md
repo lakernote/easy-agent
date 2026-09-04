@@ -46,9 +46,25 @@ EasyAgent 使用模型原生 Function Calling 决定是否调用工具，不引�
 压缩包。Linux 和 macOS 进入解压目录后运行：
 
 ```bash
-chmod +x easyagent
 ./easyagent
 ```
+
+Linux AMD64 也可以进入准备安装 EasyAgent 的目录，然后直接复制下面的命令。
+它会把 `v0.0.1` 解压到当前目录并在后台启动：
+
+```bash
+(
+set -euo pipefail
+curl -fL https://github.com/lakernote/easy-agent/releases/download/v0.0.1/easyagent_0.0.1_linux_amd64.tar.gz \
+  | tar -xz --strip-components=1
+nohup ./easyagent >easyagent.log 2>&1 </dev/null &
+printf '%s\n' "$!" >easyagent.pid
+)
+```
+
+发布包已经包含可执行权限，无需再运行 `chmod +x`；如果二进制经过其他工具复制后
+丢失权限，再手动赋权即可。使用 `tail -f easyagent.log` 查看日志；需要停止时执行
+`kill "$(cat easyagent.pid)"`。
 
 Windows 运行 `easyagent.exe`。服务默认监听 `0.0.0.0:8080`，启动后打开
 <http://127.0.0.1:8080>；远程访问时改为服务器 IP。
