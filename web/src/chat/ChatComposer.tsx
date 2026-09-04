@@ -12,7 +12,7 @@ export function ChatComposer(model: ChatComposerModel) {
     session, draft, sending, attachments, attachmentError, dragging, setDragging,
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
-    composerRef, textareaRef, fileInputRef, isCodexRuntime, workspace, profileOptions, selectedProfileId,
+    composerRef, textareaRef, fileInputRef, isCodexRuntime, workspace, workspaceDraft, setWorkspaceDraft, workspaceOpen, setWorkspaceOpen, applyWorkspace, profileOptions, selectedProfileId,
     displayedModel, onOpenSkills, onOpenCapabilities, addFiles, removeAttachment,
     closeCapabilityPicker, openCapabilityPicker, insertCapability, removeCapability, handleCapabilityKey, updateDraft, send,
     setSelectedProfileId,
@@ -24,7 +24,7 @@ export function ChatComposer(model: ChatComposerModel) {
       {capabilityOpen && <CapabilityPicker items={visibleCapabilities} activeIndex={capabilityIndex} query={capabilityQuery} searchRef={capabilitySearchRef} onQuery={setCapabilityQuery} onKeyDown={handleCapabilityKey} onPick={insertCapability} onOpenSkills={onOpenSkills} onOpenCapabilities={onOpenCapabilities} />}
       <div className="composer-context" aria-label="会话运行环境">
         <strong className="composer-runtime">{isCodexRuntime ? 'Codex' : 'EasyAgent'}</strong>
-        {!session && <span className="composer-workspace" title={workspace}>工作区 · {workspaceLabel}</span>}
+        {!session && <button type="button" className="composer-workspace" title={workspace} aria-expanded={workspaceOpen} aria-controls="workspace-picker" onClick={() => setWorkspaceOpen(!workspaceOpen)}>工作区 · {workspaceLabel}<span aria-hidden="true">⌄</span></button>}
         <div className="composer-model">
           {!session && profileOptions.length > 0 ? <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={sending} aria-label="新会话模型配置">
             {profileOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.settings.model ? ` · ${item.settings.model}` : ''}</option>)}
@@ -32,6 +32,11 @@ export function ChatComposer(model: ChatComposerModel) {
         </div>
         <em>{session ? '已固定' : '创建时固定'}</em>
       </div>
+      {!session && workspaceOpen && <div id="workspace-picker" className="workspace-picker" role="group" aria-label="选择服务器项目目录">
+        <label htmlFor="workspace-path">服务器项目目录</label>
+        <div><input id="workspace-path" autoFocus value={workspaceDraft} onChange={(event) => setWorkspaceDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyWorkspace() }; if (event.key === 'Escape') setWorkspaceOpen(false) }} placeholder="/srv/projects/my-repository" /><button type="button" className="primary-button" onClick={applyWorkspace}>使用此目录</button></div>
+        <small>目录必须存在于运行 EasyAgent 的服务器。Git 项目会为新会话创建独立 worktree；普通目录按项目串行。</small>
+      </div>}
       {attachments.length > 0 && <div className="attachment-preview-list" aria-label="待发送附件">{attachments.map((item) => <div className="attachment-preview" key={item.id}>{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="attachment-file-icon"><FileIcon /></span>}<span><strong title={item.file.name}>{item.file.name}</strong><small>{attachmentTypeLabel(item.file)} · {formatBytes(item.file.size)}</small></span><button type="button" disabled={sending || isActive(session?.status)} aria-label={`移除附件 ${item.file.name}`} onClick={() => removeAttachment(item.id)}><CloseIcon /></button></div>)}</div>}
       {selectedCapabilities.length > 0 && <div className="selected-capabilities" aria-label="已指定能力">{selectedCapabilities.map((item) => <span key={item.key}><b>{capabilityKindLabel(item.kind)}</b>{item.name}<button type="button" aria-label={`移除 ${item.name}`} onClick={() => removeCapability(item)}>×</button></span>)}</div>}
       <textarea ref={textareaRef} value={draft} onChange={updateDraft} aria-label="消息内容" aria-describedby="composer-help attachment-error" placeholder={attachments.length ? '描述如何处理这些附件…' : `给 ${isCodexRuntime ? 'Codex' : 'EasyAgent'} 发消息…`} rows={1} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addFiles(files) } }} onKeyDown={(event) => { if (handleCapabilityKey(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />

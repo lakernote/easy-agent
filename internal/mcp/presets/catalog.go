@@ -25,26 +25,26 @@ type Preset struct {
 func Catalog() []Preset {
 	return []Preset{
 		{
-			ID: "openai-docs", Name: "OpenAI Docs", Description: "搜索并读取 OpenAI、Codex 和 API 官方文档",
-			Transport: "http", Endpoint: "https://developers.openai.com/mcp",
-			Action: "configure", Requirement: "OpenAI 官方远端 MCP · 无需本地安装",
+			ID: "github", Name: "GitHub", Description: "读取仓库、Issue、Pull Request 和 Actions，串联研发上下文",
+			Transport: "http", Endpoint: "https://api.githubcopilot.com/mcp/", AuthType: "bearer",
+			Headers: map[string]string{"X-MCP-Toolsets": "repos,issues,pull_requests,actions"},
+			Action:  "configure", Requirement: "GitHub 官方远端 MCP · 需要 PAT 或 App Token",
 		},
 		{
-			ID: "context7", Name: "Context7", Description: "查询最新的开源库与框架文档和代码示例",
+			ID: "context7", Name: "Context7", Description: "查询依赖库与框架的最新文档和代码示例，减少过时实现",
 			Transport: "http", Endpoint: "https://mcp.context7.com/mcp",
 			Action: "configure", Requirement: "Context7 官方远端 MCP · API Key 可选，配置后可提高额度",
 		},
 		{
-			ID: "playwright", Name: "Playwright", Description: "复现网页问题，操作页面并检查结构与请求",
+			ID: "playwright", Name: "Playwright", Description: "在真实浏览器复现问题，验证页面交互、控制台与网络请求",
 			Transport: "stdio", Command: "@runtime/mcp/playwright/node_modules/.bin/playwright-mcp", Args: []string{"--headless", "--isolated"},
 			Action: "install", Requirement: "宿主机 Node.js 20+ / npm · MCP 包私有安装 · 固定版本 0.0.79", RequiredCommands: []string{"node", "npm"}, MinimumNodeMajor: 20,
 			NPMPackage: "@playwright/mcp@0.0.79", NPMExecutable: "playwright-mcp",
 		},
 		{
-			ID: "github", Name: "GitHub", Description: "读取仓库、Issue、PR 和 Actions 上下文",
-			Transport: "http", Endpoint: "https://api.githubcopilot.com/mcp/", AuthType: "bearer",
-			Headers: map[string]string{"X-MCP-Toolsets": "repos,issues,pull_requests,actions"},
-			Action:  "configure", Requirement: "GitHub 官方远端 MCP · 需要 PAT 或 App Token",
+			ID: "openai-docs", Name: "OpenAI Docs", Description: "查询 OpenAI API 与 Codex 官方文档，适合 AI 应用研发",
+			Transport: "http", Endpoint: "https://developers.openai.com/mcp",
+			Action: "configure", Requirement: "OpenAI 官方远端 MCP · 无需本地安装",
 		},
 	}
 }

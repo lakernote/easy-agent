@@ -149,6 +149,7 @@ type Session struct {
 	// EasyAgent 创建的 worktree，SourceWorkspace 仍用于展示和追踪来源。
 	SourceWorkspace   string      `json:"sourceWorkspace,omitempty"`
 	WorktreeBranch    string      `json:"worktreeBranch,omitempty"`
+	WorkspaceNotice   string      `json:"workspaceNotice,omitempty"`
 	CreatedAt         time.Time   `json:"createdAt"`
 	UpdatedAt         time.Time   `json:"updatedAt"`
 	Messages          []Message   `json:"messages"`

@@ -21,6 +21,7 @@ type sessionView struct {
 	SourceWorkspace    string            `json:"sourceWorkspace,omitempty"`
 	WorktreeBranch     string            `json:"worktreeBranch,omitempty"`
 	WorkspaceIsolation string            `json:"workspaceIsolation,omitempty"`
+	WorkspaceNotice    string            `json:"workspaceNotice,omitempty"`
 	CreatedAt          time.Time         `json:"createdAt"`
 	UpdatedAt          time.Time         `json:"updatedAt"`
 	Messages           []store.Message   `json:"messages"`
@@ -48,7 +49,7 @@ type codexRequestView struct {
 func publicSession(value store.Session) sessionView {
 	return sessionView{
 		ID: value.ID, Title: value.Title, Status: value.Status, Error: value.Error,
-		Runtime: value.Runtime, Model: value.Model, Workspace: value.Workspace, SourceWorkspace: value.SourceWorkspace, WorktreeBranch: value.WorktreeBranch, WorkspaceIsolation: workspaceIsolationLabel(value), CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		Runtime: value.Runtime, Model: value.Model, Workspace: value.Workspace, SourceWorkspace: value.SourceWorkspace, WorktreeBranch: value.WorktreeBranch, WorkspaceIsolation: workspaceIsolationLabel(value), WorkspaceNotice: value.WorkspaceNotice, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		ProfileID: value.ProfileID,
 		Messages:  value.Messages, Events: value.Events, MessageCount: value.MessageCount, EventCount: value.EventCount,
 		UserTurnCount: value.UserTurnCount, MessagesTruncated: value.MessagesTruncated, EventsTruncated: value.EventsTruncated,

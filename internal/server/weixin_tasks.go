@@ -95,7 +95,7 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 		if _, err := manager.server.store.CreateSessionWithProfile(sessionID, makeTitle(text), model.Runtime, model.ProfileID, model.Model, workspace.Execution, now); err != nil {
 			return err
 		}
-		if err := manager.server.store.SetSessionWorkspace(sessionID, workspace.Execution, workspace.Source, workspace.Branch); err != nil {
+		if err := manager.server.store.SetSessionWorkspace(sessionID, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
 			_ = manager.server.store.DeleteSession(sessionID)
 			return err
 		}

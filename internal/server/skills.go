@@ -8,6 +8,19 @@ import (
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
+var coreSkillOrder = map[string]int{
+	"problem-analysis":      10,
+	"code-review":           20,
+	"api-design":            30,
+	"test-and-e2e":          40,
+	"browser-validation":    50,
+	"incident-rca":          60,
+	"release-engineering":   70,
+	"docs-maintenance":      80,
+	"git-worktree-workflow": 90,
+	"web-research":          100,
+}
+
 // skillCatalog 合并“编译进二进制的默认 Skill”和“SQLite 中的用户覆盖”。
 // 默认文件始终保留，所以用户点恢复默认时只需删除覆盖记录。
 type skillCatalog struct {
@@ -40,8 +53,22 @@ func loadSkillCatalog(database *store.Store) (*skillCatalog, error) {
 	for _, value := range byName {
 		items = append(items, value)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	sortSkillOverrides(items)
 	return &skillCatalog{items: items}, nil
+}
+
+func sortSkillOverrides(items []store.SkillOverride) {
+	sort.Slice(items, func(i, j int) bool {
+		left, leftCore := coreSkillOrder[items[i].Name]
+		right, rightCore := coreSkillOrder[items[j].Name]
+		if leftCore != rightCore {
+			return leftCore
+		}
+		if leftCore {
+			return left < right
+		}
+		return items[i].Name < items[j].Name
+	})
 }
 
 func (catalog *skillCatalog) All() []store.SkillOverride {

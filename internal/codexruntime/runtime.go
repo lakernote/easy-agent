@@ -26,6 +26,7 @@ import (
 
 const installDocsURL = "https://developers.openai.com/codex/cli"
 const installScriptURL = "https://chatgpt.com/codex/install.sh"
+const detectCommandTimeout = 5 * time.Second
 
 type Status struct {
 	// Installed 表示 codex CLI 可执行文件存在。app-server 不是另一个安装包，
@@ -69,7 +70,7 @@ func Detect(environment *appenv.Environment) Status {
 		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), detectCommandTimeout)
 		command := exec.CommandContext(ctx, path, "--version")
 		if environment != nil {
 			command.Env = environment.Environ(nil)
@@ -82,7 +83,7 @@ func Detect(environment *appenv.Environment) Status {
 		status.Installed = true
 		status.Path = path
 		status.Version = strings.TrimSpace(string(output))
-		appCtx, appCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		appCtx, appCancel := context.WithTimeout(context.Background(), detectCommandTimeout)
 		appServer := exec.CommandContext(appCtx, path, "app-server", "--help")
 		if environment != nil {
 			appServer.Env = environment.Environ(nil)

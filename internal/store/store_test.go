@@ -418,3 +418,25 @@ func TestRuntimeSettingsDefaultsAndNormalization(t *testing.T) {
 		t.Fatalf("运行设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
 	}
 }
+
+func TestCountOtherSessionsUsingWorkspace(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	for _, id := range []string{"source", "shared", "other"} {
+		workspace := "/tmp/project"
+		if id == "other" {
+			workspace = "/tmp/another-project"
+		}
+		if _, err := value.CreateSession(id, id, "fixture", workspace, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count, err := value.CountOtherSessionsUsingWorkspace("source", "/tmp/project")
+	if err != nil || count != 1 {
+		t.Fatalf("共享工作区引用计数异常: count=%d err=%v", count, err)
+	}
+}

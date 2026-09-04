@@ -94,7 +94,7 @@ func (store *Store) RecoverRunning(now time.Time) error {
 }
 
 func (store *Store) ListQueuedSessions() ([]Session, error) {
-	rows, err := store.db.Query(`SELECT id,title,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE status='queued' ORDER BY updated_at,id`)
+	rows, err := store.db.Query(`SELECT id,title,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE status='queued' ORDER BY updated_at,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +110,8 @@ func (store *Store) ListQueuedSessions() ([]Session, error) {
 	return result, rows.Err()
 }
 
-func (store *Store) SetSessionWorkspace(id, workspace, sourceWorkspace, branch string) error {
-	_, err := store.db.Exec(`UPDATE ea_sessions SET workspace=?,source_workspace=?,worktree_branch=? WHERE id=?`, workspace, sourceWorkspace, branch, id)
+func (store *Store) SetSessionWorkspace(id, workspace, sourceWorkspace, branch, notice string) error {
+	_, err := store.db.Exec(`UPDATE ea_sessions SET workspace=?,source_workspace=?,worktree_branch=?,workspace_notice=? WHERE id=?`, workspace, sourceWorkspace, branch, notice, id)
 	return err
 }
 

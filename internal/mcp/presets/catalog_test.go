@@ -43,3 +43,16 @@ func TestConfigurablePresetsAreNotAutoInstalled(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogPrioritizesDevelopmentWorkflow(t *testing.T) {
+	catalog := Catalog()
+	want := []string{"github", "context7", "playwright", "openai-docs"}
+	if len(catalog) != len(want) {
+		t.Fatalf("MCP 核心预设数量错误: %+v", catalog)
+	}
+	for index, id := range want {
+		if catalog[index].ID != id {
+			t.Fatalf("MCP 预设顺序错误: got %q at %d, want %q", catalog[index].ID, index, id)
+		}
+	}
+}

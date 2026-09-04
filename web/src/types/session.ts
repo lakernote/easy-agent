@@ -81,6 +81,7 @@ export type Session = {
   sourceWorkspace?: string
   worktreeBranch?: string
   workspaceIsolation?: string
+  workspaceNotice?: string
   createdAt: string
   updatedAt: string
   messages: Message[]

@@ -90,7 +90,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
 
   const leaveManaging = () => { setManaging(false); setSelectedIds(new Set()) }
   return <aside className="sidebar">
-    <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>轻量 · 自托管 · 可扩展</small></div></div>
+    <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>研发 · 测试 · 运维</small></div></div>
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
     <nav className="primary-nav" aria-label="主导航">
       <button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button>
@@ -112,7 +112,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onRefresh,
     </div>
     <button className={`sidebar-settings ${page !== 'chat' ? 'active' : ''}`} type="button" aria-label="设置" aria-current={page !== 'chat' ? 'page' : undefined} onClick={() => onPage('settings')}><Icon name="settings" /><span>设置</span></button>
     <div className="sidebar-feedback" aria-live="polite">{feedback}</div>
-    <div className="sidebar-foot"><strong>EasyAgent</strong><small>{displayVersion}</small></div>
+    <div className="sidebar-foot"><a href="https://github.com/lakernote/easy-agent" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 打开 EasyAgent 仓库"><strong>EasyAgent</strong><span aria-hidden="true">↗</span></a><small>{displayVersion}</small></div>
     {pendingDelete.length > 0 && <ConfirmDialog
       title={pendingDelete.length === 1 ? '删除这个会话？' : `删除选中的 ${pendingDelete.length} 个会话？`}
       description="会话消息和对应的 Agent Trace 将一起删除，删除后无法恢复。"

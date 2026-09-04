@@ -51,7 +51,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := server.store.SetSessionWorkspace(id, workspace.Execution, workspace.Source, workspace.Branch); err != nil {
+	if err := server.store.SetSessionWorkspace(id, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
 		_ = server.store.DeleteSession(id)
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
@@ -116,12 +116,30 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 
 func (server *Server) deleteSession(response http.ResponseWriter, request *http.Request) {
 	// 删除前只需要检查状态，不要为了一个状态字段把超长消息和 Trace 全量读入内存。
-	value, err := server.store.LoadSessionWindow(request.PathValue("id"), 1, 1)
+	id := request.PathValue("id")
+	value, err := server.store.LoadSessionWindow(id, 1, 1)
 	if err == nil && (value.Status == "queued" || value.Status == "running") {
 		writeError(response, http.StatusConflict, "Agent 正在运行，暂时不能删除")
 		return
 	}
-	if err := server.store.DeleteSession(request.PathValue("id")); err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err == nil && value.WorktreeBranch != "" {
+		shared, countErr := server.store.CountOtherSessionsUsingWorkspace(id, value.Workspace)
+		if countErr != nil {
+			writeError(response, http.StatusInternalServerError, countErr.Error())
+			return
+		}
+		if shared == 0 {
+			if _, cleanupErr := server.cleanupSessionWorktree(request.Context(), value); cleanupErr != nil {
+				writeError(response, http.StatusConflict, "删除会话前无法安全清理 worktree："+cleanupErr.Error())
+				return
+			}
+		}
+	}
+	if err := server.store.DeleteSession(id); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}

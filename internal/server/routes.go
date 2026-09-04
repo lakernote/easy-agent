@@ -30,6 +30,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/cancel", server.cancelSession)
 	server.mux.HandleFunc("GET /api/v1/sessions/{id}/stream", server.streamSession)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/fork", server.forkSession)
+	server.mux.HandleFunc("DELETE /api/v1/sessions/{id}/worktree", server.cleanupWorktree)
 	server.mux.HandleFunc("POST /api/v1/sessions/{id}/codex-request", server.resolveCodexRequest)
 	server.mux.HandleFunc("DELETE /api/v1/sessions/{id}", server.deleteSession)
 	server.mux.HandleFunc("PUT /api/v1/model", server.saveModel)

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
   workspace TEXT NOT NULL DEFAULT '',
   source_workspace TEXT NOT NULL DEFAULT '',
   worktree_branch TEXT NOT NULL DEFAULT '',
+  workspace_notice TEXT NOT NULL DEFAULT '',
   response_id TEXT NOT NULL,
   provider_key TEXT NOT NULL,
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -178,6 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 	}{
 		{name: "source_workspace", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "worktree_branch", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "workspace_notice", definition: "TEXT NOT NULL DEFAULT ''"},
 	} {
 		var exists int
 		if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name=?`, column.name).Scan(&exists); err != nil {

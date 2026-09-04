@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { APIError, api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, updateSessionSummary, type Page } from './sessionState'
-import { friendlyError } from './dialogs'
+import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } from './dialogs'
 import { Logo } from './ui'
 import { Sidebar } from './Sidebar'
 import { Chat } from './Chat'
@@ -18,6 +18,10 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [forkOpen, setForkOpen] = useState(false)
+  const [forking, setForking] = useState(false)
+  const [worktreeOpen, setWorktreeOpen] = useState(false)
+  const [cleaningWorktree, setCleaningWorktree] = useState(false)
 
   const refresh = useCallback(async () => {
     const next = await api.bootstrap()
@@ -53,6 +57,8 @@ export default function App() {
   const openSession = useCallback(async (id: string) => {
     setPage('chat')
     setError('')
+    setForkOpen(false)
+    setWorktreeOpen(false)
     try { setSession(await api.session(id)) } catch (reason) { setError((reason as Error).message) }
   }, [])
 
@@ -94,7 +100,7 @@ export default function App() {
     return () => stream.close()
   }, [session?.id, session?.status, refresh, setCurrentSession])
 
-  const newChat = () => { setSession(null); setPage('chat'); setTraceOpen(false); setError('') }
+  const newChat = () => { setSession(null); setPage('chat'); setTraceOpen(false); setForkOpen(false); setWorktreeOpen(false); setError('') }
   const stopSession = async () => {
     if (!session || (!isActive(session.status) && session.status !== 'paused')) return
     try {
@@ -120,10 +126,20 @@ export default function App() {
     } catch (reason) { setError((reason as Error).message) }
   }
 
-  const forkSession = async () => {
+  const forkSession = async (workspaceMode: ForkWorkspaceMode) => {
     if (!session || session.runtime !== 'codex' || isActive(session.status) || session.status === 'paused') return
-    try { setCurrentSession(await api.forkSession(session.id)); await refresh(); setTraceOpen(false) }
+    setForking(true)
+    try { setCurrentSession(await api.forkSession(session.id, workspaceMode)); await refresh(); setTraceOpen(false); setForkOpen(false) }
     catch (reason) { setError((reason as Error).message) }
+    finally { setForking(false) }
+  }
+
+  const cleanupWorktree = async () => {
+    if (!session?.worktreeBranch) return
+    setCleaningWorktree(true)
+    try { setCurrentSession(await api.cleanupWorktree(session.id)); await refresh(); setWorktreeOpen(false) }
+    catch (reason) { setError((reason as Error).message) }
+    finally { setCleaningWorktree(false) }
   }
 
   const resolveCodexRequest = async (value: unknown) => {
@@ -142,10 +158,11 @@ export default function App() {
     <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
     <main className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
-        <div className="mobile-brand"><Logo /></div>
+        <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
         <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : '设置'}</div>
         <div className="topbar-actions">
-          {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => void forkSession()}>创建分支</button>}
+          {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
+          {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}
           {page === 'chat' && session?.status === 'queued' && <button className="ghost-button" onClick={() => void pauseSession()}>暂停排队</button>}
           {page === 'chat' && session?.status === 'running' && <button className="stop-button" onClick={stopSession}>中断</button>}
           {page === 'chat' && session?.status === 'paused' && <><button className="ghost-button" onClick={() => void stopSession()}>取消任务</button><button className="primary-button" onClick={() => void resumeSession()}>继续</button></>}
@@ -157,6 +174,8 @@ export default function App() {
       {page !== 'chat' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} />}
     </main>
     {traceOpen && session && <TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} />}
+    {forkOpen && <ForkDialog busy={forking} onCancel={() => setForkOpen(false)} onConfirm={(mode) => void forkSession(mode)} />}
+    {worktreeOpen && session?.worktreeBranch && <WorktreeDialog session={session} busy={cleaningWorktree} onCancel={() => setWorktreeOpen(false)} onCleanup={() => void cleanupWorktree()} />}
     {session?.codexRequest && <CodexRequestPrompt request={session.codexRequest} onResolve={resolveCodexRequest} onCancel={stopSession} />}
   </div>
 }

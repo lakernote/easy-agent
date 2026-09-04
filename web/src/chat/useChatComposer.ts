@@ -28,6 +28,9 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState(data.activeModelProfileId)
+  const [workspace, setWorkspaceState] = useState(() => window.localStorage.getItem('easyagent.workspace') || data.runtime.workspace)
+  const [workspaceDraft, setWorkspaceDraft] = useState(workspace)
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const capabilitySearchRef = useRef<HTMLInputElement>(null)
@@ -43,9 +46,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const selectedCapabilities = useMemo(() => capabilities.filter((item) => hasCapabilityToken(draft, item.token)), [capabilities, draft])
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
   const profileOptions = useMemo(() => data.modelProfiles.filter((item) => item.settings.runtime === runtime), [data.modelProfiles, runtime])
-  const workspace = session?.workspace || data.runtime.workspace
   const selectedProfile = profileOptions.find((item) => item.id === selectedProfileId)
-  const displayedModel = session?.model || selectedProfile?.settings.model || data.model.model || (isCodexRuntime ? '使用 config.toml' : '未配置模型')
+  const displayedModel = session?.model || selectedProfile?.settings.model || (isCodexRuntime ? '使用 config.toml' : data.model.model || '未配置模型')
   useEffect(() => {
     if (!textareaRef.current) return
     textareaRef.current.style.height = 'auto'
@@ -55,6 +57,11 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
   useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
   useEffect(() => { if (!session) setSelectedProfileId(data.activeModelProfileId) }, [data.activeModelProfileId, session?.id])
+  useEffect(() => {
+    if (session || workspace.trim()) return
+    setWorkspaceState(data.runtime.workspace)
+    setWorkspaceDraft(data.runtime.workspace)
+  }, [data.runtime.workspace, session, workspace])
   useEffect(() => {
     if (!capabilityOpen) return
     const close = (event: PointerEvent) => {
@@ -177,7 +184,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
       const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim(), selectedProfileId)
-      onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
+      onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); setWorkspaceOpen(false); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
       if (/附件|Base64|MiB|格式/.test(message)) setAttachmentError(message)
@@ -195,13 +202,23 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     send(suggestion.prompt)
   }
 
+  const applyWorkspace = () => {
+    const value = workspaceDraft.trim() || data.runtime.workspace
+    setWorkspaceState(value)
+    setWorkspaceDraft(value)
+    setWorkspaceOpen(false)
+    window.localStorage.setItem('easyagent.workspace', value)
+    textareaRef.current?.focus()
+  }
+
   return {
     session, data, onOpenSkills, onOpenCapabilities,
     draft, setDraft, sending, attachments, attachmentError, dragging, setDragging,
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
-    workspace, profileOptions, selectedProfileId, setSelectedProfileId, displayedModel,
+    workspace: session?.workspace || workspace, workspaceDraft, setWorkspaceDraft, workspaceOpen, setWorkspaceOpen, applyWorkspace,
+    profileOptions, selectedProfileId, setSelectedProfileId, displayedModel,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,
   }
