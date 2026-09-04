@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -25,30 +26,41 @@ import (
 	"github.com/lakernote/easy-agent/web"
 )
 
-// Authentication protects the UI/API, but binding a default-admin service to
-// every network interface is still an unnecessary exposure. Use localhost by
-// default; operators can explicitly choose -listen 0.0.0.0:8080 when needed.
-const defaultListenAddress = "127.0.0.1:8080"
+const defaultListenAddress = "0.0.0.0:8080"
+
+// Release builds replace these values through -ldflags. Keeping usable
+// fallbacks makes local `go build` and development binaries self-describing.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
 
 func main() {
-	// 1. 初始化 EasyAgent 自己管理的 Home、默认工作区、私有运行时和 PATH。
+	// 1. 先解析启动参数，使 -version 和 -help 不会创建应用目录。
+	address := flag.String("listen", defaultListenAddress, "HTTP listen address")
+	databasePath := flag.String("db", "", "SQLite database file (default ~/.easyagent/easyagent.db)")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("easyagent %s (%s)\n", version, commit)
+		return
+	}
+
+	// 2. 初始化 EasyAgent 自己管理的 Home、默认工作区、私有运行时和 PATH。
 	// 这些是应用内部状态，不要求用户在启动命令中配置；真正执行任务时，用户可在
 	// 页面为新会话选择工作区。
 	environment, err := appenv.Open(appenv.Config{})
 	if err != nil {
 		log.Fatalf("open runtime environment: %v", err)
 	}
-
-	// 2. 启动只需要两个可选参数，而且都有可直接使用的默认值。
-	// flag.String 返回 *string（字符串指针）；flag.Parse 后通过 *address 取实际值。
-	address := flag.String("listen", defaultListenAddress, "HTTP listen address")
-	databasePath := flag.String("db", filepath.Join(environment.Home(), "easyagent.db"), "SQLite database file")
-	flag.Parse()
+	if strings.TrimSpace(*databasePath) == "" {
+		*databasePath = filepath.Join(environment.Home(), "easyagent.db")
+	}
 
 	// 3. 先独占 HTTP 端口，再打开数据库或恢复任务状态。这样即使用户、launchd
 	// 或其他进程误启动了第二个实例，它也会在触碰 SQLite 前退出，不会把第一个
 	// 实例正在执行的会话误判成“服务重启中断”。
-	listener, err := net.Listen("tcp", *address)
+	listener, err := net.Listen(listenNetwork(*address), *address)
 	if err != nil {
 		if errors.Is(err, syscall.EADDRINUSE) {
 			port := *address
@@ -142,4 +154,19 @@ func main() {
 		log.Printf("runner shutdown: %v", err)
 	}
 	cancelRunnerShutdown()
+}
+
+func listenNetwork(address string) string {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return "tcp"
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "tcp"
+	}
+	if ip.To4() != nil {
+		return "tcp4"
+	}
+	return "tcp6"
 }

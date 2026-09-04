@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
@@ -81,22 +80,9 @@ func runShell(parent context.Context, environment *appenv.Environment, raw json.
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "/bin/sh", "-c", arguments.Command)
+	command := newShellCommand(ctx, arguments.Command)
 	command.Dir = directory
 	command.Env = environment.Environ(nil)
-	// 单独创建进程组。超时或用户停止任务时，连同命令启动的子进程一起结束，
-	// 避免只杀掉 /bin/sh、却把测试或安装进程遗留在服务器上。
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error {
-		if command.Process == nil {
-			return os.ErrProcessDone
-		}
-		err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
 	command.WaitDelay = 2 * time.Second
 	stdout := newOutputCapture(maxShellOutputBytes)
 	stderr := newOutputCapture(maxShellOutputBytes)

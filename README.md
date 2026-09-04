@@ -39,12 +39,20 @@
 
 ## 快速开始
 
-从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载对应平台的单文件：
+从 [Releases](https://github.com/lakernote/easy-agent/releases) 下载对应平台的压缩包：
 
 ```bash
+tar -xzf easyagent_0.2.0_linux_amd64.tar.gz
+cd easyagent_0.2.0_linux_amd64
 chmod +x easyagent
 ./easyagent
 ```
+
+Windows 用户解压对应 `.zip` 后运行 `easyagent.exe`；macOS 用户将文件名中的
+`linux` 换成 `darwin`，Apple Silicon 选择 `arm64`、Intel Mac 选择 `amd64`。
+当前自动发布包尚未接入 Apple Developer ID 或 Windows Authenticode 证书，因此
+macOS Gatekeeper 或 Windows SmartScreen 可能提示“未知开发者”；正式对外分发时
+可在 Release workflow 中继续接入签名与 notarization。
 
 启动后打开 <http://127.0.0.1:8080>（远程服务器请把 `127.0.0.1` 换成服务器 IP），进入「设置 → 模型配置」完成配置后即可对话。发布包不要求安装 Go、Node.js、Python、Git 或 SQLite；只有 Agent 通过 Shell 执行这些程序时，服务器才需要安装对应程序。
 
@@ -63,7 +71,7 @@ make build
 ./easyagent -listen 0.0.0.0:8080 -db /var/lib/easyagent/easyagent.db
 ```
 
-不传参数时监听 `0.0.0.0:8080`，数据库位于 `~/.easyagent/easyagent.db`。服务器上如果端口已被占用，先用 `ss -ltnp | grep :8080` 找到进程，再停止旧实例或换端口，例如 `./easyagent -listen 0.0.0.0:8081`。
+不传参数时监听 `0.0.0.0:8080`，数据库位于 `~/.easyagent/easyagent.db`。首次登录账号和密码均为 `admin`，请登录后立即在「设置 → 账户安全」修改密码。服务器上如果端口已被占用，先用 `ss -ltnp | grep :8080` 找到进程，再停止旧实例或换端口，例如 `./easyagent -listen 0.0.0.0:8081`。
 EasyAgent 自动管理 `~/.easyagent` 和默认工作区
 `~/.easyagent/workspaces/default`，不依赖服务进程从哪个目录启动。
 
@@ -100,6 +108,32 @@ profile；首页新会话可以选择同一 Runtime 下的 profile。会话创�
 profile，之后修改或删除其他 profile 不会改变已有会话；仍被会话使用的 profile
 不能删除。
 
+## 发布版本
+
+仓库的 `Release` GitHub Action 会构建 Windows、macOS 和 Linux 的 amd64/arm64
+压缩包，并生成 SHA-256 校验文件。正常发布只需创建并推送语义化版本 tag：
+
+```bash
+git tag -a v0.2.0 -m "EasyAgent v0.2.0"
+git push origin v0.2.0
+```
+
+也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入一个尚未存在的
+`vX.Y.Z` tag；Action 会基于所选分支提交创建 tag 和 Release。包含 `-rc.1`、
+`-beta.1` 等后缀的版本会自动标记为预发布。
+
+每个 Release 包含：
+
+- `easyagent_<version>_windows_amd64.zip`
+- `easyagent_<version>_windows_arm64.zip`
+- `easyagent_<version>_darwin_amd64.tar.gz`
+- `easyagent_<version>_darwin_arm64.tar.gz`
+- `easyagent_<version>_linux_amd64.tar.gz`
+- `easyagent_<version>_linux_arm64.tar.gz`
+- `checksums.txt`
+
+运行 `easyagent -version` 可以确认二进制内写入的版本和提交。
+
 ## 三种扩展
 
 | 能力 | 适合放什么 | 如何使用 |
@@ -134,7 +168,7 @@ profile，之后修改或删除其他 profile 不会改变已有会话；仍被�
 
 ## 当前边界
 
-EasyAgent 目前是单机、单进程、SQLite 应用，没有登录、RBAC 或多租户隔离，请勿直接暴露到公网。Agent 的效果取决于所选模型、上下文和可用能力。
+EasyAgent 目前是单机、单进程、SQLite 应用，提供单管理员登录，但没有 RBAC 或多租户隔离。默认监听所有网卡，公网部署时应使用 TLS 反向代理、防火墙或 VPN，并立即修改默认密码。Agent 的效果取决于所选模型、上下文和可用能力。
 
 ## 许可证
 

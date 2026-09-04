@@ -1,7 +1,9 @@
 .PHONY: build build-linux web test run clean
 
 LINUX_ARCH ?= amd64
-BUILD_FLAGS ?= -trimpath -ldflags="-s -w"
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_FLAGS ?= -trimpath -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)"
 
 # 默认发布构建：先生成前端 dist，再把 dist 嵌入 Go 单二进制。
 build: web
@@ -15,7 +17,7 @@ build-linux: web
 
 # npm ci 严格按照 package-lock.json 安装依赖，适合 CI 和可复现构建。
 web:
-	cd web && npm ci && npm run build
+	cd web && npm ci && VITE_APP_VERSION=$(VERSION) npm run build
 
 # 本项目的完整本地检查：依赖校验、Go 静态检查、竞态测试和前端构建。
 test:
