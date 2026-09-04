@@ -40,6 +40,7 @@ function traceEventTitle(event: TraceEvent) {
   if (event.kind === 'codex_end') return `Codex Runtime 响应 · ${event.name || 'Codex'}`
   if (event.kind === 'codex_usage') return 'Codex · 本轮用量'
   if (event.kind === 'codex_turn') return `Codex Turn · ${event.status === 'started' ? '开始' : '完成'}`
+  if (event.kind === 'agent_guidance') return 'Agent 校验 · 原始来源核验'
   if (event.kind === 'capability') {
     if (event.activityKind === 'skill') return `应用 Skill · ${event.displayName || event.name}`
     return `选择 MCP · ${formatActivitySource(event.activitySource || event.name || 'MCP')}`

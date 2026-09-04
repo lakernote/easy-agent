@@ -131,6 +131,7 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		RequiredToolNames: selectedToolNamesForTurn,
 		PromptCacheKey:    promptCacheKey(settings),
 		OnTextDelta:       func(delta string) { server.tasks.appendPartial(id, delta) },
+		OnTextReset:       func() { server.tasks.resetPartial(id) },
 		OnTurnMessages: func(messages []agent.Message) error {
 			values := make([]store.Message, 0, len(messages))
 			for _, message := range messages {

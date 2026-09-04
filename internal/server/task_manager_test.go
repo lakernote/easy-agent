@@ -22,6 +22,10 @@ func TestTaskManagerTracksLiveState(t *testing.T) {
 	if got := manager.partial("session-1"); got != "hello world" {
 		t.Fatalf("partial = %q, want %q", got, "hello world")
 	}
+	manager.resetPartial("session-1")
+	if got := manager.partial("session-1"); got != "" {
+		t.Fatalf("reset partial = %q, want empty", got)
+	}
 	if got := manager.progress("session-1"); got != "正在运行" {
 		t.Fatalf("progress = %q, want %q", got, "正在运行")
 	}

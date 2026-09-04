@@ -16,3 +16,4 @@ data/workspaces/
 coverage.out
 *.tsbuildinfo
 output/
+.playwright-cli/

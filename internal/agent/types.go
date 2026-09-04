@@ -98,6 +98,10 @@ type ToolSpec struct {
 	// Loader 表示这个工具只负责把真实工具加入下一轮，成功本身不构成任务证据。
 	// Runner 会在下一步临时隐藏 Loader，并验证模型至少调用一个真实工具。
 	Loader bool
+	// DiscoveryOnly 表示成功结果只提供候选线索，不能单独支撑外部事实。
+	// Runner 不读取用户文本，只在模型准备基于这类结果直接结束时提醒一次，
+	// 让模型使用任意非 Discovery 工具读取原始来源；该字段不会发送给 Provider。
+	DiscoveryOnly bool
 }
 
 // Tool 把声明与实际执行函数绑定起来。
@@ -216,6 +220,7 @@ const (
 	EventModelEnd   EventKind = "model_end"
 	EventToolStart  EventKind = "tool_start"
 	EventToolEnd    EventKind = "tool_end"
+	EventGuidance   EventKind = "agent_guidance"
 )
 
 // Event 只包含可审计的操作信息，不包含模型的私有思维过程。
@@ -231,6 +236,8 @@ type Event struct {
 	Exchange  Exchange
 	StartedAt time.Time
 	Duration  time.Duration
+	Name      string
+	Detail    string
 }
 
 // Observer 接收每一步模型和工具事件。传 nil 即关闭 Trace，不影响 Agent 行为。
@@ -253,6 +260,9 @@ type RunRequest struct {
 	MaxSteps       int
 	ToolTimeout    time.Duration
 	OnTextDelta    func(string)
+	// OnTextReset 清除不应成为最终回答的临时流式正文，例如模型只看了搜索
+	// 摘要就提前作答、Runner 要求其继续读取原始来源时。
+	OnTextReset func()
 	// PrepareRequest 在每次真实模型调用前执行。它可以对当前内存中的消息做
 	// 微压缩，或在 force=true 时处理 Provider 返回的上下文超限。changed=true
 	// 表示请求历史已经改变，Responses 适配器不应继续复用旧的 response ID。

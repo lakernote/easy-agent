@@ -115,6 +115,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 	forceConverge := false
 	requireLoadedToolCall := false
 	hasCurrentRealToolResult := false
+	pendingSourceVerification := false
+	sourceVerificationReminderSent := false
 	requiredToolNames := availableRequiredTools(runner.modelToolSpecs, input.RequiredToolNames)
 	failedCalls := make(map[string]failedToolCall)
 
@@ -263,6 +265,19 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			if requireLoadedToolCall {
 				return RunResult{}, errors.New("模型在能力加载后没有调用真实工具")
 			}
+			if pendingSourceVerification && !sourceVerificationReminderSent && step < maxSteps {
+				// Discovery 工具只返回候选线索。给模型一次有界纠偏机会，要求它
+				// 读取原始来源；仍保持 auto，不替模型选择具体工具，也不会循环强制。
+				sourceVerificationReminderSent = true
+				reminder := Message{Role: RoleSystem, Content: sourceVerificationReminder}
+				messages = append(messages, reminder)
+				pending = []Message{reminder}
+				if input.OnTextReset != nil {
+					input.OnTextReset()
+				}
+				runner.emit(Event{Kind: EventGuidance, Step: step, Name: "source_verification", Detail: "搜索结果只提供候选摘要；已提醒模型读取原始来源后再回答", StartedAt: time.Now()})
+				continue
+			}
 			if input.OnTurnMessages != nil {
 				if err := input.OnTurnMessages(turnMessages); err != nil {
 					return RunResult{}, err
@@ -282,6 +297,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		failedToolCalls := 0
 		calledLoader := false
 		calledRealTool := false
+		calledDiscovery := false
+		calledVerification := false
 		for _, call := range assistant.ToolCalls {
 			key := toolCallKey(call)
 			previous, repeated := failedCalls[key]
@@ -315,6 +332,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 				} else {
 					calledRealTool = true
 					hasCurrentRealToolResult = true
+					if exists && tool.Spec.DiscoveryOnly {
+						calledDiscovery = true
+					} else {
+						calledVerification = true
+					}
 				}
 			}
 			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
@@ -337,6 +359,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		// 让模型根据现有错误收敛，而不是用略有不同的参数无限重复同一尝试。
 		forceConverge = consecutiveFailedToolSteps >= 2
 		requireLoadedToolCall = calledLoader && !calledRealTool
+		if calledVerification {
+			pendingSourceVerification = false
+		} else if calledDiscovery {
+			pendingSourceVerification = true
+		}
 		if input.OnTurnMessages != nil {
 			if err := input.OnTurnMessages(turnMessages); err != nil {
 				return RunResult{}, err
@@ -358,6 +385,8 @@ func (runner *Runner) describeToolCall(call ToolCall) ToolCall {
 }
 
 const visibleAnswerReminder = "上一响应没有可展示的最终正文。不要重复调用已经成功的工具；请根据已有工具结果，在 assistant content 中直接给出最终答案。"
+
+const sourceVerificationReminder = "你刚才只获得了搜索候选和摘要，它们不是原始来源证据。请继续调用当前可用的 web_fetch、Shell、MCP 或其他合适工具读取至少一个权威原始来源；核对实体和关键数值后再回答。若原始来源确实无法访问，请明确说明已尝试的地址和限制，不要把搜索摘要当成已核验事实。"
 
 // prepareEmptyResponseRetry 只在当前 Run 已成功执行真实工具时强制收敛。
 // Loader、失败结果和历史消息都不是本轮已经取得事实证据的证明。

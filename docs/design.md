@@ -174,7 +174,9 @@ MCP   = 外部系统提供什么能力（按需连接的 Tool）
 
 EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语言运行时。MCP 所需的 Node.js、Python 或 Java 从服务器 PATH 检测；缺少时给出明确提示，由宿主机、容器或项目工具链提供。这样扩展能力不会演变成另一套 SDK 管理器。
 
-内置 Tool 使用分层渐进披露：首轮常驻 `current_time`、`weather`、`calculate`、`shell` 四个高频核心工具，同时保留 `load_tools` 的五个自解释能力组；文件、网页和 Skill 等 Schema 较大的能力由模型选择组后再加入下一轮。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader，使用 `tool_choice=auto` 交给 Provider，再由 Runner 验证至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时仍只按准确名称预加载。保留在协议历史中的内置 function call 会自动恢复同名 Schema。工具模式的空响应或 SSE 尾部工具校验错误可以从流式切到非流式重试一次；只有本轮已成功执行真实工具时，空正文重试才可进入无工具收敛。
+内置 Tool 使用分层渐进披露：首轮常驻 `current_time`、`shell`、`read`、`grep`、`find`、`ls`、`web_search`、`web_fetch`，同时保留 `load_tools` 的自解释能力组；文件写入、天气、计算和 Skill 等低频能力由模型选择组后再加入下一轮。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader，使用 `tool_choice=auto` 交给 Provider，再由 Runner 验证至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时仍只按准确名称预加载。保留在协议历史中的内置 function call 会自动恢复同名 Schema。工具模式的空响应或 SSE 尾部工具校验错误可以从流式切到非流式重试一次；只有本轮已成功执行真实工具时，空正文重试才可进入无工具收敛。
+
+`web_search` 被声明为 Discovery Tool，只返回候选来源。模型若在没有调用其他真实工具读取来源的情况下直接结束，Runner 会追加一次来源核验提醒并继续下一步；工具仍是 `tool_choice=auto`，Runtime 不指定必须使用哪个函数。提醒最多一次，避免 Provider 不支持或来源不可达时形成循环。
 
 Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `search_mcp_tools` 后才连接服务并按任务语义注册最多 5 个远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
 

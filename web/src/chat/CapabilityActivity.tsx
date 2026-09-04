@@ -4,6 +4,7 @@ export type CapabilityPresentation = {
   kind: 'tool' | 'loader' | 'skill' | 'mcp'
   label: string
   name: string
+  resultLabel?: string
 }
 
 const groupLabels: Record<string, string> = {
@@ -14,27 +15,26 @@ export function describeToolCall(call: ToolCall): CapabilityPresentation {
   const input = parseArguments(call.arguments)
   if (call.activityKind === 'loader' || call.name === 'load_tools') {
     const groups = Array.isArray(input.groups) ? input.groups.map((value) => groupLabels[String(value)] || String(value)) : []
-    return { kind: 'loader', label: '加载能力', name: groups.join(' / ') || call.displayName || '内置能力' }
+    return { kind: 'loader', label: '加载能力', resultLabel: '能力加载结果', name: groups.join(' / ') || call.displayName || '内置能力' }
   }
   if (call.activityKind === 'skill' || call.name === 'load_skill') {
-    return { kind: 'skill', label: '使用 Skill', name: String(input.name || call.displayName || 'Skill') }
+    return { kind: 'skill', label: '使用 Skill', resultLabel: 'Skill 加载结果', name: String(input.name || call.displayName || 'Skill') }
   }
   if (call.activityKind === 'mcp_loader' || call.name === 'search_mcp_tools') {
-    return { kind: 'mcp', label: '发现 MCP 工具', name: formatSource(String(input.id || call.activitySource || 'MCP')) }
+    return { kind: 'mcp', label: '发现 MCP 工具', resultLabel: 'MCP 发现结果', name: formatSource(String(input.id || call.activitySource || 'MCP')) }
   }
   const legacyMCP = /^mcp__(.+?)__(.+)$/.exec(call.name)
   if (call.activityKind === 'mcp' || legacyMCP) {
     const source = formatSource(call.activitySource || legacyMCP?.[1] || 'MCP')
     const tool = call.displayName || legacyMCP?.[2] || call.name
-    return { kind: 'mcp', label: '调用 MCP', name: `${source} / ${tool}` }
+    return { kind: 'mcp', label: '调用 MCP', resultLabel: 'MCP 返回结果', name: `${source} / ${tool}` }
   }
-  return { kind: 'tool', label: '调用 Tool', name: call.displayName || call.name }
+  return { kind: 'tool', label: '调用 Tool', resultLabel: 'Tool 返回结果', name: call.displayName || call.name }
 }
 
 export function capabilityResultLabel(call: ToolCall | undefined, fallbackName: string) {
   const item = call ? describeToolCall(call) : describeToolCall({ id: '', name: fallbackName, arguments: '' })
-  const labels = { loader: '能力加载结果', skill: 'Skill 加载结果', mcp: 'MCP 返回结果', tool: 'Tool 返回结果' }
-  return `${labels[item.kind]} · ${item.name}`
+  return `${item.resultLabel || '能力返回结果'} · ${item.name}`
 }
 
 export function SelectedCapabilities({ message }: { message: Message }) {

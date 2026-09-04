@@ -230,7 +230,14 @@ func TestWebFetchReadsHTMLAndLimitsContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) || !strings.Contains(output, `"content_trust": "untrusted_external"`) {
+	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) || !strings.Contains(output, `"content_trust": "untrusted_external"`) || !strings.Contains(output, `"stage": "source"`) || !strings.Contains(output, `"evidence_status": "source_retrieved"`) {
 		t.Fatalf("网页正文提取错误: %s", output)
+	}
+}
+
+func TestWebSearchIsMarkedAsDiscoveryOnly(t *testing.T) {
+	tool := webSearchTool()
+	if !tool.Spec.DiscoveryOnly || !strings.Contains(tool.Spec.Description, "搜索摘要不是原始证据") {
+		t.Fatalf("web_search 必须声明候选发现语义: %+v", tool.Spec)
 	}
 }

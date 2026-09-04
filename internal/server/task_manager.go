@@ -77,6 +77,17 @@ func (manager *taskManager) appendPartial(id, delta string) {
 	manager.tasks[id] = current
 }
 
+func (manager *taskManager) resetPartial(id string) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	current, ok := manager.tasks[id]
+	if !ok {
+		return
+	}
+	current.partial = ""
+	manager.tasks[id] = current
+}
+
 func (manager *taskManager) partial(id string) string {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()

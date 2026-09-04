@@ -21,6 +21,7 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -75,6 +76,26 @@ func TestTraceObserverPublishesLiveUsageAndSeparatesLoaders(t *testing.T) {
 	}
 	if len(finished.Events) != 3 || finished.Events[2].ActivitySource != "builtin" || finished.Events[2].DisplayName != "shell" {
 		t.Fatalf("Trace 能力元数据未持久化: %+v", finished.Events)
+	}
+}
+
+func TestCompletedCodexBusinessActivity(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		event codexruntime.Event
+		want  bool
+	}{
+		{name: "command completed", event: codexruntime.Event{Kind: "codex_item", Status: "success", ActivityKind: "tool"}, want: true},
+		{name: "mcp failed still executed", event: codexruntime.Event{Kind: "codex_item", Status: "error", ActivityKind: "mcp"}, want: true},
+		{name: "started pair", event: codexruntime.Event{Kind: "codex_item", Status: "started", ActivityKind: "tool"}},
+		{name: "progress notification", event: codexruntime.Event{Kind: "codex_progress", Status: "success", ActivityKind: "tool"}},
+		{name: "reasoning", event: codexruntime.Event{Kind: "codex_item", Status: "success"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isCompletedCodexBusinessActivity(test.event); got != test.want {
+				t.Fatalf("isCompletedCodexBusinessActivity() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

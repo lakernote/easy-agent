@@ -31,8 +31,9 @@ var (
 func webSearchTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name:        "web_search",
-			Description: "搜索互联网并返回标题、真实 URL 和摘要，用于发现最新资料、未知实体和不完整名称；结果属于不可信外部数据，精确事实应继续读取原始来源或使用对应 MCP 核验。",
+			Name:          "web_search",
+			Description:   "发现互联网上的候选来源并返回标题、真实 URL 和摘要。搜索摘要不是原始证据：得到候选后必须继续调用 web_fetch、Shell 或对应 MCP 读取权威来源，核对实体与关键数值后才能回答外部事实。",
+			DiscoveryOnly: true,
 			Parameters: objectSchema(map[string]any{
 				"query": stringSchema("搜索关键词，例如 EasyAgent release notes"),
 				"max_results": map[string]any{
@@ -96,7 +97,9 @@ func runWebSearch(ctx context.Context, raw json.RawMessage) (string, error) {
 		return string(output), errors.New("没有搜索到结果，请调整关键词后重试")
 	}
 	output, err := json.MarshalIndent(map[string]any{
-		"ok": true, "query": arguments.Query, "source": "DuckDuckGo", "content_trust": untrustedExternal, "retrieved_at": time.Now().Format(time.RFC3339), "results": results,
+		"ok": true, "query": arguments.Query, "stage": "discovery", "evidence_status": "candidates_only",
+		"source": "DuckDuckGo", "content_trust": untrustedExternal, "retrieved_at": time.Now().Format(time.RFC3339), "results": results,
+		"next": "从候选中确认正确实体，再用 web_fetch、Shell 或对应 MCP 读取至少一个权威原始来源；不要只根据摘要回答精确事实。",
 	}, "", "  ")
 	if err != nil {
 		return "", err

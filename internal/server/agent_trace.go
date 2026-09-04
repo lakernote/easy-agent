@@ -20,7 +20,7 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 		} else if event.Kind == agent.EventModelEnd {
 			server.tasks.setProgress(id, "EasyAgent · 整理回答")
 		}
-		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
+		value := store.Event{Kind: string(event.Kind), Turn: turn, Step: event.Step, Attempt: event.Attempt, Status: "success", Name: event.Name, Detail: event.Detail, CreatedAt: time.Now(), DurationMS: event.Duration.Milliseconds()}
 		if event.ToolCall != nil {
 			value.Name = event.ToolCall.Name
 			value.Input = string(event.ToolCall.Arguments)

@@ -66,6 +66,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	var lastProgressAt time.Time
 	var lastProgressName string
+	completedActivities := make(map[string]struct{})
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout: time.Duration(turnTimeoutSeconds) * time.Second,
@@ -78,10 +79,26 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 				CachedTokens: value.CachedInputTokens, CacheWriteTokens: value.CacheWriteInputTokens,
 				TotalTokens: value.TotalTokens, ModelCalls: 1, CacheReported: value.Reported,
 				ContextWindowTokens: value.ModelContextWindow,
+				ToolCalls:           usage.ToolCalls, ToolDurationMS: usage.ToolDurationMS,
 			})
 		},
 		OnEvent: func(event codexruntime.Event) {
 			server.tasks.setProgress(session.ID, codexProgress(event))
+			if isCompletedCodexBusinessActivity(event) {
+				key := strings.TrimSpace(event.ActivityID)
+				if key == "" {
+					key = fmt.Sprintf("%s\x00%s\x00%d", event.Name, event.Input, len(completedActivities))
+				}
+				if _, counted := completedActivities[key]; !counted {
+					completedActivities[key] = struct{}{}
+					usage.ToolCalls++
+					usage.ToolDurationMS += event.Duration.Milliseconds()
+					liveUsage := server.tasks.usage(session.ID)
+					liveUsage.ToolCalls = usage.ToolCalls
+					liveUsage.ToolDurationMS = usage.ToolDurationMS
+					server.tasks.setUsage(session.ID, liveUsage)
+				}
+			}
 			// Delta-heavy Codex notifications are useful for the live status, but
 			// persisting every one of them makes the trace noisy and grows SQLite
 			// much faster than the user can inspect it. Keep a responsive status
@@ -133,6 +150,13 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	providerKey := strings.Join([]string{"codex", settings.Model, status.Path}, "|")
 	return server.store.FinishSession(session.ID, result.ThreadID, providerKey, *usage, time.Now())
+}
+
+func isCompletedCodexBusinessActivity(event codexruntime.Event) bool {
+	if event.Kind != "codex_item" || event.Status == "started" {
+		return false
+	}
+	return event.ActivityKind == "tool" || event.ActivityKind == "mcp"
 }
 
 func (server *Server) awaitCodexRequest(ctx context.Context, sessionID string, request codexruntime.ServerRequest) (any, error) {

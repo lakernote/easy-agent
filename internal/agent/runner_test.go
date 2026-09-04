@@ -356,6 +356,87 @@ func TestRunnerDoesNotConvergeAfterLoaderOnlyResult(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestsSourceAfterDiscoveryOnlyResult(t *testing.T) {
+	calls := 0
+	resetCalls := 0
+	var requests []Request
+	var saved []Message
+	var events []Event
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		requests = append(requests, request)
+		switch calls {
+		case 1:
+			return Response{ID: "response-1", Message: Message{ToolCalls: []ToolCall{{ID: "search-1", Name: "web_search", Arguments: json.RawMessage(`{"query":"项目 stars"}`)}}}}, nil
+		case 2:
+			return Response{ID: "response-2", Message: Message{Content: "搜索摘要说是 42。"}}, nil
+		case 3:
+			if request.ToolChoice.Mode != ToolChoiceAuto || len(request.Tools) != 2 {
+				t.Fatalf("来源核验仍应保留 auto 和当前工具: %+v", request)
+			}
+			if len(request.NewMessages) != 1 || request.NewMessages[0].Role != RoleSystem || !strings.Contains(request.NewMessages[0].Content, "原始来源") {
+				t.Fatalf("没有把有界核验提醒作为新增消息发送: %+v", request.NewMessages)
+			}
+			return Response{ID: "response-3", Message: Message{ToolCalls: []ToolCall{{ID: "fetch-1", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/source"}`)}}}}, nil
+		default:
+			return Response{ID: "response-4", Message: Message{Content: "原始来源确认是 41。"}}, nil
+		}
+	}), "fixture", []Tool{
+		{Spec: ToolSpec{Name: "web_search", DiscoveryOnly: true}, Run: func(context.Context, json.RawMessage) (string, error) { return `{"stage":"discovery"}`, nil }},
+		{Spec: ToolSpec{Name: "web_fetch"}, Run: func(context.Context, json.RawMessage) (string, error) { return `{"stage":"source","value":41}`, nil }},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) { events = append(events, event) }
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages:    []Message{{Role: RoleUser, Content: "项目多少 stars"}},
+		OnTextReset: func() { resetCalls++ },
+		OnTurnMessages: func(messages []Message) error {
+			saved = append(saved, messages...)
+			return nil
+		},
+	})
+	if err != nil || result.Answer != "原始来源确认是 41。" || calls != 4 || resetCalls != 1 {
+		t.Fatalf("来源核验链路异常: calls=%d reset=%d result=%+v err=%v", calls, resetCalls, result, err)
+	}
+	for _, message := range saved {
+		if message.Content == "搜索摘要说是 42。" {
+			t.Fatalf("被纠正的临时回答不应持久化: %+v", saved)
+		}
+	}
+	guidance := 0
+	for _, event := range events {
+		if event.Kind == EventGuidance && event.Name == "source_verification" {
+			guidance++
+		}
+	}
+	if guidance != 1 {
+		t.Fatalf("核验纠偏应且只应进入一次 Trace: %+v", events)
+	}
+}
+
+func TestRunnerSourceReminderIsBounded(t *testing.T) {
+	calls := 0
+	runner, err := NewRunner(modelFunc(func(_ context.Context, _ Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "search-1", Name: "web_search", Arguments: json.RawMessage(`{"query":"事实"}`)}}}}, nil
+		}
+		return Response{Message: Message{Content: "无法读取来源，明确保留不确定性。"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "web_search", DiscoveryOnly: true},
+		Run:  func(context.Context, json.RawMessage) (string, error) { return `{"stage":"discovery"}`, nil },
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "查询事实"}}})
+	if err != nil || result.Answer != "无法读取来源，明确保留不确定性。" || calls != 3 {
+		t.Fatalf("来源提醒不应无限循环: calls=%d result=%+v err=%v", calls, result, err)
+	}
+}
+
 func TestRunnerIgnoresHistoricalToolResultsWhenRetryingEmptyResponse(t *testing.T) {
 	calls := 0
 	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {

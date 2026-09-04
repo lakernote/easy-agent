@@ -79,10 +79,12 @@ entry {
 
 **当前方案**：
 
-- `web_search` 只发现候选网址；
-- `web_fetch` 读取已知网页证据；
+- `web_search` 只发现候选网址，并在结构化结果中标记 `candidates_only`；
+- `web_fetch` 读取已知网页证据，并标记 `source_retrieved`；
 - GitHub 精确结构化数据使用 GitHub MCP；
 - 其他平台使用对应 MCP 或独立、明确命名的 Tool。
+
+如果模型只拿到 Discovery 结果就直接回答，Runner 会在不改变 `tool_choice=auto` 的前提下提醒一次继续读取原始来源。这个规则依赖 Tool 自身的 `DiscoveryOnly` 元数据，不扫描用户文本，也不替模型选择具体来源工具。
 
 搜索实现当前使用 DuckDuckGo HTML 作为零配置后端。这是可替换的基础设施实现，不是业务语义判断；如果稳定性成为问题，应抽象 Search Provider，而不是添加网站特判。
 

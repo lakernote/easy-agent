@@ -28,6 +28,7 @@
 - 默认并发 4 个任务、单轮最长 12 小时；支持排队、暂停、继续、停止和重启恢复。
 - 支持 Codex thread 列表、详情、继续和分支；分支可复用目录或创建独立 worktree。
 - Skills 和 MCP 只配置一次，同时供两个 Runtime 使用；大能力按需加载，减少无关上下文。
+- 网页查询采用“发现候选 → 读取原始来源 → 回答”的证据链；模型只看搜索摘要就结束时会获得一次有界纠偏。
 - 可选微信 ClawBot 通道，支持多人扫码绑定、全局或单人停用；只发送任务确认和最终结果，不发送 Trace。
 
 ### 内置 Skills
@@ -46,7 +47,7 @@
 | Playwright | 浏览器复现与 E2E 验证 | Node.js 20+，页面一键安装 |
 | OpenAI Docs | OpenAI API 与 Codex 官方文档 | 可直接连接 |
 
-EasyAgent Runtime 首轮提供当前时间、Shell、只读文件检索和网页检索，文件写入、Skill、天气与计算按需加载；Codex Runtime 保留自己的原生工具。默认 MCP 聚焦代码、依赖文档和浏览器验证，不接入与研发交付无关的办公服务。
+EasyAgent Runtime 首轮提供当前时间、Shell、只读文件检索、网页搜索和原始来源读取，文件写入、Skill、天气与计算按需加载；Codex Runtime 保留自己的原生工具。默认 MCP 聚焦代码、依赖文档和浏览器验证，不接入与研发交付无关的办公服务。
 
 <p align="center">
   <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />
