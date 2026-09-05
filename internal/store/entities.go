@@ -22,6 +22,17 @@ type MCPConfig struct {
 	SecretConfigured bool              `json:"secretConfigured,omitempty"`
 }
 
+// Project 对应 Codex 风格的本地项目：左侧用名称组织会话，一个项目可以包含
+// 多个服务器源文件夹。移除项目配置不会删除这些磁盘目录。
+type Project struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Directories []string  `json:"directories"`
+	Default     bool      `json:"default"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
 type SkillOverride struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -146,6 +157,7 @@ type ContextInfo struct {
 type Session struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
+	ProjectID string `json:"projectId,omitempty"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 	Runtime   string `json:"runtime"`
@@ -207,6 +219,7 @@ type WeixinAccount struct {
 	Enabled             bool      `json:"enabled"`
 	SyncBuffer          string    `json:"-"`
 	CurrentSessionID    string    `json:"currentSessionId,omitempty"`
+	ProjectID           string    `json:"projectId,omitempty"`
 	IgnoreBefore        time.Time `json:"-"`
 	LastSeenAt          time.Time `json:"lastSeenAt,omitempty"`
 	LastMessageAt       time.Time `json:"lastMessageAt,omitempty"`

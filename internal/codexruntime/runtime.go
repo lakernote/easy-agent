@@ -132,16 +132,17 @@ func Install(ctx context.Context, environment *appenv.Environment) (string, erro
 }
 
 type Config struct {
-	Path      string
-	Workspace string
-	Model     string
-	ThreadID  string
-	Timeout   time.Duration
-	Env       []string
-	Skills    []SkillRef
-	OnDelta   func(string)
-	OnEvent   func(Event)
-	OnUsage   func(Usage)
+	Path                  string
+	Workspace             string
+	AdditionalDirectories []string
+	Model                 string
+	ThreadID              string
+	Timeout               time.Duration
+	Env                   []string
+	Skills                []SkillRef
+	OnDelta               func(string)
+	OnEvent               func(Event)
+	OnUsage               func(Usage)
 	// OnServerRequest 可选地处理 app-server 发起的反向 JSON-RPC 请求。
 	// 未设置时，RunMessage 会回复标准 JSON-RPC 方法未实现错误，避免把
 	// “服务器请求”误判成协议损坏并直接断开连接。
@@ -454,7 +455,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		return Result{}, errors.New("Codex app-server 没有返回 thread id")
 	}
 	threadID = thread.Thread.ID
-	input := []map[string]string{{"type": "text", "text": codexCapabilityText(userMessage)}}
+	input := []map[string]string{{"type": "text", "text": codexCapabilityText(userMessage, config.AdditionalDirectories...)}}
 	for _, skill := range config.Skills {
 		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Path) == "" {
 			continue
@@ -526,9 +527,9 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	}
 }
 
-func codexCapabilityText(value string) string {
+func codexCapabilityText(value string, directories ...string) string {
 	pattern := regexp.MustCompile(`(?i)@(skill|mcp):([a-z0-9][a-z0-9._-]*)`)
-	return strings.TrimSpace(pattern.ReplaceAllStringFunc(value, func(token string) string {
+	value = strings.TrimSpace(pattern.ReplaceAllStringFunc(value, func(token string) string {
 		match := pattern.FindStringSubmatch(token)
 		if len(match) != 3 {
 			return token
@@ -538,6 +539,10 @@ func codexCapabilityText(value string) string {
 		}
 		return "[优先使用 MCP server easyagent_" + strings.ReplaceAll(match[2], ".", "_") + "]"
 	}))
+	if len(directories) == 0 {
+		return value
+	}
+	return "<easyagent_project_sources>\nAdditional source folders in this project; keep cwd unchanged and use absolute paths when needed:\n- " + strings.Join(directories, "\n- ") + "\n</easyagent_project_sources>\n\n" + value
 }
 
 func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *strings.Builder, timers *eventTimers, latestUsage *Usage) {

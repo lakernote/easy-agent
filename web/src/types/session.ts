@@ -84,6 +84,7 @@ export type ContextInfo = {
 export type Session = {
   id: string
   title: string
+  projectId?: string
   status: 'idle' | 'queued' | 'paused' | 'running' | 'failed' | 'canceled'
   error?: string
   runtime: 'easyagent' | 'codex'

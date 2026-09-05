@@ -13,6 +13,7 @@ import (
 type weixinStateView struct {
 	Enabled  bool                `json:"enabled"`
 	Accounts []weixinAccountView `json:"accounts"`
+	Projects []store.Project     `json:"projects"`
 }
 
 type weixinAccountView struct {
@@ -22,6 +23,8 @@ type weixinAccountView struct {
 	Enabled          bool               `json:"enabled"`
 	Connected        bool               `json:"connected"`
 	CurrentSessionID string             `json:"currentSessionId,omitempty"`
+	ProjectID        string             `json:"projectId,omitempty"`
+	ProjectName      string             `json:"projectName,omitempty"`
 	CurrentSession   *weixinSessionView `json:"currentSession,omitempty"`
 	DeliveryStatus   string             `json:"deliveryStatus"`
 	LastSeenAt       string             `json:"lastSeenAt,omitempty"`
@@ -59,6 +62,15 @@ func (server *Server) getWeixin(response http.ResponseWriter, _ *http.Request) {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
+	projects, err := server.projects()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	projectNames := make(map[string]string, len(projects))
+	for _, project := range projects {
+		projectNames[project.ID] = project.Name
+	}
 	views := make([]weixinAccountView, 0, len(accounts))
 	server.weixin.mu.Lock()
 	connectedAccounts := make(map[string]bool, len(server.weixin.pollers))
@@ -81,12 +93,13 @@ func (server *Server) getWeixin(response http.ResponseWriter, _ *http.Request) {
 		}
 		views = append(views, weixinAccountView{
 			ID: account.ID, Label: account.Label, UserID: maskWeixinID(account.UserID), Enabled: account.Enabled,
+			ProjectID: account.ProjectID, ProjectName: projectNames[account.ProjectID],
 			Connected: connectedAccounts[account.ID], CurrentSessionID: account.CurrentSessionID, CurrentSession: currentSession,
 			DeliveryStatus: weixinDeliveryStatus(account, sessionStatus, deliveringAccounts[account.ID]),
 			LastSeenAt:     optionalTimeJSON(account.LastSeenAt), LastMessageAt: optionalTimeJSON(account.LastMessageAt), CreatedAt: account.CreatedAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, weixinStateView{Enabled: settings.Enabled, Accounts: views})
+	writeJSON(response, http.StatusOK, weixinStateView{Enabled: settings.Enabled, Accounts: views, Projects: projects})
 }
 
 func (server *Server) saveWeixinSettings(response http.ResponseWriter, request *http.Request) {
@@ -176,13 +189,20 @@ func (server *Server) verifyWeixinLogin(response http.ResponseWriter, request *h
 
 func (server *Server) updateWeixinAccount(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Label   string `json:"label"`
-		Enabled bool   `json:"enabled"`
+		Label     string `json:"label"`
+		Enabled   bool   `json:"enabled"`
+		ProjectID string `json:"projectId"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	account, err := server.store.UpdateWeixinAccount(request.PathValue("id"), input.Label, input.Enabled, time.Now())
+	if strings.TrimSpace(input.ProjectID) != "" {
+		if _, err := server.store.GetProject(input.ProjectID); err != nil {
+			writeError(response, http.StatusBadRequest, "所选项目不存在")
+			return
+		}
+	}
+	account, err := server.store.UpdateWeixinAccount(request.PathValue("id"), input.Label, input.Enabled, input.ProjectID, time.Now())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(response, http.StatusNotFound, "微信绑定不存在")

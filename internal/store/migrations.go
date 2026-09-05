@@ -31,9 +31,23 @@ CREATE TABLE IF NOT EXISTS ea_mcp (
   config_json BLOB NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ea_projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ea_project_directories (
+  project_id TEXT NOT NULL REFERENCES ea_projects(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY(project_id, path)
+);
 CREATE TABLE IF NOT EXISTS ea_sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
+	  project_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
   error TEXT NOT NULL,
   runtime TEXT NOT NULL DEFAULT 'easyagent',
@@ -109,6 +123,7 @@ CREATE TABLE IF NOT EXISTS ea_weixin_accounts (
   enabled INTEGER NOT NULL DEFAULT 1,
   sync_buf TEXT NOT NULL DEFAULT '',
   current_session_id TEXT NOT NULL DEFAULT '',
+  project_id TEXT NOT NULL DEFAULT '',
   ignore_before TEXT NOT NULL,
   last_seen_at TEXT NOT NULL DEFAULT '',
   last_message_at TEXT NOT NULL DEFAULT '',
@@ -120,6 +135,7 @@ CREATE TABLE IF NOT EXISTS ea_weixin_accounts (
   updated_at TEXT NOT NULL
 );
 	CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_ea_projects_default ON ea_projects(is_default DESC, name);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session_id ON ea_messages(session_id, id);
 	CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
@@ -177,6 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 		name       string
 		definition string
 	}{
+		{name: "project_id", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "source_workspace", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "worktree_branch", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "workspace_notice", definition: "TEXT NOT NULL DEFAULT ''"},
@@ -189,6 +206,15 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 			if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
 				return fmt.Errorf("迁移 ea_sessions.%s: %w", column.name, err)
 			}
+		}
+	}
+	var weixinProjectColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_weixin_accounts') WHERE name='project_id'`).Scan(&weixinProjectColumn); err != nil {
+		return err
+	}
+	if weixinProjectColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_weixin_accounts ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 ea_weixin_accounts.project_id: %w", err)
 		}
 	}
 	var count int

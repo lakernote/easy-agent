@@ -25,7 +25,7 @@ func (server *Server) detectCodex(ctx context.Context) codexRuntimeStatus {
 	return status
 }
 
-func (server *Server) runCodexTurn(ctx context.Context, session store.Session, settings store.ModelSettings, workspace string, usage *store.Usage) error {
+func (server *Server) runCodexTurn(ctx context.Context, session store.Session, settings store.ModelSettings, workspace string, directories []string, usage *store.Usage) error {
 	status := server.detectCodex(ctx)
 	if !status.Installed {
 		return errors.New(status.Message)
@@ -68,7 +68,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	var lastProgressName string
 	completedActivities := make(map[string]struct{})
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
-		Path: status.Path, Workspace: workspace, Model: settings.Model, ThreadID: session.ResponseID,
+		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout: time.Duration(turnTimeoutSeconds) * time.Second,
 		Env:     server.codexEnvironmentWith(capabilityEnv),
 		Skills:  selectedSkillsForTurn,

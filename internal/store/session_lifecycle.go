@@ -94,7 +94,7 @@ func (store *Store) RecoverRunning(now time.Time) error {
 }
 
 func (store *Store) ListQueuedSessions() ([]Session, error) {
-	rows, err := store.db.Query(`SELECT id,title,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at FROM ea_sessions WHERE status='queued' ORDER BY updated_at,id`)
+	rows, err := store.db.Query(`SELECT ` + sessionSelectColumns + ` FROM ea_sessions WHERE status='queued' ORDER BY updated_at,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,4 +118,21 @@ func (store *Store) SetSessionWorkspace(id, workspace, sourceWorkspace, branch, 
 func (store *Store) SetSessionContinuation(id, responseID string) error {
 	_, err := store.db.Exec(`UPDATE ea_sessions SET response_id=? WHERE id=?`, responseID, id)
 	return err
+}
+
+// UpdateSessionMetadata 更新会话的管理信息，不改变 updated_at，避免仅重命名或
+// 整理文件夹就把旧会话移动到“最近”顶部。
+func (store *Store) UpdateSessionMetadata(id, title, projectID string) error {
+	result, err := store.db.Exec(`UPDATE ea_sessions SET title=?,project_id=? WHERE id=?`, title, projectID, id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return errors.New("会话不存在")
+	}
+	return nil
 }

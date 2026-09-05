@@ -155,7 +155,7 @@ export default function App() {
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
   return <div className="app-shell">
-    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
+    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
     <main className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>

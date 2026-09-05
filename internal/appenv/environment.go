@@ -29,11 +29,12 @@ type Config struct {
 
 // Environment 是整个进程共享的、已经规范化的运行环境。
 type Environment struct {
-	home      string
-	workspace string
-	runtime   string
-	bin       string
-	path      string
+	home        string
+	workspace   string
+	directories []string
+	runtime     string
+	bin         string
+	path        string
 
 	commandMu    sync.Mutex
 	commandCache map[string]string
@@ -167,9 +168,12 @@ func discoveredLoginPath() string {
 
 func (environment *Environment) Home() string      { return environment.home }
 func (environment *Environment) Workspace() string { return environment.workspace }
-func (environment *Environment) Runtime() string   { return environment.runtime }
-func (environment *Environment) Bin() string       { return environment.bin }
-func (environment *Environment) Path() string      { return environment.path }
+func (environment *Environment) Directories() []string {
+	return append([]string(nil), environment.directories...)
+}
+func (environment *Environment) Runtime() string { return environment.runtime }
+func (environment *Environment) Bin() string     { return environment.bin }
+func (environment *Environment) Path() string    { return environment.path }
 
 // WithWorkspace 为一次会话选择工作区。空值表示使用 EasyAgent 的默认工作区；
 // 用户提供的目录必须已经存在且必须是目录。返回新 Environment，避免并发会话
@@ -206,6 +210,30 @@ func (environment *Environment) WithWorkspace(value string) (*Environment, error
 	}, nil
 }
 
+// WithDirectories 扩展当前项目的源文件夹范围。相对路径仍以主工作区解析，
+// 额外源文件夹必须使用绝对路径，因此不会悄悄改变命令的默认 cwd。
+func (environment *Environment) WithDirectories(values []string) (*Environment, error) {
+	directories := make([]string, 0, len(values))
+	seen := map[string]struct{}{filepath.Clean(environment.workspace): {}}
+	for _, value := range values {
+		derived, err := environment.WithWorkspace(value)
+		if err != nil {
+			return nil, err
+		}
+		absolute := filepath.Clean(derived.Workspace())
+		if _, exists := seen[absolute]; exists {
+			continue
+		}
+		seen[absolute] = struct{}{}
+		directories = append(directories, absolute)
+	}
+	return &Environment{
+		home: environment.home, workspace: environment.workspace, directories: directories,
+		runtime: environment.runtime, bin: environment.bin, path: environment.path,
+		commandCache: make(map[string]string),
+	}, nil
+}
+
 // Environ 返回给 Shell 和 MCP 子进程使用的环境变量。PATH 总是来自 Environment，
 // extra 中的同名值会覆盖进程环境，但不能覆盖这个确定性 PATH。
 func (environment *Environment) Environ(extra map[string]string) []string {
@@ -233,7 +261,8 @@ func (environment *Environment) Environ(extra map[string]string) []string {
 	return result
 }
 
-// ResolveWorkspacePath 将相对路径固定解析到默认工作区，并拒绝越出工作区。
+// ResolveWorkspacePath 将相对路径固定解析到主工作区；绝对路径也可位于当前
+// Project 配置的其他源文件夹中。
 func (environment *Environment) ResolveWorkspacePath(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "." {
@@ -246,11 +275,13 @@ func (environment *Environment) ResolveWorkspacePath(value string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	relative, err := filepath.Rel(environment.workspace, absolute)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("路径必须位于工作区 %s 内", environment.workspace)
+	for _, root := range append([]string{environment.workspace}, environment.directories...) {
+		relative, relativeErr := filepath.Rel(root, absolute)
+		if relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return absolute, nil
+		}
 	}
-	return absolute, nil
+	return "", errors.New("路径必须位于当前项目的源文件夹中")
 }
 
 // ResolveCommand 只根据 EasyAgent 的 PATH 查找命令；不会依赖进程当前目录。

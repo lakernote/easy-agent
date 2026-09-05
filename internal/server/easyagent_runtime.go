@@ -79,7 +79,7 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		return err
 	}
 	systemPrompt := prompt.Render(prompt.Context{
-		Workspace: runEnvironment.Workspace(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkillsForTurn, SelectedTools: selectedToolNamesForTurn,
+		Workspace: runEnvironment.Workspace(), Directories: runEnvironment.Directories(), Skills: skillMeta, MCPs: mcpMeta, SelectedSkills: selectedSkillsForTurn, SelectedTools: selectedToolNamesForTurn,
 	})
 	if err := server.appendSelectedCapabilityEvents(id, turn, selectedSkillNamesForTurn, selectedMCPIDsForTurn); err != nil {
 		return err

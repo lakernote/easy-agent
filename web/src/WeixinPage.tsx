@@ -68,11 +68,11 @@ export function WeixinPage({ onError, onOpenSession }: Props) {
     catch (reason) { onError((reason as Error).message) }
     finally { setBusy('') }
   }
-  const updateAccount = async (account: WeixinAccount, enabled = account.enabled) => {
+  const updateAccount = async (account: WeixinAccount, enabled = account.enabled, projectId = account.projectId || '') => {
     const nextLabel = (draftLabels[account.id] || account.label).trim()
     if (!nextLabel) return
     setBusy(account.id); onError(''); setNotice('')
-    try { setState(await api.updateWeixinAccount(account.id, nextLabel, enabled)); setNotice(`${nextLabel} 已${enabled ? '启用' : '停用'}。`) }
+    try { setState(await api.updateWeixinAccount(account.id, nextLabel, enabled, projectId)); setNotice(`${nextLabel} 的远程设置已保存。`) }
     catch (reason) { onError((reason as Error).message) }
     finally { setBusy('') }
   }
@@ -111,14 +111,14 @@ export function WeixinPage({ onError, onOpenSession }: Props) {
 
     {notice && <p className="weixin-notice" role="status">{notice}</p>}
 
-    <WeixinAccountList accounts={state.accounts} channelEnabled={state.enabled} busy={busy} draftLabels={draftLabels} onDraftLabel={(id, value) => setDraftLabels((current) => ({ ...current, [id]: value }))} onUpdate={(account, enabled) => void updateAccount(account, enabled)} onRemove={setDeleting} onRetry={retryDelivery} onOpenSession={onOpenSession} />
+    <WeixinAccountList accounts={state.accounts} projects={state.projects} channelEnabled={state.enabled} busy={busy} draftLabels={draftLabels} onDraftLabel={(id, value) => setDraftLabels((current) => ({ ...current, [id]: value }))} onUpdate={(account, enabled, projectId) => void updateAccount(account, enabled, projectId)} onRemove={setDeleting} onRetry={retryDelivery} onOpenSession={onOpenSession} />
 
     <section className={`weixin-bind ${showBind || login || !state.accounts.length ? 'open' : ''}`} aria-labelledby="weixin-bind-title">
       <div className="weixin-section-title"><div><h3 id="weixin-bind-title">绑定新成员</h3><p>每个人单独扫码绑定，备注只在管理页面显示。</p></div>{state.accounts.length > 0 && <button className="ghost-button" type="button" aria-expanded={showBind || Boolean(login)} onClick={() => setShowBind((value) => !value)}>{showBind || login ? '收起' : '开始绑定'}</button>}</div>
       {(showBind || login || !state.accounts.length) && <><div className="weixin-bind-form"><label htmlFor="weixin-label">成员备注</label><div><input id="weixin-label" value={label} maxLength={40} placeholder="例如：小王 / 运维值班" onChange={(event) => setLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void startLogin() }} /><button className="primary-button" type="button" disabled={!label.trim() || busy === 'login'} onClick={() => void startLogin()}>{busy === 'login' ? '生成中…' : '生成二维码'}</button></div></div>{login && <WeixinLoginCard login={login} verifyCode={verifyCode} busy={busy === 'verify'} onVerifyCode={setVerifyCode} onVerify={verify} onClose={() => void closeLogin()} />}</>}
     </section>
 
-    <aside className="weixin-commands"><div><strong>微信快捷指令</strong><span>直接发送中文即可，也兼容斜杠命令。</span></div><div><code>新会话</code><span>开始独立任务</span><small>/new</small></div><div><code>状态</code><span>查看当前进度</span><small>/status</small></div><div><code>停止</code><span>中断当前任务</span><small>/stop</small></div></aside>
+    <aside className="weixin-commands"><div><strong>微信快捷指令</strong><span>直接发送中文即可，也兼容斜杠命令。</span></div><div><code>新会话</code><span>开始独立任务</span><small>/new</small></div><div><code>状态</code><span>查看当前进度</span><small>/status</small></div><div><code>停止</code><span>中断当前任务</span><small>/stop</small></div><div><code>项目列表</code><span>查看与切换项目</span><small>/projects</small></div></aside>
     {deleting && <ConfirmDialog title="移除微信绑定？" description="移除后该成员不能再通过微信控制 EasyAgent，需要重新扫码才能恢复。已有 Web 会话不会删除。" subject={deleting.label} confirmLabel="移除绑定" busy={busy === `delete-${deleting.id}`} onCancel={() => setDeleting(null)} onConfirm={() => void removeAccount()} />}
   </section>
 }

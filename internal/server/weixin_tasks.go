@@ -14,10 +14,10 @@ import (
 )
 
 func (manager *weixinManager) handleCommand(account store.WeixinAccount, message weixin.Message, text string) bool {
-	command := weixinCommand(text)
-	switch command {
+	intent := defaultWeixinIntentParser.Parse(text)
+	switch intent.Command {
 	case "help":
-		manager.send(account, message.FromUserID, message.ContextToken, "直接发送文字即可创建或继续任务。\n“新会话” 开始独立任务\n“状态” 查看当前进度\n“停止” 中断当前任务\n\n也支持 /new、/status、/stop。")
+		manager.send(account, message.FromUserID, message.ContextToken, "直接发送文字即可创建或继续任务。\n“新会话” 开始独立任务\n“状态” 查看当前进度\n“停止” 中断当前任务\n“项目列表” 查看可用项目\n“切换项目 项目名” 设置后续新会话的源文件夹\n\n也支持 /new、/status、/stop、/projects、/project 项目名。")
 		return true
 	case "new":
 		if session, err := manager.currentSession(account); err == nil && activeSessionStatus(session.Status) {
@@ -55,6 +55,54 @@ func (manager *weixinManager) handleCommand(account store.WeixinAccount, message
 		manager.server.tasks.cancel(session.ID)
 		manager.send(account, message.FromUserID, message.ContextToken, "已停止当前任务。")
 		return true
+	case "projects":
+		projects, err := manager.server.projects()
+		if err != nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "暂时无法读取项目列表，请稍后重试。")
+			return true
+		}
+		lines := []string{"可用项目："}
+		for _, project := range projects {
+			mark := ""
+			if project.ID == account.ProjectID || (account.ProjectID == "" && project.Default) {
+				mark = "（当前）"
+			}
+			lines = append(lines, "- "+project.Name+mark)
+		}
+		lines = append(lines, "发送“切换项目 项目名”可切换。")
+		manager.send(account, message.FromUserID, message.ContextToken, strings.Join(lines, "\n"))
+		return true
+	case "current_project":
+		project, err := manager.weixinProject(account)
+		if err != nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "暂时无法读取当前项目，请稍后重试。")
+		} else {
+			manager.send(account, message.FromUserID, message.ContextToken, fmt.Sprintf("当前项目：%s\n主源文件夹：%s\n共 %d 个源文件夹。", project.Name, project.Directories[0], len(project.Directories)))
+		}
+		return true
+	case "project":
+		projects, err := manager.server.projects()
+		if err != nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "暂时无法切换项目，请稍后重试。")
+			return true
+		}
+		var selected *store.Project
+		for index := range projects {
+			if normalizeWeixinIntent(projects[index].Name) == normalizeWeixinIntent(intent.Argument) {
+				selected = &projects[index]
+				break
+			}
+		}
+		if selected == nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "没有找到项目“"+intent.Argument+"”。发送“项目列表”查看可用项目。")
+			return true
+		}
+		if err := manager.server.store.SetWeixinProject(account.ID, selected.ID, time.Now()); err != nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "项目切换失败，请稍后重试。")
+			return true
+		}
+		manager.send(account, message.FromUserID, message.ContextToken, "已选择项目“"+selected.Name+"”。当前会话不变；发送“新会话”后，新任务会使用这个项目的源文件夹。")
+		return true
 	default:
 		return false
 	}
@@ -89,14 +137,18 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 		if err != nil {
 			return "", err
 		}
-		runEnvironment, err := manager.server.env.WithWorkspace("")
+		project, err := manager.weixinProject(account)
+		if err != nil {
+			return "", err
+		}
+		runEnvironment, err := manager.server.env.WithWorkspace(project.Directories[0])
 		if err != nil {
 			return "", err
 		}
 		sessionID = newID()
 		runtimeSettings, _ := manager.server.store.GetRuntimeSettings()
 		workspace := manager.server.prepareSessionWorkspace(manager.server.context, sessionID, runEnvironment.Workspace(), runtimeSettings)
-		if _, err := manager.server.store.CreateSessionWithProfile(sessionID, makeTitle(text), model.Runtime, model.ProfileID, model.Model, workspace.Execution, now); err != nil {
+		if _, err := manager.server.store.CreateSessionWithProject(sessionID, makeTitle(text), model.Runtime, model.ProfileID, model.Model, project.ID, workspace.Execution, now); err != nil {
 			return "", err
 		}
 		if err := manager.server.store.SetSessionWorkspace(sessionID, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
@@ -115,6 +167,18 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 		return "", err
 	}
 	return sessionID, nil
+}
+
+func (manager *weixinManager) weixinProject(account store.WeixinAccount) (store.Project, error) {
+	if strings.TrimSpace(account.ProjectID) != "" {
+		if project, err := manager.server.store.GetProject(account.ProjectID); err == nil && len(project.Directories) > 0 {
+			return project, nil
+		}
+	}
+	if err := manager.server.ensureDefaultProject(); err != nil {
+		return store.Project{}, err
+	}
+	return manager.server.store.DefaultProject()
 }
 
 func (manager *weixinManager) resumeDelivery(accountID string) {

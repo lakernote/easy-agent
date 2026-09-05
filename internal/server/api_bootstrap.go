@@ -12,6 +12,7 @@ import (
 
 type bootstrapPayload struct {
 	Sessions             []sessionView               `json:"sessions"`
+	Projects             []store.Project             `json:"projects"`
 	SessionsHasMore      bool                        `json:"sessionsHasMore,omitempty"`
 	Model                store.ModelSettings         `json:"model"`
 	ModelProfiles        []store.ModelProfile        `json:"modelProfiles"`
@@ -49,6 +50,11 @@ type modelRulesPayload struct {
 }
 
 func (server *Server) bootstrap(response http.ResponseWriter, request *http.Request) {
+	projects, err := server.projects()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	sessions, sessionsHasMore, err := server.store.ListSessionsBefore(100, "", "")
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
@@ -90,13 +96,13 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	model = detectedModel
 	runtimeSettings, _ := server.store.GetRuntimeSettings()
 	writeJSON(response, http.StatusOK, bootstrapPayload{
-		Sessions: server.sessionViews(sessions), SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
+		Sessions: server.sessionViews(sessions), Projects: projects, SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),
 		MCPs: publicMCPs(mcps), SystemPrompt: prompt.Template(), Ollama: server.detectOllama(request.Context()),
-		Runtime:     runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
+		Runtime:         runtimeInfoPayload{Home: server.env.Home(), Workspace: server.env.Workspace(), Runtime: server.env.Runtime()},
 		RuntimeSettings: runtimeSettings,
-		Codex:       server.detectCodex(request.Context()),
-		CodexConfig: server.loadCodexConfig(),
+		Codex:           server.detectCodex(request.Context()),
+		CodexConfig:     server.loadCodexConfig(),
 	})
 }
 

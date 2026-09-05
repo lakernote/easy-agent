@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { TrashIcon } from './ui'
-import type { Session } from './types'
+import { FolderIcon, TrashIcon } from './ui'
+import type { Bootstrap, Session } from './types'
 export function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -18,6 +18,58 @@ export function ConfirmDialog({ title, description, subject, confirmLabel, busy,
       <div className="confirm-copy"><p className="eyebrow">确认删除</p><h2>{title}</h2><p>{description}</p>{subject && <div className="confirm-subject" title={subject}>{subject}</div>}</div>
       <div className="confirm-actions"><button ref={cancelRef} className="ghost-button" disabled={busy} onClick={onCancel}>取消</button><button className="danger-button" disabled={busy} onClick={onConfirm}>{busy ? '删除中…' : confirmLabel}</button></div>
     </div>
+  </div>
+}
+
+export function RenameSessionDialog({ session, projects, busy, onCancel, onSave, onDelete }: { session: Session; projects: Bootstrap['projects']; busy: boolean; onCancel: () => void; onSave: (title: string, projectId: string) => void; onDelete: () => void }) {
+  const [title, setTitle] = useState(session.title)
+  const [projectId, setProjectId] = useState(session.projectId || '')
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    inputRef.current?.focus(); inputRef.current?.select()
+    const closeWithEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onCancel() }
+    document.addEventListener('keydown', closeWithEscape)
+    return () => document.removeEventListener('keydown', closeWithEscape)
+  }, [busy, onCancel])
+  const valid = title.trim().length > 0 && title.trim().length <= 120
+  return <div className="modal-backdrop" onMouseDown={() => !busy && onCancel()}>
+    <section className="modal session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><p className="eyebrow">CONVERSATION</p><h2 id="session-dialog-title">编辑会话</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
+      <label className="project-field"><span>会话名称</span><input ref={inputRef} value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && valid) onSave(title.trim(), projectId) }} /></label>
+      <label className="project-field"><span>所属项目</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">历史会话（不归入项目）</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+      <div className="session-project-fact"><span>固定执行目录</span><code>{session.sourceWorkspace || session.workspace}</code></div>
+      <p className="project-help">移动会话只调整项目归属及后续可用源文件夹，不会切换这个会话已经固定的执行目录。</p>
+      <div className="project-dialog-actions"><button className="danger-link" type="button" disabled={busy} onClick={onDelete}><TrashIcon />删除会话</button><div><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || !valid} onClick={() => onSave(title.trim(), projectId)}>{busy ? '保存中…' : '保存'}</button></div></div>
+    </section>
+  </div>
+}
+
+type Project = Bootstrap['projects'][number]
+
+export function ProjectDialog({ project, busy, onCancel, onSave, onDelete }: { project: Project | null; busy: boolean; onCancel: () => void; onSave: (value: { name: string; directories: string[]; default: boolean }) => void; onDelete: () => void }) {
+  const [name, setName] = useState(project?.name || '')
+  const [directories, setDirectories] = useState<string[]>(project?.directories.length ? project.directories : [''])
+  const [makeDefault, setMakeDefault] = useState(project?.default || false)
+  const nameRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    nameRef.current?.focus()
+    const closeWithEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onCancel() }
+    document.addEventListener('keydown', closeWithEscape)
+    return () => document.removeEventListener('keydown', closeWithEscape)
+  }, [busy, onCancel])
+  const normalized = directories.map((value) => value.trim()).filter(Boolean)
+  const valid = name.trim().length > 0 && name.trim().length <= 60 && normalized.length > 0
+  const updateDirectory = (index: number, value: string) => setDirectories((current) => current.map((item, itemIndex) => itemIndex === index ? value : item))
+  const removeDirectory = (index: number) => setDirectories((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  return <div className="modal-backdrop" onMouseDown={() => !busy && onCancel()}>
+    <section className="modal project-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><p className="eyebrow">LOCAL PROJECT</p><h2 id="project-dialog-title">{project ? '编辑项目' : '添加项目'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
+      <label className="project-field"><span>项目名称</span><div className="project-name-input"><FolderIcon /><input ref={nameRef} value={name} maxLength={60} placeholder="例如 EasyAgent" onChange={(event) => setName(event.target.value)} /></div></label>
+      <fieldset className="project-sources"><legend>源文件夹</legend>{directories.map((directory, index) => <div className="project-source" key={`${index}-${project?.id || 'new'}`}><FolderIcon /><input value={directory} aria-label={`源文件夹 ${index + 1}`} placeholder="/srv/projects/repository" onChange={(event) => updateDirectory(index, event.target.value)} /><button type="button" aria-label={`移除源文件夹 ${index + 1}`} disabled={busy || directories.length === 1} onClick={() => removeDirectory(index)}>×</button></div>)}<button className="add-source" type="button" disabled={busy || directories.length >= 12} onClick={() => setDirectories((current) => [...current, ''])}><FolderIcon add />添加文件夹</button></fieldset>
+      <label className="project-default"><input type="checkbox" checked={makeDefault} disabled={project?.default} onChange={(event) => setMakeDefault(event.target.checked)} /><span>设为微信和浏览器新会话的默认项目</span></label>
+      <p className="project-help">源文件夹必须已存在于 EasyAgent 所在服务器。第一个目录是新会话的主工作目录；移除配置不会删除磁盘文件。</p>
+      <div className="project-dialog-actions">{project && <button className="danger-link" type="button" disabled={busy || project.default} title={project.default ? '请先把其他项目设为默认' : '移除项目配置'} onClick={onDelete}>移除本地项目</button>}<div><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || !valid} onClick={() => onSave({ name: name.trim(), directories: normalized, default: makeDefault })}>{busy ? '保存中…' : '保存'}</button></div></div>
+    </section>
   </div>
 }
 

@@ -1,18 +1,19 @@
-import type { WeixinAccount } from '../types'
+import type { Project, WeixinAccount } from '../types'
 
 type Props = {
   accounts: WeixinAccount[]
+  projects: Project[]
   channelEnabled: boolean
   busy: string
   draftLabels: Record<string, string>
   onDraftLabel: (id: string, value: string) => void
-  onUpdate: (account: WeixinAccount, enabled?: boolean) => void
+  onUpdate: (account: WeixinAccount, enabled?: boolean, projectId?: string) => void
   onRemove: (account: WeixinAccount) => void
   onRetry: (account: WeixinAccount) => void
   onOpenSession: (id: string) => void
 }
 
-export function WeixinAccountList({ accounts, channelEnabled, busy, draftLabels, onDraftLabel, onUpdate, onRemove, onRetry, onOpenSession }: Props) {
+export function WeixinAccountList({ accounts, projects, channelEnabled, busy, draftLabels, onDraftLabel, onUpdate, onRemove, onRetry, onOpenSession }: Props) {
   return <section className="weixin-list" aria-labelledby="weixin-list-title">
     <div className="weixin-section-title"><div><h3 id="weixin-list-title">成员与任务</h3><p>查看每个人的连接、当前会话和结果回传状态。</p></div><span>{accounts.length} 人</span></div>
     {!accounts.length && <div className="weixin-empty"><strong>还没有绑定成员</strong><span>生成二维码并完成扫码后，绑定会显示在这里。</span></div>}
@@ -26,7 +27,7 @@ export function WeixinAccountList({ accounts, channelEnabled, busy, draftLabels,
         <div className={`weixin-task ${session ? session.status : 'empty'}`}>
           {session ? <><div className="weixin-task-copy"><span>当前会话</span><strong>{session.title}</strong><small>{session.progress || statusLabel(session.status)} · {session.runtime === 'codex' ? 'Codex' : 'EasyAgent'}{account.lastMessageAt ? ` · 收到于 ${formatRelative(account.lastMessageAt)}` : ''}</small></div><div className="weixin-task-state"><strong>{statusLabel(session.status)}</strong><span className={`delivery ${account.deliveryStatus}`}>{deliveryLabel(account.deliveryStatus)}</span></div></> : <div className="weixin-task-empty"><strong>还没有远程任务</strong><span>成员从微信发送文字后，会话状态会显示在这里。</span></div>}
         </div>
-        <footer className="weixin-account-actions"><div>{session && <button className="ghost-button" type="button" onClick={() => onOpenSession(session.id)}>打开会话</button>}{account.deliveryStatus === 'pending' && <button className="ghost-button retry" type="button" disabled={busy === `retry-${account.id}`} onClick={() => onRetry(account)}>{busy === `retry-${account.id}` ? '重试中…' : '重试回传'}</button>}</div><div><label className="weixin-member-toggle"><span>{account.enabled ? '允许远程' : '已停用'}</span><span className="switch"><input type="checkbox" aria-label={account.enabled ? `停用 ${account.label}` : `启用 ${account.label}`} checked={account.enabled} disabled={busy === account.id} onChange={(event) => onUpdate(account, event.target.checked)} /><span /></span></label><button className="weixin-remove" type="button" onClick={() => onRemove(account)}>移除绑定</button></div></footer>
+        <footer className="weixin-account-actions"><div>{session && <button className="ghost-button" type="button" onClick={() => onOpenSession(session.id)}>打开会话</button>}{account.deliveryStatus === 'pending' && <button className="ghost-button retry" type="button" disabled={busy === `retry-${account.id}`} onClick={() => onRetry(account)}>{busy === `retry-${account.id}` ? '重试中…' : '重试回传'}</button>}</div><div><label className="weixin-project-select"><span>新会话项目</span><select aria-label={`${account.label} 的新会话项目`} value={account.projectId || projects.find((project) => project.default)?.id || ''} disabled={busy === account.id} onChange={(event) => onUpdate(account, account.enabled, event.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label className="weixin-member-toggle"><span>{account.enabled ? '允许远程' : '已停用'}</span><span className="switch"><input type="checkbox" aria-label={account.enabled ? `停用 ${account.label}` : `启用 ${account.label}`} checked={account.enabled} disabled={busy === account.id} onChange={(event) => onUpdate(account, event.target.checked)} /><span /></span></label><button className="weixin-remove" type="button" onClick={() => onRemove(account)}>移除绑定</button></div></footer>
       </article>
     })}
   </section>

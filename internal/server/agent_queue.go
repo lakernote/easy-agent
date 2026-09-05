@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/store"
@@ -39,7 +40,7 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 			_ = server.store.FailSession(id, loadErr, store.Usage{}, time.Now())
 			return
 		}
-		projectKey := session.Workspace
+		projectKey := server.taskConflictKey(session)
 		if err := server.scheduler.acquire(taskContext, projectKey); err != nil {
 			// 服务停机时保留尚未开始的 queued 任务，下一次启动会恢复；用户
 			// 主动停止则 CancelSession 已经把状态改成 canceled。
@@ -74,6 +75,26 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		}
 	}()
 	return nil
+}
+
+// taskConflictKey keeps worktrees parallel when the project only exposes the
+// isolated repository. If a project adds any shared source folder, all of its
+// sessions serialize because those extra roots are not worktree-isolated.
+func (server *Server) taskConflictKey(session store.Session) string {
+	if session.ProjectID == "" {
+		return session.Workspace
+	}
+	project, err := server.store.GetProject(session.ProjectID)
+	if err != nil {
+		return session.Workspace
+	}
+	for _, directory := range project.Directories {
+		path := filepath.Clean(directory)
+		if path != filepath.Clean(session.SourceWorkspace) && path != filepath.Clean(session.Workspace) {
+			return "project:" + session.ProjectID
+		}
+	}
+	return session.Workspace
 }
 
 func (server *Server) resumeQueuedSessions() {

@@ -59,5 +59,5 @@ type codexExecutor struct{ server *Server }
 func (executor codexExecutor) Name() string { return store.RuntimeCodex }
 
 func (executor codexExecutor) Run(request runtimeTurnRequest) error {
-	return executor.server.runCodexTurn(request.Context, request.Session, request.Settings, request.Environment.Workspace(), request.Usage)
+	return executor.server.runCodexTurn(request.Context, request.Session, request.Settings, request.Environment.Workspace(), request.Environment.Directories(), request.Usage)
 }

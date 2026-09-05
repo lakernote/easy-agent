@@ -28,8 +28,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState(data.activeModelProfileId)
-  const [workspace, setWorkspaceState] = useState(() => window.localStorage.getItem('easyagent.workspace') || data.runtime.workspace)
-  const [workspaceDraft, setWorkspaceDraft] = useState(workspace)
+  const defaultProject = data.projects.find((item) => item.default) || data.projects[0]
+  const [selectedProjectId, setSelectedProjectId] = useState(() => window.localStorage.getItem('easyagent.project') || defaultProject?.id || '')
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const composerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -58,10 +58,9 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
   useEffect(() => { if (!session) setSelectedProfileId(data.activeModelProfileId) }, [data.activeModelProfileId, session?.id])
   useEffect(() => {
-    if (session || workspace.trim()) return
-    setWorkspaceState(data.runtime.workspace)
-    setWorkspaceDraft(data.runtime.workspace)
-  }, [data.runtime.workspace, session, workspace])
+    if (session || data.projects.some((item) => item.id === selectedProjectId)) return
+    setSelectedProjectId(defaultProject?.id || '')
+  }, [data.projects, defaultProject?.id, selectedProjectId, session])
   useEffect(() => {
     if (!capabilityOpen) return
     const close = (event: PointerEvent) => {
@@ -183,7 +182,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setSending(true); onError(''); setAttachmentError('')
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
-      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, workspace.trim(), selectedProfileId)
+      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, '', selectedProfileId, selectedProjectId)
       onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); setWorkspaceOpen(false); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
@@ -202,14 +201,14 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     send(suggestion.prompt)
   }
 
-  const applyWorkspace = () => {
-    const value = workspaceDraft.trim() || data.runtime.workspace
-    setWorkspaceState(value)
-    setWorkspaceDraft(value)
+  const selectProject = (value: string) => {
+    setSelectedProjectId(value)
     setWorkspaceOpen(false)
-    window.localStorage.setItem('easyagent.workspace', value)
+    window.localStorage.setItem('easyagent.project', value)
     textareaRef.current?.focus()
   }
+
+  const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
 
   return {
     session, data, onOpenSkills, onOpenCapabilities,
@@ -217,7 +216,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
-    workspace: session?.workspace || workspace, workspaceDraft, setWorkspaceDraft, workspaceOpen, setWorkspaceOpen, applyWorkspace,
+    workspace: session?.workspace || selectedProject?.directories[0] || data.runtime.workspace,
+    projectOptions: data.projects, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen,
     profileOptions, selectedProfileId, setSelectedProfileId, displayedModel,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,

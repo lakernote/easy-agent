@@ -205,6 +205,8 @@ body { overflow: hidden; background: #f7f7f5; }
 .weixin-task-empty strong { color: #556159; font-size: 13px; }
 .weixin-account-actions { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 12px 8px 16px; border-top: 1px solid #edf0ed; }
 .weixin-account-actions > div { display: flex; align-items: center; gap: 7px; }
+.weixin-project-select { display: flex; align-items: center; gap: 7px; color: #657169; font-size: 11px; }
+.weixin-project-select select { max-width: 180px; height: 36px; padding: 0 28px 0 9px; border: 1px solid #d9e0da; border-radius: 7px; color: #334239; background: #fff; font-size: 11px; }
 .weixin-account-actions .ghost-button { min-height: 40px; }
 .weixin-account-actions .retry { color: #905435; border-color: #ead5c9; background: #fffaf7; }
 .weixin-member-toggle { display: flex; min-height: 44px; align-items: center; gap: 10px; padding: 0 8px; color: #657169; font-size: 11px; cursor: pointer; }
@@ -212,7 +214,7 @@ body { overflow: hidden; background: #f7f7f5; }
 .weixin-remove:hover { background: #fff1ef; }
 .weixin-empty { display: grid; min-height: 132px; place-items: center; align-content: center; gap: 7px; border: 1px dashed #dce2dd; border-radius: 9px; color: #879189; background: #fafbfa; font-size: 12px; text-align: center; }
 .weixin-empty strong { color: #566159; font-size: 13px; }
-.weixin-commands { display: grid; grid-template-columns: minmax(190px, 1.5fr) repeat(3, minmax(150px, 1fr)); overflow: hidden; border: 1px solid #e1e5e1; border-radius: 11px; background: #f7f9f7; }
+.weixin-commands { display: grid; grid-template-columns: minmax(190px, 1.5fr) repeat(4, minmax(130px, 1fr)); overflow: hidden; border: 1px solid #e1e5e1; border-radius: 11px; background: #f7f9f7; }
 .weixin-commands > div { display: grid; grid-template-columns: auto 1fr; align-content: center; gap: 3px 9px; min-height: 72px; padding: 12px 15px; border-right: 1px solid #e1e5e1; }
 .weixin-commands > div:last-child { border-right: 0; }
 .weixin-commands > div:first-child { display: block; }
@@ -225,6 +227,45 @@ body { overflow: hidden; background: #f7f7f5; }
   .login-panel { padding: 28px 22px; }.login-brand { margin-bottom: 34px; }
   .account-panel { grid-template-columns: 1fr; }.account-panel > button { justify-self: start; }.password-form { grid-template-columns: 1fr; }.password-form .primary-button { width: 100%; }
   .weixin-page { gap: 14px; }.weixin-head { flex-direction: column; gap: 18px; padding-bottom: 18px; }.weixin-head h2 { font-size: 24px; }.weixin-global { width: 100%; min-width: 0; }.weixin-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }.weixin-overview > div, .weixin-refresh { min-height: 82px; border-bottom: 1px solid #e7ebe7; }.weixin-overview > div:nth-child(2) { border-right: 0; }.weixin-overview > div:nth-child(3), .weixin-refresh { border-bottom: 0; }.weixin-bind, .weixin-list { padding: 15px; }.weixin-bind-form > div { flex-direction: column; }.weixin-bind-form .primary-button { width: 100%; }.weixin-login, .weixin-login.finished { grid-template-columns: 1fr; }.weixin-qr { width: 218px; justify-self: center; }.weixin-account-head { align-items: flex-start; flex-wrap: wrap; padding: 12px; }.weixin-account-main { width: calc(100% - 50px); }.weixin-state { margin-left: 50px; }.weixin-task { align-items: flex-start; flex-direction: column; gap: 12px; padding: 14px 12px; }.weixin-task-copy > strong, .weixin-task-copy > small { white-space: normal; }.weixin-task-state { width: 100%; grid-template-columns: 1fr auto; align-items: center; justify-items: start; }.weixin-account-actions { align-items: stretch; flex-direction: column; padding: 9px 10px; }.weixin-account-actions > div { justify-content: space-between; }.weixin-account-actions > div:first-child:empty { display: none; }.weixin-commands { grid-template-columns: 1fr; }.weixin-commands > div { min-height: 62px; border-right: 0; border-bottom: 1px solid #e1e5e1; }.weixin-commands > div:last-child { border-bottom: 0; }
+}
+
+/* Codex-style project organization: projects group conversations and own one
+   or more server source folders, while each conversation keeps a fixed cwd. */
+.session-project { margin: 2px 0 8px; }
+.session-project-head { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 2px 10px; color: #68746c; }
+.session-project-head > span { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.session-project-head svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-project-head strong { overflow: hidden; color: #4b5750; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.session-project-head small { display: grid; min-width: 17px; height: 17px; place-items: center; border-radius: 9px; color: #7c8780; background: #e8ebe8; font-size: 8px; }
+.session-project-head > button { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border: 0; border-radius: 7px; color: #8a938d; background: transparent; cursor: pointer; }
+.session-project-head > button:hover { color: #3e6f51; background: #e9eeea; }
+.session-project-head > button svg { width: 17px; }
+.session-more:hover { color: #3f7555; background: #e8f0ea; }
+.project-picker > .project-picker-list { display: grid; max-height: 210px; grid-template-columns: 1fr; gap: 5px; overflow: auto; }
+.project-picker-list > button { display: grid; gap: 3px; min-height: 48px; padding: 8px 10px; border: 1px solid #dde4df; border-radius: 8px; color: #3e4c43; background: #fff; cursor: pointer; text-align: left; }
+.project-picker-list > button:hover { border-color: #9db5a5; }.project-picker-list > button.selected { border-color: #70a082; background: #edf5ef; }
+.project-picker-list strong { font-size: 10px; }.project-picker-list span { overflow: hidden; color: #7e8982; font-family: var(--mono); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.project-dialog, .session-dialog { width: min(620px, 100%); }
+.project-field { display: grid; gap: 7px; margin-bottom: 18px; color: #49574e; font-size: 11px; font-weight: 600; }
+.project-field > input, .project-field > select, .project-name-input { width: 100%; min-height: 46px; border: 1px solid #d9dfda; border-radius: 10px; background: #fff; }
+.project-field > input, .project-field > select { padding: 0 13px; color: #26322a; font-size: 14px; }
+.project-name-input { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; overflow: hidden; }
+.project-name-input svg, .project-source svg { width: 19px; height: 19px; justify-self: center; fill: none; stroke: #66736b; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.project-name-input input { width: 100%; height: 44px; padding: 0 13px; border: 0; border-left: 1px solid #e5e8e5; outline: 0; color: #273129; font-size: 14px; }
+.project-field > input:focus, .project-field > select:focus, .project-name-input:focus-within, .project-source:focus-within { border-color: #6f9d80; box-shadow: 0 0 0 3px #e2eee6; outline: 0; }
+.project-sources { margin: 0; padding: 0; border: 0; }.project-sources legend { margin-bottom: 8px; color: #49574e; font-size: 11px; font-weight: 600; }
+.project-source { display: grid; min-height: 46px; grid-template-columns: 48px minmax(0, 1fr) 44px; align-items: center; margin-bottom: 7px; overflow: hidden; border: 1px solid #dde2de; border-radius: 9px; background: #fafbfa; }
+.project-source input { width: 100%; height: 44px; padding: 0 11px; border: 0; border-right: 1px solid #e5e8e5; border-left: 1px solid #e5e8e5; outline: 0; color: #354139; background: transparent; font-family: var(--mono); font-size: 10px; }
+.project-source button { height: 44px; border: 0; color: #8b958e; background: transparent; cursor: pointer; font-size: 18px; }.project-source button:hover:not(:disabled) { color: #a04a40; background: #fff0ed; }.project-source button:disabled { cursor: default; opacity: .3; }
+.add-source { display: flex; width: 100%; min-height: 44px; align-items: center; gap: 10px; padding: 0 15px; border: 1px dashed #cfd8d1; border-radius: 9px; color: #477158; background: #f7faf8; cursor: pointer; font-size: 11px; font-weight: 600; }.add-source:hover { border-color: #82a38d; background: #eef5f0; }.add-source svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.project-default { display: flex; min-height: 44px; align-items: center; gap: 9px; margin-top: 13px; color: #5f6c64; font-size: 10px; cursor: pointer; }.project-default input { width: 16px; height: 16px; accent-color: var(--green); }
+.project-help { margin: 0 0 20px; color: #849087; font-size: 9px; line-height: 1.6; }
+.project-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid #e8ebe8; }.project-dialog-actions > div { display: flex; gap: 8px; margin-left: auto; }.project-dialog-actions button { min-height: 42px; }
+.danger-link { display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 0; border-radius: 8px; color: #a0483f; background: #fff0ed; cursor: pointer; font-size: 10px; font-weight: 600; }.danger-link:hover:not(:disabled) { background: #fbe2de; }.danger-link:disabled { color: #a5aaa6; background: #f2f3f2; cursor: default; }.danger-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-project-fact { display: grid; gap: 6px; margin: 0 0 22px; padding: 12px; border-radius: 9px; color: #7c8780; background: #f5f7f5; font-size: 9px; }.session-project-fact code { overflow-wrap: anywhere; color: #415249; font-family: var(--mono); font-size: 9px; }
+
+@media (max-width: 700px) {
+  .project-dialog, .session-dialog { padding: 20px; }.project-dialog-actions { align-items: stretch; flex-direction: column; }.project-dialog-actions > div { width: 100%; margin-left: 0; }.project-dialog-actions > div button { flex: 1; }.danger-link { justify-content: center; }
 }
 
 /* 左下角只保留一个轻量设置入口，避免把设置分区摘要挤进导航。 */

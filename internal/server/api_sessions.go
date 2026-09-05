@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -15,8 +17,75 @@ type messageRequest struct {
 	Message     string              `json:"message"`
 	Attachments []attachmentRequest `json:"attachments"`
 	ProfileID   string              `json:"profileId,omitempty"`
+	ProjectID   string              `json:"projectId,omitempty"`
 	// Workspace 只在创建会话时使用；后续多轮对话始终沿用会话保存的工作区。
 	Workspace string `json:"workspace,omitempty"`
+}
+
+type updateSessionRequest struct {
+	Title     *string `json:"title"`
+	ProjectID *string `json:"projectId"`
+}
+
+func (server *Server) updateSession(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	current, err := server.store.LoadSessionWindow(id, 1, 1)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, "会话不存在")
+		} else {
+			writeError(response, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	var input updateSessionRequest
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Title == nil && input.ProjectID == nil {
+		writeError(response, http.StatusBadRequest, "缺少需要更新的会话信息")
+		return
+	}
+	title := current.Title
+	if input.Title != nil {
+		title = strings.TrimSpace(*input.Title)
+	}
+	if title == "" || utf8.RuneCountInString(title) > 120 || containsControl(title) {
+		writeError(response, http.StatusBadRequest, "会话名称必须为 1 到 120 个有效字符")
+		return
+	}
+	projectID := current.ProjectID
+	if input.ProjectID != nil {
+		projectID = strings.TrimSpace(*input.ProjectID)
+		if projectID != "" {
+			if _, err := server.store.GetProject(projectID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeError(response, http.StatusBadRequest, "所选项目不存在")
+				} else {
+					writeError(response, http.StatusInternalServerError, err.Error())
+				}
+				return
+			}
+		}
+	}
+	if title == current.Title && projectID == current.ProjectID {
+		server.writeSession(response, request, id, http.StatusOK)
+		return
+	}
+	if err := server.store.UpdateSessionMetadata(id, title, projectID); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	server.writeSession(response, request, id, http.StatusOK)
+}
+
+func containsControl(value string) bool {
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return true
+		}
+	}
+	return false
 }
 
 func (server *Server) createSession(response http.ResponseWriter, request *http.Request) {
@@ -34,7 +103,12 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, "请输入消息或添加附件")
 		return
 	}
-	runEnvironment, err := server.env.WithWorkspace(input.Workspace)
+	projectID, workspacePath, err := server.resolveNewSessionProject(input.ProjectID, input.Workspace)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	runEnvironment, err := server.env.WithWorkspace(workspacePath)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
@@ -47,7 +121,7 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 	id := newID()
 	runtimeSettings, _ := server.store.GetRuntimeSettings()
 	workspace := server.prepareSessionWorkspace(request.Context(), id, runEnvironment.Workspace(), runtimeSettings)
-	if _, err := server.store.CreateSessionWithProfile(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, workspace.Execution, time.Now()); err != nil {
+	if _, err := server.store.CreateSessionWithProject(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, projectID, workspace.Execution, time.Now()); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -66,6 +140,35 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, server.sessionView(value))
+}
+
+func (server *Server) resolveNewSessionProject(projectID, workspace string) (string, string, error) {
+	projectID = strings.TrimSpace(projectID)
+	workspace = strings.TrimSpace(workspace)
+	if projectID != "" {
+		project, err := server.store.GetProject(projectID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", "", errors.New("所选项目不存在")
+			}
+			return "", "", err
+		}
+		if len(project.Directories) == 0 {
+			return "", "", errors.New("所选项目没有源文件夹")
+		}
+		return project.ID, project.Directories[0], nil
+	}
+	if workspace != "" {
+		return "", workspace, nil
+	}
+	if err := server.ensureDefaultProject(); err != nil {
+		return "", "", err
+	}
+	project, err := server.store.DefaultProject()
+	if err != nil || len(project.Directories) == 0 {
+		return "", "", errors.New("默认项目没有可用的源文件夹")
+	}
+	return project.ID, project.Directories[0], nil
 }
 
 func (server *Server) continueSession(response http.ResponseWriter, request *http.Request) {

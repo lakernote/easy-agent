@@ -80,7 +80,7 @@ func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
 func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry {
 	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
-	files := newFileWorkspace(environment.Workspace())
+	files := newFileWorkspace(environment.Workspace(), environment.Directories())
 	result := []entry{
 		{tool: currentTimeTool(), category: categoryInformation, group: groupInformation},
 		{tool: weatherTool(), category: categoryInformation, group: groupInformation},

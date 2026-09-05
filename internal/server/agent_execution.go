@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -17,6 +20,22 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 	runEnvironment, err := server.env.WithWorkspace(session.Workspace)
 	if err != nil {
 		return fmt.Errorf("打开会话工作区: %w", err)
+	}
+	directories := []string{}
+	if session.ProjectID != "" {
+		project, projectErr := server.store.GetProject(session.ProjectID)
+		if projectErr != nil && !errors.Is(projectErr, sql.ErrNoRows) {
+			return fmt.Errorf("读取会话项目: %w", projectErr)
+		}
+		for _, directory := range project.Directories {
+			if filepath.Clean(directory) != filepath.Clean(session.SourceWorkspace) && filepath.Clean(directory) != filepath.Clean(session.Workspace) {
+				directories = append(directories, directory)
+			}
+		}
+	}
+	runEnvironment, err = runEnvironment.WithDirectories(directories)
+	if err != nil {
+		return fmt.Errorf("打开项目源文件夹: %w", err)
 	}
 	registry := server.runtimes
 	if registry == nil {

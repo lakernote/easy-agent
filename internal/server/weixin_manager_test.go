@@ -87,6 +87,9 @@ func TestWeixinNaturalCommands(t *testing.T) {
 		"请帮我终止这个任务":               "stop",
 		"有哪些命令":                   "help",
 		"你支持哪些操作":                 "help",
+		"项目列表":                    "projects",
+		"当前项目":                    "current_project",
+		"切换项目 EasyAgent":          "project",
 		"帮我实现新会话按钮":               "",
 		"创建新会话是什么意思":              "",
 		"不要创建新会话":                 "",
@@ -118,6 +121,14 @@ func TestWeixinIntentParserReportsExplicitAndGrammarConfidence(t *testing.T) {
 	unknown := parser.Parse("请解释创建新对话的实现方式")
 	if unknown.Command != "" || unknown.Confidence != 0 {
 		t.Fatalf("普通对话不应被控制层拦截: %+v", unknown)
+	}
+	project := parser.Parse("切换项目 EasyAgent Web")
+	if project.Command != "project" || project.Argument != "easyagentweb" || project.Confidence < 90 {
+		t.Fatalf("项目切换意图解析错误: %+v", project)
+	}
+	explicitProject := parser.Parse("/project EasyAgent Web")
+	if explicitProject.Command != "project" || explicitProject.Argument != "EasyAgent Web" || !explicitProject.Explicit {
+		t.Fatalf("明确项目命令解析错误: %+v", explicitProject)
 	}
 }
 

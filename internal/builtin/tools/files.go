@@ -32,16 +32,31 @@ const (
 // 既减少 Token，也避免 Trace 把服务器用户名和绝对目录暴露到截图中。
 type fileWorkspace struct {
 	root  string
+	roots []string
 	mu    sync.Mutex
 	reads map[string][sha256.Size]byte
 }
 
-func newFileWorkspace(root string) *fileWorkspace {
-	root, _ = filepath.Abs(root)
-	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
-		root = resolved
+func newFileWorkspace(root string, additional ...[]string) *fileWorkspace {
+	values := []string{root}
+	if len(additional) > 0 {
+		values = append(values, additional[0]...)
 	}
-	return &fileWorkspace{root: filepath.Clean(root), reads: map[string][sha256.Size]byte{}}
+	roots := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value, _ = filepath.Abs(value)
+		if resolved, resolveErr := filepath.EvalSymlinks(value); resolveErr == nil {
+			value = resolved
+		}
+		value = filepath.Clean(value)
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		roots = append(roots, value)
+	}
+	return &fileWorkspace{root: roots[0], roots: roots, reads: map[string][sha256.Size]byte{}}
 }
 
 func (workspace *fileWorkspace) tools() []agent.Tool {
@@ -503,11 +518,21 @@ func (workspace *fileWorkspace) resolveForWrite(input string) (string, string, b
 }
 
 func (workspace *fileWorkspace) relative(absolute string) (string, error) {
-	relative, err := filepath.Rel(workspace.root, absolute)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errors.New("路径超出 EasyAgent 工作区")
+	roots := workspace.roots
+	if len(roots) == 0 && workspace.root != "" {
+		roots = []string{workspace.root}
 	}
-	return filepath.ToSlash(relative), nil
+	for index, root := range roots {
+		relative, err := filepath.Rel(root, absolute)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if index == 0 {
+			return filepath.ToSlash(relative), nil
+		}
+		return filepath.ToSlash(absolute), nil
+	}
+	return "", errors.New("路径超出当前项目的源文件夹")
 }
 
 func (workspace *fileWorkspace) rememberRead(path string, content []byte) {

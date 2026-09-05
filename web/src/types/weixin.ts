@@ -1,3 +1,5 @@
+import type { Project } from './bootstrap'
+
 export type WeixinAccount = {
   id: string
   label: string
@@ -5,6 +7,8 @@ export type WeixinAccount = {
   enabled: boolean
   connected: boolean
   currentSessionId?: string
+  projectId?: string
+  projectName?: string
   currentSession?: {
     id: string
     title: string
@@ -22,6 +26,7 @@ export type WeixinAccount = {
 export type WeixinState = {
   enabled: boolean
   accounts: WeixinAccount[]
+  projects: Project[]
 }
 
 export type WeixinLogin = {

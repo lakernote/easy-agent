@@ -144,7 +144,13 @@ func (manager *weixinManager) pollLogin(ctx context.Context, id string) {
 				}
 			}
 			now := time.Now()
-			account := store.WeixinAccount{ID: status.AccountID, Label: login.Label, UserID: status.UserID, Token: status.BotToken, BaseURL: baseURL, Enabled: true, IgnoreBefore: now, CreatedAt: now, UpdatedAt: now}
+			projectID := ""
+			if err := manager.server.ensureDefaultProject(); err == nil {
+				if project, projectErr := manager.server.store.DefaultProject(); projectErr == nil {
+					projectID = project.ID
+				}
+			}
+			account := store.WeixinAccount{ID: status.AccountID, Label: login.Label, UserID: status.UserID, Token: status.BotToken, BaseURL: baseURL, Enabled: true, ProjectID: projectID, IgnoreBefore: now, CreatedAt: now, UpdatedAt: now}
 			if err := manager.server.store.SaveWeixinAccount(account); err != nil {
 				manager.updateLogin(id, "failed", "保存微信绑定失败："+err.Error(), "")
 				return

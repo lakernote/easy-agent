@@ -234,3 +234,12 @@ func TestCodexCapabilityTextUsesNativeSkillAndManagedMCPNames(t *testing.T) {
 		t.Fatalf("Codex 能力引用转换错误: %q", got)
 	}
 }
+
+func TestCodexCapabilityTextIncludesAdditionalProjectSources(t *testing.T) {
+	got := codexCapabilityText("检查两个仓库", "/srv/api", "/srv/web")
+	for _, expected := range []string{"<easyagent_project_sources>", "/srv/api", "/srv/web", "keep cwd unchanged", "检查两个仓库"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("Codex 项目源文件夹上下文缺少 %q: %s", expected, got)
+		}
+	}
+}

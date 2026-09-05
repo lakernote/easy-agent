@@ -43,6 +43,7 @@ type SelectedSkill struct {
 
 type Context struct {
 	Workspace      string
+	Directories    []string
 	Skills         []SkillMeta
 	MCPs           []MCPMeta
 	SelectedSkills []SelectedSkill
@@ -55,6 +56,12 @@ func Render(context Context) string {
 	runtime := "当前会话使用默认工作区。"
 	if strings.TrimSpace(context.Workspace) != "" {
 		runtime = fmt.Sprintf("当前会话工作区：%q。文件和命令默认在该目录中运行。", context.Workspace)
+	}
+	if len(context.Directories) > 0 {
+		runtime += "\n当前项目还包含以下源文件夹；跨目录操作时使用绝对路径，默认工作目录保持不变："
+		for _, directory := range context.Directories {
+			runtime += fmt.Sprintf("\n- %q", directory)
+		}
 	}
 	var skills strings.Builder
 	if len(context.Skills) == 0 {

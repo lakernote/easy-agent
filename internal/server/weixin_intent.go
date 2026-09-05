@@ -4,6 +4,7 @@ import "strings"
 
 type weixinIntent struct {
 	Command    string
+	Argument   string
 	Confidence int
 	Explicit   bool
 }
@@ -24,7 +25,7 @@ func weixinCommand(value string) string {
 
 func newWeixinIntentParser() *weixinIntentParser {
 	parser := &weixinIntentParser{
-		explicit:   map[string]string{"/help": "help", "/new": "new", "/status": "status", "/stop": "stop"},
+		explicit:   map[string]string{"/help": "help", "/new": "new", "/status": "status", "/stop": "stop", "/projects": "projects"},
 		help:       phraseSet("帮助", "使用帮助", "使用说明", "命令", "可用命令", "有哪些命令", "怎么用", "如何使用", "做什么", "哪些操作", "支持什么", "你能做什么", "你会什么"),
 		newSession: make(map[string]struct{}),
 		status:     make(map[string]struct{}),
@@ -38,6 +39,14 @@ func newWeixinIntentParser() *weixinIntentParser {
 }
 
 func (parser *weixinIntentParser) Parse(value string) weixinIntent {
+	raw := strings.TrimSpace(value)
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "/project ") {
+		argument := strings.TrimSpace(raw[len("/project "):])
+		if argument != "" {
+			return weixinIntent{Command: "project", Argument: argument, Confidence: 100, Explicit: true}
+		}
+	}
 	normalized := normalizeWeixinIntent(value)
 	if command, ok := parser.explicit[normalized]; ok {
 		return weixinIntent{Command: command, Confidence: 100, Explicit: true}
@@ -46,6 +55,17 @@ func (parser *weixinIntentParser) Parse(value string) weixinIntent {
 		return weixinIntent{}
 	}
 	core := trimWeixinIntentDecorators(normalized)
+	if core == "项目" || core == "当前项目" {
+		return weixinIntent{Command: "current_project", Confidence: 92}
+	}
+	if core == "项目列表" || core == "查看项目" || core == "查看项目列表" || core == "有哪些项目" {
+		return weixinIntent{Command: "projects", Confidence: 92}
+	}
+	for _, prefix := range []string{"切换项目到", "切换到项目", "切换项目", "选择项目"} {
+		if strings.HasPrefix(core, prefix) && strings.TrimPrefix(core, prefix) != "" {
+			return weixinIntent{Command: "project", Argument: strings.TrimPrefix(core, prefix), Confidence: 94}
+		}
+	}
 	if _, ok := parser.help[core]; ok {
 		return weixinIntent{Command: "help", Confidence: 90}
 	}

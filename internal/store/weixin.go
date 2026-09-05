@@ -50,17 +50,17 @@ func (store *Store) SaveWeixinAccount(value WeixinAccount) error {
 		value.UpdatedAt = value.CreatedAt
 	}
 	_, err := store.db.Exec(`INSERT INTO ea_weixin_accounts(
-		id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,ignore_before,
+		id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,project_id,ignore_before,
 		last_seen_at,last_message_at,last_sequence,pending_message_id,delivered_message_id,
 		pending_context_token,created_at,updated_at
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	ON CONFLICT(user_id) DO UPDATE SET
 		id=excluded.id,label=excluded.label,token=excluded.token,base_url=excluded.base_url,
-		enabled=excluded.enabled,sync_buf='',ignore_before=excluded.ignore_before,
+		enabled=excluded.enabled,sync_buf='',project_id=excluded.project_id,ignore_before=excluded.ignore_before,
 		last_seen_at='',last_message_at='',last_sequence=0,pending_message_id=0,
 		delivered_message_id=0,pending_context_token='',updated_at=excluded.updated_at`,
 		value.ID, value.Label, value.UserID, value.Token, value.BaseURL, boolInt(value.Enabled),
-		value.SyncBuffer, value.CurrentSessionID, formatOptionalTime(value.IgnoreBefore),
+		value.SyncBuffer, value.CurrentSessionID, value.ProjectID, formatOptionalTime(value.IgnoreBefore),
 		formatOptionalTime(value.LastSeenAt), formatOptionalTime(value.LastMessageAt), value.LastSequence,
 		value.PendingMessageID, value.DeliveredMessageID, value.PendingContextToken,
 		formatTime(value.CreatedAt), formatTime(value.UpdatedAt))
@@ -68,7 +68,7 @@ func (store *Store) SaveWeixinAccount(value WeixinAccount) error {
 }
 
 func (store *Store) ListWeixinAccounts() ([]WeixinAccount, error) {
-	rows, err := store.db.Query(`SELECT id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,
+	rows, err := store.db.Query(`SELECT id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,project_id,
 		ignore_before,last_seen_at,last_message_at,last_sequence,pending_message_id,
 		delivered_message_id,pending_context_token,created_at,updated_at
 		FROM ea_weixin_accounts ORDER BY created_at ASC`)
@@ -88,24 +88,24 @@ func (store *Store) ListWeixinAccounts() ([]WeixinAccount, error) {
 }
 
 func (store *Store) GetWeixinAccount(id string) (WeixinAccount, error) {
-	row := store.db.QueryRow(`SELECT id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,
+	row := store.db.QueryRow(`SELECT id,label,user_id,token,base_url,enabled,sync_buf,current_session_id,project_id,
 		ignore_before,last_seen_at,last_message_at,last_sequence,pending_message_id,
 		delivered_message_id,pending_context_token,created_at,updated_at
 		FROM ea_weixin_accounts WHERE id=?`, id)
 	return scanWeixinAccount(row)
 }
 
-func (store *Store) UpdateWeixinAccount(id, label string, enabled bool, now time.Time) (WeixinAccount, error) {
+func (store *Store) UpdateWeixinAccount(id, label string, enabled bool, projectID string, now time.Time) (WeixinAccount, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return WeixinAccount{}, errors.New("绑定备注不能为空")
 	}
 	enabledValue := boolInt(enabled)
-	result, err := store.db.Exec(`UPDATE ea_weixin_accounts SET label=?,enabled=?,
+	result, err := store.db.Exec(`UPDATE ea_weixin_accounts SET label=?,enabled=?,project_id=?,
 		ignore_before=CASE WHEN enabled=0 AND ?=1 THEN ? ELSE ignore_before END,
 		delivered_message_id=CASE WHEN ?=0 THEN pending_message_id ELSE delivered_message_id END,
 		pending_context_token=CASE WHEN ?=0 THEN '' ELSE pending_context_token END,updated_at=? WHERE id=?`,
-		label, enabledValue, enabledValue, formatTime(now), enabledValue, enabledValue, formatTime(now), id)
+		label, enabledValue, projectID, enabledValue, formatTime(now), enabledValue, enabledValue, formatTime(now), id)
 	if err != nil {
 		return WeixinAccount{}, err
 	}
@@ -117,6 +117,11 @@ func (store *Store) UpdateWeixinAccount(id, label string, enabled bool, now time
 
 func (store *Store) SetWeixinCurrentSession(id, sessionID string, now time.Time) error {
 	_, err := store.db.Exec(`UPDATE ea_weixin_accounts SET current_session_id=?,updated_at=? WHERE id=?`, sessionID, formatTime(now), id)
+	return err
+}
+
+func (store *Store) SetWeixinProject(id, projectID string, now time.Time) error {
+	_, err := store.db.Exec(`UPDATE ea_weixin_accounts SET project_id=?,updated_at=? WHERE id=?`, projectID, formatTime(now), id)
 	return err
 }
 
@@ -155,7 +160,7 @@ func scanWeixinAccount(scanner interface{ Scan(...any) error }) (WeixinAccount, 
 	var enabled int
 	var ignoreBefore, lastSeenAt, lastMessageAt, createdAt, updatedAt string
 	err := scanner.Scan(&value.ID, &value.Label, &value.UserID, &value.Token, &value.BaseURL, &enabled,
-		&value.SyncBuffer, &value.CurrentSessionID, &ignoreBefore, &lastSeenAt, &lastMessageAt,
+		&value.SyncBuffer, &value.CurrentSessionID, &value.ProjectID, &ignoreBefore, &lastSeenAt, &lastMessageAt,
 		&value.LastSequence, &value.PendingMessageID, &value.DeliveredMessageID,
 		&value.PendingContextToken, &createdAt, &updatedAt)
 	if err != nil {

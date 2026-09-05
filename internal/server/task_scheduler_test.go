@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/store"
 )
 
 func TestTaskSchedulerLimitsGlobalConcurrency(t *testing.T) {
@@ -24,6 +27,28 @@ func TestTaskSchedulerLimitsGlobalConcurrency(t *testing.T) {
 	scheduler.release("project-b")
 	if active, limit := scheduler.snapshot(); active != 0 || limit != 2 {
 		t.Fatalf("调度器计数异常: active=%d limit=%d", active, limit)
+	}
+}
+
+func TestTaskConflictKeySerializesProjectsWithSharedSources(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Now().UTC()
+	if _, err := database.CreateProject("multi", "多源项目", []string{"/srv/api", "/srv/web"}, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateProject("single", "单源项目", []string{"/srv/api"}, false, now); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{store: database}
+	if key := server.taskConflictKey(store.Session{ProjectID: "multi", Workspace: "/tmp/worktree", SourceWorkspace: "/srv/api"}); key != "project:multi" {
+		t.Fatalf("多源项目应按项目串行，实际 key=%q", key)
+	}
+	if key := server.taskConflictKey(store.Session{ProjectID: "single", Workspace: "/tmp/worktree", SourceWorkspace: "/srv/api"}); key != "/tmp/worktree" {
+		t.Fatalf("单源 worktree 应保持并行，实际 key=%q", key)
 	}
 }
 

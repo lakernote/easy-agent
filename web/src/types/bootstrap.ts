@@ -2,8 +2,11 @@ import type { CodexProviderConfig, CodexRuntimeStatus, ModelProfile, ModelRules,
 import type { MCPConfig, MCPPreset, Skill } from './capability'
 import type { Session } from './session'
 
+export type Project = { id: string; name: string; directories: string[]; default: boolean; createdAt: string; updatedAt: string }
+
 export type Bootstrap = {
   sessions: Session[]
+  projects: Project[]
   sessionsHasMore?: boolean
   model: ModelSettings
   modelProfiles: ModelProfile[]

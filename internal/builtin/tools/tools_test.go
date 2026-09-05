@@ -160,6 +160,21 @@ func TestFileToolsRejectOutsideWorkspace(t *testing.T) {
 	}
 }
 
+func TestFileToolsAllowAdditionalProjectSourceByAbsolutePath(t *testing.T) {
+	primary := t.TempDir()
+	secondary := t.TempDir()
+	path := filepath.Join(secondary, "shared.txt")
+	if err := os.WriteFile(path, []byte("shared source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := newFileWorkspace(primary, []string{secondary})
+	input, _ := json.Marshal(map[string]string{"path": path})
+	output, err := workspace.read(context.Background(), input)
+	if err != nil || !strings.Contains(output, "shared source") || !strings.Contains(output, filepath.ToSlash(path)) {
+		t.Fatalf("额外源文件夹应支持绝对路径读取: output=%s err=%v", output, err)
+	}
+}
+
 func TestGrepRejectsSymlinkToOutsideWorkspace(t *testing.T) {
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)

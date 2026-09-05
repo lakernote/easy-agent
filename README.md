@@ -26,10 +26,11 @@
 - 单个 Go 二进制内置 Web UI 和 SQLite，默认监听 `0.0.0.0:8080`。
 - EasyAgent Runtime 支持 OpenAI、Ollama 和 OpenAI-compatible 模型；Codex Runtime 通过 Codex CLI 自带的 `app-server` 执行 Codex thread。
 - 默认并发 4 个任务、单轮最长 12 小时；支持排队、暂停、继续、停止和重启恢复。
+- 项目可配置一个名称和多个服务器源文件夹；会话按项目分组，第一个源文件夹作为主工作目录，其余目录同时供 Agent 读取和修改。
 - 支持 Codex thread 列表、详情、继续和分支；分支可复用目录或创建独立 worktree。
 - Skills 和 MCP 只配置一次，同时供两个 Runtime 使用；大能力按需加载，减少无关上下文。
 - 网页查询采用“发现候选 → 读取原始来源 → 回答”的证据链；模型只看搜索摘要就结束时会获得一次有界纠偏。
-- 可选微信 ClawBot 通道，支持多人扫码绑定、中文快捷指令、进度查询和结果回传；完整 Trace 只保留在 Web 工作台。
+- 可选微信 ClawBot 通道，支持多人扫码绑定、为每个成员选择新会话项目、中文快捷指令、进度查询和结果回传；完整 Trace 只保留在 Web 工作台。
 - 微信的“新会话”“状态”“停止”等控制命令由服务端直接处理，不消耗模型调用；普通消息进入与 Web 相同的任务队列、worktree 和 Runtime。
 
 ### 内置 Skills
@@ -115,7 +116,7 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
 `app-server` 已包含在 Codex CLI 中，无需单独安装。EasyAgent 默认以完全访问模式运行 Codex 任务，因此 Codex 可以使用 EasyAgent 服务账号有权访问的文件和命令。
 
-新建会话时可在输入框上方选择服务器项目目录。EasyAgent Runtime 与 Codex Runtime 使用同一套调度和 worktree 规则：Git worktree 之间可以并行，共享同一目录的任务会排队串行。为避免遗漏本地改动，源目录存在未提交文件时不会自动创建 worktree。
+新建会话时可在输入框上方选择服务器项目。项目可包含多个源文件夹，第一个目录是固定的主工作目录；其他源目录不会改变命令默认目录，但两个 Runtime 都能按绝对路径访问。EasyAgent Runtime 与 Codex Runtime 使用同一套调度和 worktree 规则：单源 Git 项目的 worktree 可以并行，共享目录或含额外共享源文件夹的项目会排队串行。为避免遗漏本地改动，源目录存在未提交文件时不会自动创建 worktree。
 
 ## 使用前注意
 

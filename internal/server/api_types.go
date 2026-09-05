@@ -12,6 +12,7 @@ import (
 type sessionView struct {
 	ID                 string            `json:"id"`
 	Title              string            `json:"title"`
+	ProjectID          string            `json:"projectId,omitempty"`
 	Status             string            `json:"status"`
 	Error              string            `json:"error,omitempty"`
 	Runtime            string            `json:"runtime"`
@@ -48,7 +49,7 @@ type codexRequestView struct {
 
 func publicSession(value store.Session) sessionView {
 	return sessionView{
-		ID: value.ID, Title: value.Title, Status: value.Status, Error: value.Error,
+		ID: value.ID, Title: value.Title, ProjectID: value.ProjectID, Status: value.Status, Error: value.Error,
 		Runtime: value.Runtime, Model: value.Model, Workspace: value.Workspace, SourceWorkspace: value.SourceWorkspace, WorktreeBranch: value.WorktreeBranch, WorkspaceIsolation: workspaceIsolationLabel(value), WorkspaceNotice: value.WorkspaceNotice, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		ProfileID: value.ProfileID,
 		Messages:  value.Messages, Events: value.Events, MessageCount: value.MessageCount, EventCount: value.EventCount,
