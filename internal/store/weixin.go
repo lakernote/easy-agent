@@ -142,6 +142,18 @@ func (store *Store) UpdateWeixinCursor(id, buffer string, sequence int64, seenAt
 	return err
 }
 
+// RecordWeixinMessage updates channel activity for media that is intentionally
+// not queued as a task. It must not touch pending/delivered task IDs because a
+// different task may still be running and waiting for its final reply.
+func (store *Store) RecordWeixinMessage(id string, messageAt, now time.Time) error {
+	if messageAt.IsZero() {
+		messageAt = now
+	}
+	_, err := store.db.Exec(`UPDATE ea_weixin_accounts SET last_message_at=?,updated_at=? WHERE id=?`,
+		formatOptionalTime(messageAt), formatTime(now), id)
+	return err
+}
+
 func (store *Store) SetWeixinTask(id, sessionID string, messageID int64, contextToken string, messageAt, now time.Time) error {
 	_, err := store.db.Exec(`UPDATE ea_weixin_accounts SET current_session_id=?,pending_message_id=?,
 		pending_context_token=?,last_message_at=?,updated_at=? WHERE id=?`, sessionID, messageID,

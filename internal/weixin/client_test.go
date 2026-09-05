@@ -1,9 +1,12 @@
 package weixin
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -60,5 +63,45 @@ func TestGatewayUsesILinkAuthenticationAndMessageShape(t *testing.T) {
 func TestResolveURLRejectsNonHTTPS(t *testing.T) {
 	if _, err := resolveURL("http://example.com", "ilink/bot/getupdates"); err == nil {
 		t.Fatal("微信凭据不得发送到非 HTTPS 地址")
+	}
+}
+
+func TestDecryptMediaSupportsWeixinKeyEncodings(t *testing.T) {
+	key := []byte("0123456789abcdef")
+	plain := []byte("weixin attachment")
+	padding := aes.BlockSize - len(plain)%aes.BlockSize
+	padded := append(append([]byte(nil), plain...), bytes.Repeat([]byte{byte(padding)}, padding)...)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext := make([]byte, len(padded))
+	for offset := 0; offset < len(padded); offset += aes.BlockSize {
+		block.Encrypt(ciphertext[offset:offset+aes.BlockSize], padded[offset:offset+aes.BlockSize])
+	}
+	encodings := []string{
+		hex.EncodeToString(key),
+		base64.StdEncoding.EncodeToString(key),
+		base64.StdEncoding.EncodeToString([]byte(hex.EncodeToString(key))),
+	}
+	for _, encoded := range encodings {
+		decoded, err := decryptMedia(ciphertext, encoded)
+		if err != nil || !bytes.Equal(decoded, plain) {
+			t.Fatalf("key %q: decoded=%q err=%v", encoded, decoded, err)
+		}
+	}
+}
+
+func TestMediaDownloadURLOnlyAllowsTencentHTTPS(t *testing.T) {
+	if value, err := mediaDownloadURL(CDNMedia{EncryptedQuery: "a+b/c="}); err != nil || !strings.Contains(value, "encrypted_query_param=a%2Bb%2Fc%3D") {
+		t.Fatalf("fallback URL = %q, err=%v", value, err)
+	}
+	for _, value := range []string{"http://novac2c.cdn.weixin.qq.com/a", "https://example.com/a", "://broken"} {
+		if _, err := mediaDownloadURL(CDNMedia{FullURL: value}); err == nil {
+			t.Fatalf("untrusted URL accepted: %s", value)
+		}
+	}
+	if _, err := mediaDownloadURL(CDNMedia{FullURL: "https://novac2c.cdn.weixin.qq.com/a"}); err != nil {
+		t.Fatalf("Tencent CDN rejected: %v", err)
 	}
 }

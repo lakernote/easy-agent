@@ -26,6 +26,13 @@ func TestWeixinAccountsPersistSecretsAndSuppressPendingDelivery(t *testing.T) {
 	if account.Token != "token-secret" || account.UserID != "user-secret" || account.ProjectID != "project-1" || account.PendingMessageID != 42 || account.PendingContextToken != "context-secret" {
 		t.Fatalf("微信绑定没有完整持久化: %+v", account)
 	}
+	if err := database.RecordWeixinMessage("bot-1", now.Add(30*time.Second), now.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	account, err = database.GetWeixinAccount("bot-1")
+	if err != nil || account.PendingMessageID != 42 || account.DeliveredMessageID != 0 || account.PendingContextToken != "context-secret" {
+		t.Fatalf("仅保存媒体不应改变待回传任务: %+v err=%v", account, err)
+	}
 	account, err = database.UpdateWeixinAccount("bot-1", "值班小王", false, "project-2", now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)

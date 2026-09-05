@@ -103,7 +103,7 @@ export function WeixinPage({ onError, onOpenSession }: Props) {
   const activeCount = state.accounts.filter((account) => account.deliveryStatus === 'processing' || account.deliveryStatus === 'sending').length
   return <section className="weixin-page" aria-labelledby="weixin-title">
     <header className="weixin-head">
-      <div><p className="settings-kicker">远程工作台</p><h2 id="weixin-title">微信 ClawBot</h2><p>在微信提交任务、查询进度并接收最终结果；完整过程与 Trace 仍留在 Web 工作台。</p></div>
+		<div><p className="settings-kicker">远程工作台</p><h2 id="weixin-title">微信 ClawBot</h2><p>通过文字、语音、图片或文件提交任务并接收最终结果；完整过程与 Trace 仍留在 Web 工作台。</p></div>
       <div className={`weixin-global ${state.enabled ? 'enabled' : ''}`}><span className="weixin-channel-mark" aria-hidden="true" /><div><strong>{state.enabled ? '通道运行中' : '通道已停用'}</strong><small>{state.enabled ? `${onlineCount}/${state.accounts.length} 个成员在线` : '不会接收或回传消息'}</small></div><label className="switch"><input type="checkbox" aria-label={state.enabled ? '停用微信远程' : '启用微信远程'} checked={state.enabled} disabled={busy === 'global'} onChange={(event) => void toggleGlobal(event.target.checked)} /><span /></label></div>
     </header>
 

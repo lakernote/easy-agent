@@ -34,13 +34,15 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		return errors.New(status.Message)
 	}
 	message := ""
+	var attachments []store.Attachment
 	for index := len(session.Messages) - 1; index >= 0; index-- {
 		if session.Messages[index].Role == "user" {
 			message = strings.TrimSpace(session.Messages[index].Content)
+			attachments = session.Messages[index].Attachments
 			break
 		}
 	}
-	if message == "" {
+	if message == "" && len(attachments) == 0 {
 		return errors.New("Codex Runtime 没有找到本轮用户消息")
 	}
 	startedAt := time.Now()
@@ -49,6 +51,13 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		return err
 	}
 	selectedSkillsForTurn := selectedCodexSkills(session.Messages, skillRefs)
+	codexAttachments := make([]codexruntime.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.Kind == "audio" {
+			continue
+		}
+		codexAttachments = append(codexAttachments, codexruntime.Attachment{Name: attachment.Name, MIMEType: attachment.MIMEType, Kind: attachment.Kind, Data: attachment.Data})
+	}
 	selectedSkillNamesForTurn := make([]string, 0, len(selectedSkillsForTurn))
 	for _, skill := range selectedSkillsForTurn {
 		selectedSkillNamesForTurn = append(selectedSkillNamesForTurn, skill.Name)
@@ -69,10 +78,11 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	completedActivities := make(map[string]struct{})
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, ThreadID: session.ResponseID,
-		Timeout: time.Duration(turnTimeoutSeconds) * time.Second,
-		Env:     server.codexEnvironmentWith(capabilityEnv),
-		Skills:  selectedSkillsForTurn,
-		OnDelta: func(delta string) { server.tasks.appendPartial(session.ID, delta) },
+		Timeout:     time.Duration(turnTimeoutSeconds) * time.Second,
+		Env:         server.codexEnvironmentWith(capabilityEnv),
+		Skills:      selectedSkillsForTurn,
+		Attachments: codexAttachments,
+		OnDelta:     func(delta string) { server.tasks.appendPartial(session.ID, delta) },
 		OnUsage: func(value codexruntime.Usage) {
 			server.tasks.setUsage(session.ID, store.Usage{
 				InputTokens: value.InputTokens, OutputTokens: value.OutputTokens,

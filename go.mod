@@ -8,6 +8,7 @@ go 1.26.7
 require (
 	github.com/BurntSushi/toml v1.5.0 // 读取和安全更新 Codex config.toml
 	github.com/modelcontextprotocol/go-sdk v1.7.0 // MCP 官方 Go SDK，用于动态接入外部 Agent 工具
+	github.com/wdvxdr1123/go-silk v0.0.0-20220304095002-f67345df09ea // 解码微信 SILK 语音
 	modernc.org/sqlite v1.45.0 // 纯 Go SQLite 驱动，不依赖系统 SQLite 或 CGO
 )
 

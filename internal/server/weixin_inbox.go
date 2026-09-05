@@ -42,7 +42,7 @@ func (manager *weixinManager) poll(ctx context.Context, id string) {
 			if message.Sequence > lastSequence {
 				lastSequence = message.Sequence
 			}
-			manager.handleMessage(account, settings, message)
+			manager.handleMessage(ctx, account, settings, message)
 			fresh, loadErr := manager.server.store.GetWeixinAccount(id)
 			if loadErr == nil {
 				account = fresh
@@ -58,7 +58,7 @@ func (manager *weixinManager) poll(ctx context.Context, id string) {
 	}
 }
 
-func (manager *weixinManager) handleMessage(account store.WeixinAccount, settings store.WeixinSettings, message weixin.Message) {
+func (manager *weixinManager) handleMessage(ctx context.Context, account store.WeixinAccount, settings store.WeixinSettings, message weixin.Message) {
 	freshSettings, settingsErr := manager.server.store.GetWeixinSettings()
 	freshAccount, accountErr := manager.server.store.GetWeixinAccount(account.ID)
 	if settingsErr != nil || accountErr != nil || !freshSettings.Enabled || !freshAccount.Enabled {
@@ -76,6 +76,7 @@ func (manager *weixinManager) handleMessage(account store.WeixinAccount, setting
 	if messageID == 0 {
 		messageID = time.Now().UnixNano()
 	}
+	message.MessageID = messageID
 	if messageID <= account.PendingMessageID || messageID <= account.DeliveredMessageID {
 		return
 	}
@@ -90,15 +91,36 @@ func (manager *weixinManager) handleMessage(account store.WeixinAccount, setting
 	if !ignoreBefore.IsZero() && (message.CreatedAtMS == 0 || createdAt.Before(ignoreBefore)) {
 		return
 	}
-	text := messageText(message)
-	if text == "" {
-		manager.send(account, message.FromUserID, message.ContextToken, "当前仅支持文字任务。")
+	text, attachments, err := manager.decodeWeixinMessage(ctx, account, message)
+	if err != nil {
+		manager.send(account, message.FromUserID, message.ContextToken, "消息处理失败："+err.Error())
+		return
+	}
+	if text == "" && len(attachments) == 0 {
+		manager.send(account, message.FromUserID, message.ContextToken, "暂时无法识别这条消息；当前支持文字、语音、图片、PDF 和文本/代码文件。")
+		return
+	}
+	if text == "" && onlyAudioAttachments(attachments) {
+		sessionID, saveErr := manager.saveUntranscribedVoice(account, attachments, createdAt)
+		if saveErr != nil {
+			manager.send(account, message.FromUserID, message.ContextToken, "语音保存失败："+saveErr.Error())
+			return
+		}
+		_ = manager.server.store.RecordWeixinMessage(account.ID, createdAt, time.Now())
+		sessionTitle := "未转写的微信语音"
+		if session, loadErr := manager.server.store.LoadSessionWindow(sessionID, 1, 1); loadErr == nil {
+			sessionTitle = session.Title
+		}
+		manager.send(account, message.FromUserID, message.ContextToken, "这条语音没有取得微信文字，已保存到 Web 会话，但没有启动 Agent。\n请补发文字说明后重试。\n会话："+sessionTitle)
 		return
 	}
 	if manager.handleCommand(account, message, text) {
 		return
 	}
-	sessionID, err := manager.submit(account, message, text, messageID, createdAt)
+	if text == "" {
+		text = defaultWeixinMediaPrompt(attachments)
+	}
+	sessionID, err := manager.submit(account, message, text, attachments, messageID, createdAt)
 	if err != nil {
 		manager.send(account, message.FromUserID, message.ContextToken, "任务未提交："+err.Error())
 		return
@@ -113,10 +135,18 @@ func (manager *weixinManager) handleMessage(account store.WeixinAccount, setting
 }
 
 func messageText(message weixin.Message) string {
+	values := make([]string, 0, len(message.Items))
 	for _, item := range message.Items {
 		if item.Type == 1 && item.TextItem != nil {
-			return strings.TrimSpace(item.TextItem.Text)
+			if value := strings.TrimSpace(item.TextItem.Text); value != "" {
+				values = append(values, value)
+			}
+		}
+		if item.Type == 3 && item.VoiceItem != nil {
+			if value := strings.TrimSpace(item.VoiceItem.Text); value != "" {
+				values = append(values, value)
+			}
 		}
 	}
-	return ""
+	return strings.Join(values, "\n")
 }

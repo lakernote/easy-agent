@@ -243,3 +243,28 @@ func TestCodexCapabilityTextIncludesAdditionalProjectSources(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexTurnInputMapsTextImageAndPDF(t *testing.T) {
+	input, cleanup, err := codexTurnInput("检查附件", Config{Attachments: []Attachment{
+		{Name: "notes.txt", MIMEType: "text/plain", Kind: "text", Data: []byte("hello")},
+		{Name: "screen.png", MIMEType: "image/png", Kind: "image", Data: []byte("png")},
+		{Name: "spec.pdf", MIMEType: "application/pdf", Kind: "pdf", Data: []byte("pdf")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input) != 3 || input[1]["type"] != "localImage" || input[2]["type"] != "text" {
+		t.Fatalf("unexpected Codex input: %#v", input)
+	}
+	if !strings.Contains(input[0]["text"].(string), "hello") || !strings.Contains(input[2]["text"].(string), "spec.pdf") {
+		t.Fatalf("attachment context missing: %#v", input)
+	}
+	imagePath := input[1]["path"].(string)
+	if data, err := os.ReadFile(imagePath); err != nil || string(data) != "png" {
+		t.Fatalf("materialized image = %q, err=%v", data, err)
+	}
+	cleanup()
+	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
+		t.Fatalf("temporary attachment was not removed: %v", err)
+	}
+}

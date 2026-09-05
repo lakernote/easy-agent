@@ -11,7 +11,7 @@ export type Attachment = {
   id: string
   name: string
   mimeType: string
-  kind: 'text' | 'image' | 'pdf'
+  kind: 'text' | 'image' | 'pdf' | 'audio'
   size: number
 }
 

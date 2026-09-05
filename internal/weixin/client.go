@@ -6,6 +6,7 @@ package weixin
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -21,8 +22,9 @@ import (
 )
 
 const (
-	DefaultBaseURL = "https://ilinkai.weixin.qq.com"
-	defaultBotType = "3"
+	DefaultBaseURL    = "https://ilinkai.weixin.qq.com"
+	DefaultCDNBaseURL = "https://novac2c.cdn.weixin.qq.com/c2c"
+	defaultBotType    = "3"
 	// iLinkClientVersion follows Tencent/openclaw-weixin 2.4.6:
 	// major<<16 | minor<<8 | patch.
 	iLinkClientVersion = 2<<16 | 4<<8 | 6
@@ -50,12 +52,45 @@ type QRStatus struct {
 }
 
 type MessageItem struct {
-	Type     int       `json:"type"`
-	TextItem *TextItem `json:"text_item,omitempty"`
+	Type      int        `json:"type"`
+	TextItem  *TextItem  `json:"text_item,omitempty"`
+	ImageItem *ImageItem `json:"image_item,omitempty"`
+	VoiceItem *VoiceItem `json:"voice_item,omitempty"`
+	FileItem  *FileItem  `json:"file_item,omitempty"`
+	VideoItem *VideoItem `json:"video_item,omitempty"`
 }
 
 type TextItem struct {
 	Text string `json:"text"`
+}
+
+type CDNMedia struct {
+	EncryptedQuery string `json:"encrypt_query_param,omitempty"`
+	AESKey         string `json:"aes_key,omitempty"`
+	FullURL        string `json:"full_url,omitempty"`
+}
+
+type ImageItem struct {
+	Media  *CDNMedia `json:"media,omitempty"`
+	AESKey string    `json:"aeskey,omitempty"`
+}
+
+type VoiceItem struct {
+	Media         *CDNMedia `json:"media,omitempty"`
+	EncodeType    int       `json:"encode_type,omitempty"`
+	BitsPerSample int       `json:"bits_per_sample,omitempty"`
+	SampleRate    int       `json:"sample_rate,omitempty"`
+	PlaytimeMS    int       `json:"playtime,omitempty"`
+	Text          string    `json:"text,omitempty"`
+}
+
+type FileItem struct {
+	Media    *CDNMedia `json:"media,omitempty"`
+	FileName string    `json:"file_name,omitempty"`
+}
+
+type VideoItem struct {
+	Media *CDNMedia `json:"media,omitempty"`
 }
 
 type Message struct {
@@ -87,6 +122,7 @@ type Gateway interface {
 	PollLogin(context.Context, string, string, string) (QRStatus, error)
 	GetUpdates(context.Context, Account, string) (Updates, error)
 	SendText(context.Context, Account, string, string, string) error
+	DownloadMedia(context.Context, CDNMedia, string) ([]byte, error)
 }
 
 type HTTPGateway struct {
@@ -166,6 +202,127 @@ func (gateway *HTTPGateway) SendText(ctx context.Context, account Account, userI
 		return fmt.Errorf("微信发送消息失败: ret=%d %s", response.ReturnCode, response.ErrorMessage)
 	}
 	return nil
+}
+
+const maxDownloadedMediaBytes = 10 * 1024 * 1024
+
+// DownloadMedia follows Tencent's iLink CDN contract. Direct URLs are limited
+// to Tencent HTTPS hosts so a forged update cannot turn EasyAgent into an SSRF
+// proxy. The channel uses AES-128-ECB with PKCS#7 padding.
+func (gateway *HTTPGateway) DownloadMedia(ctx context.Context, media CDNMedia, aesKey string) ([]byte, error) {
+	downloadURL, err := mediaDownloadURL(media)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := *gateway.client
+	previousRedirect := client.CheckRedirect
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if _, err := mediaDownloadURL(CDNMedia{FullURL: next.URL.String()}); err != nil {
+			return err
+		}
+		if previousRedirect != nil {
+			return previousRedirect(next, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("微信媒体重定向次数过多")
+		}
+		return nil
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("下载微信媒体: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("微信 CDN 返回 HTTP %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxDownloadedMediaBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取微信媒体: %w", err)
+	}
+	if len(data) > maxDownloadedMediaBytes {
+		return nil, errors.New("微信媒体超过 10 MiB")
+	}
+	if strings.TrimSpace(aesKey) == "" {
+		return data, nil
+	}
+	return decryptMedia(data, aesKey)
+}
+
+func mediaDownloadURL(media CDNMedia) (string, error) {
+	if value := strings.TrimSpace(media.FullURL); value != "" {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed == nil {
+			return "", errors.New("微信媒体下载地址不可信")
+		}
+		host := strings.ToLower(parsed.Hostname())
+		trustedHost := host == "qq.com" || strings.HasSuffix(host, ".qq.com") || host == "weixin.qq.com" || strings.HasSuffix(host, ".weixin.qq.com")
+		if parsed.Scheme != "https" || !trustedHost {
+			return "", errors.New("微信媒体下载地址不可信")
+		}
+		return parsed.String(), nil
+	}
+	if strings.TrimSpace(media.EncryptedQuery) == "" {
+		return "", errors.New("微信媒体缺少下载引用")
+	}
+	return DefaultCDNBaseURL + "/download?encrypted_query_param=" + url.QueryEscape(media.EncryptedQuery), nil
+}
+
+func decryptMedia(ciphertext []byte, encodedKey string) ([]byte, error) {
+	key, err := decodeMediaKey(encodedKey)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) == 0 || len(ciphertext)%block.BlockSize() != 0 {
+		return nil, errors.New("微信媒体密文长度无效")
+	}
+	plaintext := make([]byte, len(ciphertext))
+	for offset := 0; offset < len(ciphertext); offset += block.BlockSize() {
+		block.Decrypt(plaintext[offset:offset+block.BlockSize()], ciphertext[offset:offset+block.BlockSize()])
+	}
+	padding := int(plaintext[len(plaintext)-1])
+	if padding == 0 || padding > block.BlockSize() || padding > len(plaintext) {
+		return nil, errors.New("微信媒体填充无效")
+	}
+	for _, value := range plaintext[len(plaintext)-padding:] {
+		if int(value) != padding {
+			return nil, errors.New("微信媒体填充无效")
+		}
+	}
+	return plaintext[:len(plaintext)-padding], nil
+}
+
+func decodeMediaKey(value string) ([]byte, error) {
+	value = strings.TrimSpace(value)
+	if len(value) == 32 {
+		if decoded, err := hex.DecodeString(value); err == nil {
+			return decoded, nil
+		}
+	}
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(value)
+	}
+	if err != nil {
+		return nil, errors.New("微信媒体 AES Key 编码无效")
+	}
+	if len(decoded) == 16 {
+		return decoded, nil
+	}
+	if len(decoded) == 32 {
+		if raw, decodeErr := hex.DecodeString(string(decoded)); decodeErr == nil {
+			return raw, nil
+		}
+	}
+	return nil, errors.New("微信媒体 AES Key 长度无效")
 }
 
 func (gateway *HTTPGateway) request(ctx context.Context, method, baseURL, endpoint, token string, body any, output any, authenticated bool) error {

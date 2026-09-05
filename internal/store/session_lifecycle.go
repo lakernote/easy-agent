@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// TouchSession moves a session containing a channel-only message to the top of
+// the recent list without changing its task lifecycle state.
+func (store *Store) TouchSession(id string, now time.Time) error {
+	_, err := store.db.Exec(`UPDATE ea_sessions SET updated_at=? WHERE id=?`, formatTime(now), id)
+	return err
+}
+
 func (store *Store) QueueSession(id, model string, now time.Time) error {
 	result, err := store.db.Exec(`UPDATE ea_sessions SET status='queued',error='',model=?,updated_at=? WHERE id=? AND status NOT IN ('queued','running','paused')`, model, formatTime(now), id)
 	if err != nil {

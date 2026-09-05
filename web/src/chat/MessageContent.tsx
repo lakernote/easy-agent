@@ -55,9 +55,12 @@ function formatWeatherNumber(value?: number) {
 }
 
 function MessageAttachments({ attachments }: { attachments: Session['messages'][number]['attachments'] }) {
-  return <div className="message-attachments">{attachments.map((attachment) => attachment.kind === 'image'
-    ? <a key={attachment.id} className="message-image" href={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" title={`查看 ${attachment.name}`}><img src={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} alt={attachment.name} loading="lazy" /><span>{attachment.name}</span></a>
-    : <a key={attachment.id} className="message-file" href={`/api/v1/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" download={attachment.name}><FileIcon /><span><strong>{attachment.name}</strong><small>{attachment.kind === 'pdf' ? 'PDF' : '文本文件'} · {formatBytes(attachment.size)}</small></span></a>)}</div>
+  return <div className="message-attachments">{attachments.map((attachment) => {
+    const source = `/api/v1/attachments/${encodeURIComponent(attachment.id)}`
+    if (attachment.kind === 'image') return <a key={attachment.id} className="message-image" href={source} target="_blank" rel="noreferrer" title={`查看 ${attachment.name}`}><img src={source} alt={attachment.name} loading="lazy" /><span>{attachment.name}</span></a>
+    if (attachment.kind === 'audio') return <div key={attachment.id} className="message-audio"><div><strong>{attachment.name}</strong><small>微信语音 · {formatBytes(attachment.size)}</small></div><audio controls preload="metadata" src={source}>浏览器不支持播放音频。</audio></div>
+    return <a key={attachment.id} className="message-file" href={source} target="_blank" rel="noreferrer" download={attachment.name}><FileIcon /><span><strong>{attachment.name}</strong><small>{attachment.kind === 'pdf' ? 'PDF' : '文本文件'} · {formatBytes(attachment.size)}</small></span></a>
+  })}</div>
 }
 
 export function Avatar() { return <div className="avatar"><Logo /></div> }

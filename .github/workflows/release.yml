@@ -102,7 +102,7 @@ jobs:
               -trimpath \
               -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
               -o "${package_dir}/${binary}" ./cmd/easyagent
-            cp README.md LICENSE "${package_dir}/"
+            cp README.md LICENSE THIRD_PARTY_NOTICES.md "${package_dir}/"
             if [[ "${os}" == "windows" ]]; then
               (cd staging && zip -q -r "../release/${package}.zip" "${package}")
             else

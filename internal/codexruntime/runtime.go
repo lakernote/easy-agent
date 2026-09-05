@@ -140,6 +140,7 @@ type Config struct {
 	Timeout               time.Duration
 	Env                   []string
 	Skills                []SkillRef
+	Attachments           []Attachment
 	OnDelta               func(string)
 	OnEvent               func(Event)
 	OnUsage               func(Usage)
@@ -147,6 +148,16 @@ type Config struct {
 	// 未设置时，RunMessage 会回复标准 JSON-RPC 方法未实现错误，避免把
 	// “服务器请求”误判成协议损坏并直接断开连接。
 	OnServerRequest func(ServerRequest) (any, error)
+}
+
+// Attachment is the narrow media contract between EasyAgent storage and the
+// Codex app-server input types. Data is materialized only for the lifetime of
+// one turn and is never included in JSON trace output.
+type Attachment struct {
+	Name     string
+	MIMEType string
+	Kind     string
+	Data     []byte
 }
 
 type SkillRef struct {
@@ -250,7 +261,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if strings.TrimSpace(config.Workspace) == "" {
 		return Result{}, errors.New("Codex Runtime 缺少工作区")
 	}
-	if strings.TrimSpace(userMessage) == "" {
+	if strings.TrimSpace(userMessage) == "" && len(config.Attachments) == 0 {
 		return Result{}, errors.New("Codex Runtime 收到空消息")
 	}
 	if config.Timeout <= 0 {
@@ -258,6 +269,11 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	}
 	ctx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()
+	input, cleanupInput, err := codexTurnInput(userMessage, config)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupInput()
 
 	// 不使用 CommandContext 的自动 Kill：取消时先给 app-server 一个协议层
 	// turn/interrupt 机会，随后再用进程组终止作为兜底。
@@ -455,12 +471,11 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		return Result{}, errors.New("Codex app-server 没有返回 thread id")
 	}
 	threadID = thread.Thread.ID
-	input := []map[string]string{{"type": "text", "text": codexCapabilityText(userMessage, config.AdditionalDirectories...)}}
 	for _, skill := range config.Skills {
 		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Path) == "" {
 			continue
 		}
-		input = append(input, map[string]string{"type": "skill", "name": skill.Name, "path": skill.Path})
+		input = append(input, map[string]any{"type": "skill", "name": skill.Name, "path": skill.Path})
 	}
 	turnResult, err := request("turn/start", 3, map[string]any{
 		"threadId": threadID, "input": input,
@@ -525,6 +540,54 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		}
 		consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
 	}
+}
+
+func codexTurnInput(userMessage string, config Config) ([]map[string]any, func(), error) {
+	text := codexCapabilityText(userMessage, config.AdditionalDirectories...)
+	if strings.TrimSpace(text) == "" {
+		text = "请理解并处理用户发送的附件。"
+	}
+	input := []map[string]any{{"type": "text", "text": text}}
+	temporaryDirectory := ""
+	cleanup := func() {
+		if temporaryDirectory != "" {
+			_ = os.RemoveAll(temporaryDirectory)
+		}
+	}
+	for index, attachment := range config.Attachments {
+		name := strings.TrimSpace(filepath.Base(attachment.Name))
+		if name == "" || name == "." {
+			name = fmt.Sprintf("attachment-%d", index+1)
+		}
+		switch attachment.Kind {
+		case "text":
+			input[0]["text"] = fmt.Sprintf("%s\n\n<user_attachment name=%q mime=%q>\n%s\n</user_attachment>", input[0]["text"], name, attachment.MIMEType, string(attachment.Data))
+			continue
+		case "image", "pdf":
+		default:
+			cleanup()
+			return nil, func() {}, fmt.Errorf("Codex Runtime 不支持附件类型 %q", attachment.Kind)
+		}
+		if temporaryDirectory == "" {
+			var err error
+			temporaryDirectory, err = os.MkdirTemp("", "easyagent-codex-attachment-")
+			if err != nil {
+				return nil, func() {}, fmt.Errorf("准备 Codex 附件目录: %w", err)
+			}
+		}
+		path := filepath.Join(temporaryDirectory, fmt.Sprintf("%02d-%s", index+1, name))
+		if err := os.WriteFile(path, attachment.Data, 0o600); err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("准备 Codex 附件 %s: %w", name, err)
+		}
+		switch attachment.Kind {
+		case "image":
+			input = append(input, map[string]any{"type": "localImage", "path": path})
+		case "pdf":
+			input = append(input, map[string]any{"type": "text", "text": fmt.Sprintf("用户附件 %q（%s）已保存在 %s，请读取并处理。", name, attachment.MIMEType, path)})
+		}
+	}
+	return input, cleanup, nil
 }
 
 func codexCapabilityText(value string, directories ...string) string {

@@ -108,7 +108,7 @@ func (manager *weixinManager) handleCommand(account store.WeixinAccount, message
 	}
 }
 
-func (manager *weixinManager) submit(account store.WeixinAccount, message weixin.Message, text string, messageID int64, createdAt time.Time) (string, error) {
+func (manager *weixinManager) submit(account store.WeixinAccount, message weixin.Message, text string, attachments []store.Attachment, messageID int64, createdAt time.Time) (string, error) {
 	if current, err := manager.currentSession(account); err == nil && activeSessionStatus(current.Status) {
 		return "", errors.New("上一条任务仍在执行，可发送“状态”查看或发送“停止”中断")
 	}
@@ -122,7 +122,7 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 			if err != nil {
 				return "", err
 			}
-			if err := manager.server.enqueueTurn(sessionID, text, nil, model); err != nil {
+			if err := manager.server.enqueueTurn(sessionID, text, attachments, model); err != nil {
 				return "", err
 			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
@@ -155,7 +155,7 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 			_ = manager.server.store.DeleteSession(sessionID)
 			return "", err
 		}
-		if err := manager.server.enqueueTurn(sessionID, text, nil, model); err != nil {
+		if err := manager.server.enqueueTurn(sessionID, text, attachments, model); err != nil {
 			_ = manager.server.store.DeleteSession(sessionID)
 			return "", err
 		}
@@ -165,6 +165,73 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 	}
 	if err := manager.server.store.SetWeixinTask(account.ID, sessionID, messageID, message.ContextToken, createdAt, now); err != nil {
 		return "", err
+	}
+	return sessionID, nil
+}
+
+// saveUntranscribedVoice keeps the original voice note visible and playable in
+// the Web workspace without queueing an Agent turn. When another task is
+// running, use a separate idle session so its model history and result delivery
+// remain untouched.
+func (manager *weixinManager) saveUntranscribedVoice(account store.WeixinAccount, attachments []store.Attachment, createdAt time.Time) (string, error) {
+	if !onlyAudioAttachments(attachments) {
+		return "", errors.New("没有可保存的微信语音")
+	}
+	now := time.Now()
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	sessionID := ""
+	setCurrent := true
+	if current, err := manager.currentSession(account); err == nil {
+		if activeSessionStatus(current.Status) {
+			setCurrent = false
+		} else {
+			sessionID = current.ID
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	createdSession := false
+	if sessionID == "" {
+		model, err := manager.server.store.GetModelSettings()
+		if err != nil {
+			return "", err
+		}
+		project, err := manager.weixinProject(account)
+		if err != nil {
+			return "", err
+		}
+		runEnvironment, err := manager.server.env.WithWorkspace(project.Directories[0])
+		if err != nil {
+			return "", err
+		}
+		sessionID = newID()
+		runtimeSettings, _ := manager.server.store.GetRuntimeSettings()
+		workspace := manager.server.prepareSessionWorkspace(manager.server.context, sessionID, runEnvironment.Workspace(), runtimeSettings)
+		if _, err := manager.server.store.CreateSessionWithProject(sessionID, "未转写的微信语音", model.Runtime, model.ProfileID, model.Model, project.ID, workspace.Execution, now); err != nil {
+			return "", err
+		}
+		createdSession = true
+		if err := manager.server.store.SetSessionWorkspace(sessionID, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
+			_ = manager.server.store.DeleteSession(sessionID)
+			return "", err
+		}
+	}
+	message := store.Message{Role: "user", Content: "（微信语音未取得文字，未提交 Agent）", Attachments: attachments, ToolCalls: []store.ToolCall{}, CreatedAt: createdAt}
+	if err := manager.server.store.AppendMessage(sessionID, message); err != nil {
+		if createdSession {
+			_ = manager.server.store.DeleteSession(sessionID)
+		}
+		return "", err
+	}
+	if err := manager.server.store.TouchSession(sessionID, now); err != nil {
+		return "", err
+	}
+	if setCurrent {
+		if err := manager.server.store.SetWeixinCurrentSession(account.ID, sessionID, now); err != nil {
+			return "", err
+		}
 	}
 	return sessionID, nil
 }
