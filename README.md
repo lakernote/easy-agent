@@ -1,63 +1,34 @@
 <div align="center">
   <img src="web/public/logo.svg" alt="EasyAgent Logo" width="88" />
   <h1>EasyAgent</h1>
-  <p>面向研发、测试和运维团队的私有远程 AI Agent 工作台。</p>
-  <p><strong>部署在自己的服务器，通过浏览器或个人微信下发任务；支持任务队列、停止、Trace、会话恢复与 Git worktree 隔离。</strong></p>
+  <p><strong>部署在自己服务器上的远程 AI Agent 工作台。</strong></p>
+  <p>通过浏览器或个人微信，把研发、测试和运维任务交给服务器持续执行。</p>
 </div>
 
-## 解决什么问题
+## EasyAgent 能做什么
 
-- **随时远程下发任务**：通过浏览器或个人微信，把代码修改、测试、发布检查和故障排查交给自己的服务器执行。
-- **团队共享一套能力**：成员通过浏览器共用模型、项目目录、Skills、MCP 和任务记录。
-- **多任务安全并发**：干净的 Git 项目按会话创建 worktree；共享目录自动互斥，避免同时写坏文件。
-- **服务重启不丢状态**：队列和任务状态持久化，重启后恢复待执行任务，并明确标记被中断的任务。
-- **执行过程可追溯**：SSE 实时展示模型、工具、Token、缓存、耗时和错误，断线后按事件序号续传。
-
-## 适合的工作流
-
-| 角色 | 常见任务 |
+| 场景 | 可以交给 Agent 的任务 |
 | --- | --- |
-| 研发 | 理解项目、实现需求、代码审查、API 设计、依赖文档查询 |
-| 测试 | 生成测试、执行回归、浏览器 E2E、定位失败与验证修复 |
-| 运维 | 分析日志、排查服务异常、形成事故 RCA、检查发布风险 |
+| 研发 | 理解代码库、实现需求、修改文件、代码审查、API 设计、查询依赖文档 |
+| 测试 | 编写测试、执行回归、浏览器 E2E、复现问题、验证修复结果 |
+| 运维 | 检查服务和日志、定位故障、整理 RCA、核对发布流程与风险 |
+| 远程协作 | 从浏览器或微信提交任务、查看状态、停止任务并接收结果 |
 
-## 核心能力
+它主要解决这些问题：
 
-- 单个 Go 二进制内置 Web UI 和 SQLite，默认监听 `0.0.0.0:8080`。
-- EasyAgent Runtime 支持 OpenAI、Ollama 和 OpenAI-compatible 模型；Codex Runtime 通过 Codex CLI 自带的 `app-server` 执行 Codex thread。
-- 默认并发 4 个任务、单轮最长 12 小时；支持排队、暂停、继续、停止和重启恢复。
-- 项目可配置一个名称和多个服务器源文件夹；会话按项目分组，第一个源文件夹作为主工作目录，其余目录同时供 Agent 读取和修改。
-- 支持 Codex thread 列表、详情、继续和分支；分支可复用目录或创建独立 worktree。
-- Skills 和 MCP 只配置一次，同时供两个 Runtime 使用；大能力按需加载，减少无关上下文。
-- 网页查询采用“发现候选 → 读取原始来源 → 回答”的证据链；模型只看搜索摘要就结束时会获得一次有界纠偏。
-- 可选微信 ClawBot 通道，支持多人扫码绑定、文字/语音/图片/文件任务、为每个成员选择新会话项目、中文快捷指令、进度查询和结果回传；语音使用微信自带文本，没有文字时只保存音频并提示补发文字，不额外运行语音识别；完整 Trace 只保留在 Web 工作台。
-- 微信的“新会话”“状态”“停止”等控制命令由服务端直接处理，不消耗模型调用；普通消息进入与 Web 相同的任务队列、worktree 和 Runtime。
-
-### 内置 Skills
-
-- **理解与研发**：`project-onboarding`、`problem-analysis`、`code-review`、`api-design`
-- **测试与验证**：`test-and-e2e`、`browser-validation`
-- **运维与交付**：`incident-rca`、`release-engineering`、`docs-maintenance`
-- **协作与研究**：`git-worktree-workflow`、`web-research`
-
-### MCP 核心预设
-
-| MCP | 用途 | 启用要求 |
-| --- | --- | --- |
-| GitHub | 仓库、Issue、Pull Request、Actions | PAT 或 App Token |
-| Context7 | 最新依赖库与框架文档 | 可直接连接，API Key 可选 |
-| Playwright | 浏览器复现与 E2E 验证 | Node.js 20+，页面一键安装 |
-| OpenAI Docs | OpenAI API 与 Codex 官方文档 | 可直接连接 |
-
-EasyAgent Runtime 首轮提供当前时间、Shell、只读文件检索、网页搜索和原始来源读取，文件写入、Skill、天气与计算按需加载；Codex Runtime 保留自己的原生工具。默认 MCP 聚焦代码、依赖文档和浏览器验证，不接入与研发交付无关的办公服务。
+- **任务不必绑在个人电脑上**：Agent 在团队服务器运行，关闭浏览器也可以继续执行。
+- **多个任务可控并发**：默认同时运行 4 个任务；Git 项目可用 worktree 隔离，共享目录自动排队，避免互相覆盖。
+- **长任务有记录、可恢复**：会话、队列和运行状态写入 SQLite；服务重启后恢复排队任务，并明确标记被中断的任务。
+- **过程看得见**：通过 SSE 实时显示模型、Tool、Skill、MCP、Token、缓存、耗时和错误，网络重连后可继续 Trace。
+- **团队共用一套能力**：模型配置、服务器项目、Skills 和 MCP 统一管理，同时提供给 EasyAgent 与 Codex Runtime。
 
 <p align="center">
   <img src="docs/images/conversation.png" alt="EasyAgent 对话工作区" width="920" />
 </p>
 
-## 快速下载
+## 快速体验
 
-打开 [最新版本下载页](https://github.com/lakernote/easy-agent/releases/latest)，根据系统和架构选择文件：
+前往 [Releases](https://github.com/lakernote/easy-agent/releases/latest)，按系统和架构下载：
 
 | 系统 | x64 / Intel | ARM64 / Apple Silicon |
 | --- | --- | --- |
@@ -65,22 +36,15 @@ EasyAgent Runtime 首轮提供当前时间、Shell、只读文件检索、网页
 | macOS | `easyagent_*_darwin_amd64.tar.gz` | `easyagent_*_darwin_arm64.tar.gz` |
 | Linux | `easyagent_*_linux_amd64.tar.gz` | `easyagent_*_linux_arm64.tar.gz` |
 
-[查看全部 Releases](https://github.com/lakernote/easy-agent/releases) · [最新版 SHA-256 校验文件](https://github.com/lakernote/easy-agent/releases/latest/download/checksums.txt)
+解压后运行 `easyagent.exe`（Windows）或 `./easyagent`（macOS/Linux）。发布包是包含 Web UI 的单个二进制，不需要安装 Go、Node.js 或 SQLite。
 
-下载并解压后运行：
+服务默认监听 `0.0.0.0:8080`。启动后访问 `http://服务器IP:8080`，使用默认账号 `admin / admin` 登录，并立即在 **设置 → 账户安全** 修改密码，然后到 **模型配置** 添加模型。
 
-- Windows：双击或执行 `easyagent.exe`
-- macOS / Linux：执行 `./easyagent`
+macOS 和 Windows 发布包暂未代码签名；如果首次运行被系统拦截，请在系统安全设置中确认。
 
-macOS/Windows 发布包暂未代码签名；如果系统首次拦截，请在系统安全设置中确认运行。
+### Linux x64 下载并后台启动
 
-服务默认监听 `0.0.0.0:8080`。启动后访问 <http://127.0.0.1:8080>；部署在服务器时，将地址换成服务器 IP。
-
-首次登录用户名和密码均为 `admin`。登录后先到 **设置 → 账户安全** 修改密码，再到 **设置 → 模型配置** 添加模型。
-
-### Linux x64 一键启动
-
-进入准备存放 EasyAgent 的空目录，执行：
+进入准备存放 EasyAgent 的目录后执行：
 
 ```bash
 (
@@ -96,17 +60,19 @@ printf '%s\n' "$!" >easyagent.pid
 )
 ```
 
-- 查看日志：`tail -f easyagent.log`
-- 停止服务：`kill "$(cat easyagent.pid)"`
+```bash
+tail -f easyagent.log       # 查看日志
+kill "$(cat easyagent.pid)" # 停止服务
+```
 
-发布包已包含可执行权限，不需要额外运行 `chmod +x`。程序、日志和 PID 文件位于当前目录；数据库和默认工作区保存在 `~/.easyagent/`。
+发布包已带可执行权限。数据库、默认工作区和运行状态保存在 `~/.easyagent/`。
 
-## Runtime 怎么选
+## 两种 Runtime
 
-| Runtime | 适合场景 | 额外要求 |
+| Runtime | 适合场景 | 要求 |
 | --- | --- | --- |
-| EasyAgent Runtime | 可控的模型接入、内置工具与团队自定义 Agent | 无，配置模型即可 |
-| Codex Runtime | 代码任务、Codex thread、原生 Codex 工具 | 服务器需要安装 Codex CLI |
+| EasyAgent | 使用 Ollama、OpenAI、Groq 等 OpenAI-compatible 模型和 EasyAgent 工具循环 | 在页面配置模型 |
+| Codex | 使用 Codex thread、原生工具、Skill 和沙箱处理代码任务 | 服务器安装 Codex CLI |
 
 安装 Codex CLI：
 
@@ -114,18 +80,33 @@ printf '%s\n' "$!" >easyagent.pid
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-`app-server` 已包含在 Codex CLI 中，无需单独安装。EasyAgent 默认以完全访问模式运行 Codex 任务，因此 Codex 可以使用 EasyAgent 服务账号有权访问的文件和命令。
+`app-server` 是 Codex CLI 自带的子命令，不需要单独安装。EasyAgent 默认以完全访问模式运行 Codex，两个 Runtime 共用任务队列、项目目录、worktree、Skills 和 MCP。
 
-新建会话时可在输入框上方选择服务器项目。项目可包含多个源文件夹，第一个目录是固定的主工作目录；其他源目录不会改变命令默认目录，但两个 Runtime 都能按绝对路径访问。EasyAgent Runtime 与 Codex Runtime 使用同一套调度和 worktree 规则：单源 Git 项目的 worktree 可以并行，共享目录或含额外共享源文件夹的项目会排队串行。为避免遗漏本地改动，源目录存在未提交文件时不会自动创建 worktree。
+无论选择哪个 Runtime，都使用相同的项目和任务系统：
 
-## 使用前注意
+- 项目可包含多个服务器源文件夹，第一个目录作为默认工作目录。
+- 支持排队、暂停、继续、停止和重启恢复；默认并发 4、单轮最长 12 小时，均可在设置中调整。
+- Git 项目可按会话创建 worktree；源仓库有未提交修改时不会自动隔离。Codex 会话还支持 thread 继续、读取和分支。
 
-- 默认监听所有网卡，首次登录密码为 `admin`；服务器部署后请立即修改密码。
-- 不要直接暴露到公网。建议使用防火墙或 VPN 限制来源，并通过反向代理启用 HTTPS。
-- 当前定位是单机共享服务：一个管理员账号、一个 SQLite 数据库，不提供 RBAC 或多租户隔离。
-- Shell 和 stdio MCP 使用服务进程权限运行，不是安全沙箱；建议使用低权限系统账号。
-- 发布包无需 Go、Node.js 或系统 SQLite。只有任务调用 Git、Python 等命令时，服务器才需要安装对应程序。
+## 内置能力
+
+内置 Skills 聚焦项目理解、问题分析、代码审查、API 设计、测试与 E2E、事故 RCA、发布工程、文档维护、Git worktree 和网页研究。GitHub、Context7、Playwright、OpenAI Docs 等 MCP 可在设置页启用，供两个 Runtime 共用。
+
+Skills 和大型工具组按需加载，减少无关上下文。网页研究会先发现候选，再读取原始来源后回答。
+
+## 微信远程
+
+- 支持多人扫码绑定，并为每个人选择新会话的默认项目。
+- 文字、图片、PDF、代码文件和语音消息进入与 Web 相同的任务队列；无语音文本时保存音频并提示补发说明，不额外运行语音识别。
+- “新会话”“状态”“停止”“项目列表”等控制指令不调用模型；微信回传状态和结果，完整 Trace 保留在 Web。
+
+## 部署前注意
+
+- 默认监听所有网卡，请立即修改默认密码；不要直接暴露到公网，建议使用防火墙、VPN 和 HTTPS。
+- 当前是单机团队共享模式：一个管理员账号、一个 SQLite 数据库，不提供 RBAC 或多租户隔离。
+- Shell、Codex 和 stdio MCP 使用 EasyAgent 服务进程的系统权限运行；建议使用专用的低权限账号。
+- 只有任务需要调用 Git、Python、Node.js 等命令时，服务器才需要安装对应工具。
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
