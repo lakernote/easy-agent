@@ -14,6 +14,7 @@ type SettingsShellProps = {
   onRefresh: () => Promise<Bootstrap>
   onError: (value: string) => void
   onLogout: () => Promise<void>
+  onOpenSession: (id: string) => void
 }
 
 const sections: { id: SettingsSection; label: string; description: string }[] = [
@@ -31,7 +32,7 @@ function activeSection(page: Page): SettingsSection {
   return page === 'tasks' || page === 'models' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'weixin' || page === 'security' ? page : 'runtime'
 }
 
-export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout }: SettingsShellProps) {
+export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
   const selected = activeSection(page)
   const pageDescription = selected === 'security'
     ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。'
@@ -98,7 +99,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
       <main className="settings-hub-content">
         {selected === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'usage' && <UsagePage data={data} />}
-        {selected === 'weixin' && <WeixinPage onError={onError} />}
+        {selected === 'weixin' && <WeixinPage onError={onError} onOpenSession={onOpenSession} />}
         {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'security' && <section className="account-panel account-security-page" aria-labelledby="account-title">
           <div><p className="settings-kicker">账户安全</p><h2 id="account-title">管理员账号</h2><p>当前登录用户：<code>admin</code>。服务重启、12 小时后或修改密码后需要重新登录。</p></div>

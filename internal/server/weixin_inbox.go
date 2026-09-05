@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -47,9 +48,13 @@ func (manager *weixinManager) poll(ctx context.Context, id string) {
 				account = fresh
 			}
 		}
-		if updates.Buffer != "" || lastSequence != account.LastSequence {
-			_ = manager.server.store.UpdateWeixinCursor(id, updates.Buffer, lastSequence, time.Now())
+		nextBuffer := account.SyncBuffer
+		if updates.Buffer != "" {
+			nextBuffer = updates.Buffer
 		}
+		// 每次成功拉取都刷新在线时间。否则没有新消息时，页面会把一个健康的
+		// 长轮询连接显示成“很久没有活动”，让管理员误以为通道已经掉线。
+		_ = manager.server.store.UpdateWeixinCursor(id, nextBuffer, lastSequence, time.Now())
 	}
 }
 
@@ -93,11 +98,18 @@ func (manager *weixinManager) handleMessage(account store.WeixinAccount, setting
 	if manager.handleCommand(account, message, text) {
 		return
 	}
-	if err := manager.submit(account, message, text, messageID, createdAt); err != nil {
+	sessionID, err := manager.submit(account, message, text, messageID, createdAt)
+	if err != nil {
 		manager.send(account, message.FromUserID, message.ContextToken, "任务未提交："+err.Error())
 		return
 	}
-	manager.send(account, message.FromUserID, message.ContextToken, "任务已提交，完成后会在这里回复。")
+	acknowledgement := "任务已接收，完成后会在这里回复。\n发送“状态”查看进度，发送“停止”中断任务。"
+	if session, loadErr := manager.server.store.LoadSessionWindow(sessionID, 1, 1); loadErr == nil {
+		acknowledgement = fmt.Sprintf("任务已接收\n会话：%s\n状态：%s\n\n发送“状态”查看进度，发送“停止”中断任务。", session.Title, weixinSessionStatus(session.Status))
+	}
+	manager.send(account, message.FromUserID, message.ContextToken, acknowledgement)
+	// 先发送接收确认，再启动结果等待，避免极短任务的最终结果先于确认消息到达。
+	manager.resumeDelivery(account.ID)
 }
 
 func messageText(message weixin.Message) string {

@@ -17,6 +17,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("DELETE /api/v1/channels/weixin/login/{id}", server.cancelWeixinLogin)
 	server.mux.HandleFunc("POST /api/v1/channels/weixin/login/{id}/verify", server.verifyWeixinLogin)
 	server.mux.HandleFunc("PUT /api/v1/channels/weixin/accounts/{id}", server.updateWeixinAccount)
+	server.mux.HandleFunc("POST /api/v1/channels/weixin/accounts/{id}/retry", server.retryWeixinDelivery)
 	server.mux.HandleFunc("DELETE /api/v1/channels/weixin/accounts/{id}", server.deleteWeixinAccount)
 	server.mux.HandleFunc("GET /api/v1/usage", server.usage)
 	server.mux.HandleFunc("GET /api/v1/sessions/history", server.getOlderSessions)

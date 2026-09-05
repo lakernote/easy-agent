@@ -36,6 +36,7 @@ export const api = {
   cancelWeixinLogin: (id: string) => request<void>(`/api/v1/channels/weixin/login/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   verifyWeixinLogin: (id: string, code: string) => request<WeixinLogin>(`/api/v1/channels/weixin/login/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({ code }) }),
   updateWeixinAccount: (id: string, label: string, enabled: boolean) => request<WeixinState>(`/api/v1/channels/weixin/accounts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ label, enabled }) }),
+  retryWeixinDelivery: (id: string) => request<WeixinState>(`/api/v1/channels/weixin/accounts/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
   deleteWeixinAccount: (id: string) => request<void>(`/api/v1/channels/weixin/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   usage: (period: UsageReport['period'], days?: number) => request<UsageReport>(`/api/v1/usage?period=${period}${days ? `&days=${days}` : ''}`),
   olderSessions: (beforeUpdatedAt: string, beforeID: string) => request<{ sessions: Session[]; hasMore: boolean }>(`/api/v1/sessions/history?beforeUpdatedAt=${encodeURIComponent(beforeUpdatedAt)}&beforeID=${encodeURIComponent(beforeID)}`),

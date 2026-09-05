@@ -5,6 +5,15 @@ export type WeixinAccount = {
   enabled: boolean
   connected: boolean
   currentSessionId?: string
+  currentSession?: {
+    id: string
+    title: string
+    status: 'idle' | 'queued' | 'paused' | 'running' | 'failed' | 'canceled'
+    runtime: 'easyagent' | 'codex'
+    progress?: string
+    updatedAt: string
+  }
+  deliveryStatus: 'idle' | 'processing' | 'sending' | 'delivered' | 'pending'
   lastSeenAt?: string
   lastMessageAt?: string
   createdAt: string
