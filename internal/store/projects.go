@@ -168,7 +168,16 @@ func (store *Store) DeleteProject(id string) error {
 		return err
 	}
 	if defaultValue != 0 {
-		return errors.New("默认项目不能移除；请先把其他项目设为默认")
+		var replacementID string
+		if err := tx.QueryRow(`SELECT id FROM ea_projects WHERE id<>? ORDER BY created_at,id LIMIT 1`, id).Scan(&replacementID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errors.New("至少需要保留一个项目")
+			}
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE ea_projects SET is_default=1 WHERE id=?`, replacementID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE ea_sessions SET project_id='' WHERE project_id=?`, id); err != nil {
 		return err

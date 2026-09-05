@@ -37,3 +37,28 @@ func TestProjectsPersistDirectoriesAndSessionAssignment(t *testing.T) {
 		t.Fatalf("会话元数据没有更新: %+v err=%v", updated, err)
 	}
 }
+
+func TestDeleteDefaultProjectPromotesReplacement(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Now().UTC()
+	if _, err := database.CreateProject("default", "Default", []string{t.TempDir()}, true, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateProject("replacement", "Replacement", []string{t.TempDir()}, false, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteProject("default"); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := database.GetProject("replacement")
+	if err != nil || !replacement.Default {
+		t.Fatalf("删除默认项目后没有提升替代项目: %+v err=%v", replacement, err)
+	}
+	if err := database.DeleteProject("replacement"); err == nil || err.Error() != "至少需要保留一个项目" {
+		t.Fatalf("最后一个项目应被保护，实际错误: %v", err)
+	}
+}

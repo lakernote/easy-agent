@@ -46,7 +46,7 @@ export function RenameSessionDialog({ session, projects, busy, onCancel, onSave,
 
 type Project = Bootstrap['projects'][number]
 
-export function ProjectDialog({ project, busy, onCancel, onSave, onDelete }: { project: Project | null; busy: boolean; onCancel: () => void; onSave: (value: { name: string; directories: string[]; default: boolean }) => void; onDelete: () => void }) {
+export function ProjectDialog({ project, projectCount, busy, onCancel, onSave, onDelete }: { project: Project | null; projectCount: number; busy: boolean; onCancel: () => void; onSave: (value: { name: string; directories: string[]; default: boolean }) => void; onDelete: () => void }) {
   const [name, setName] = useState(project?.name || '')
   const [directories, setDirectories] = useState<string[]>(project?.directories.length ? project.directories : [''])
   const [makeDefault, setMakeDefault] = useState(project?.default || false)
@@ -58,17 +58,19 @@ export function ProjectDialog({ project, busy, onCancel, onSave, onDelete }: { p
     return () => document.removeEventListener('keydown', closeWithEscape)
   }, [busy, onCancel])
   const normalized = directories.map((value) => value.trim()).filter(Boolean)
-  const valid = name.trim().length > 0 && name.trim().length <= 60 && normalized.length > 0
+  const duplicateSources = new Set(normalized).size !== normalized.length
+  const sourceError = normalized.length === 0 ? '至少添加一个源文件夹后才能保存' : duplicateSources ? '同一个源文件夹不能重复添加' : ''
+  const valid = name.trim().length > 0 && name.trim().length <= 60 && !sourceError
+  const onlyProject = Boolean(project && projectCount <= 1)
   const updateDirectory = (index: number, value: string) => setDirectories((current) => current.map((item, itemIndex) => itemIndex === index ? value : item))
   const removeDirectory = (index: number) => setDirectories((current) => current.filter((_, itemIndex) => itemIndex !== index))
   return <div className="modal-backdrop" onMouseDown={() => !busy && onCancel()}>
     <section className="modal project-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
-      <div className="modal-head"><div><p className="eyebrow">LOCAL PROJECT</p><h2 id="project-dialog-title">{project ? '编辑项目' : '添加项目'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
+      <div className="modal-head"><div><p className="eyebrow">项目设置</p><h2 id="project-dialog-title">{project ? '编辑项目' : '添加项目'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
       <label className="project-field"><span>项目名称</span><div className="project-name-input"><FolderIcon /><input ref={nameRef} value={name} maxLength={60} placeholder="例如 EasyAgent" onChange={(event) => setName(event.target.value)} /></div></label>
-      <fieldset className="project-sources"><legend>源文件夹</legend>{directories.map((directory, index) => <div className="project-source" key={`${index}-${project?.id || 'new'}`}><FolderIcon /><input value={directory} aria-label={`源文件夹 ${index + 1}`} placeholder="/srv/projects/repository" onChange={(event) => updateDirectory(index, event.target.value)} /><button type="button" aria-label={`移除源文件夹 ${index + 1}`} disabled={busy || directories.length === 1} onClick={() => removeDirectory(index)}>×</button></div>)}<button className="add-source" type="button" disabled={busy || directories.length >= 12} onClick={() => setDirectories((current) => [...current, ''])}><FolderIcon add />添加文件夹</button></fieldset>
-      <label className="project-default"><input type="checkbox" checked={makeDefault} disabled={project?.default} onChange={(event) => setMakeDefault(event.target.checked)} /><span>设为微信和浏览器新会话的默认项目</span></label>
-      <p className="project-help">源文件夹必须已存在于 EasyAgent 所在服务器。第一个目录是新会话的主工作目录；移除配置不会删除磁盘文件。</p>
-      <div className="project-dialog-actions">{project && <button className="danger-link" type="button" disabled={busy || project.default} title={project.default ? '请先把其他项目设为默认' : '移除项目配置'} onClick={onDelete}>移除本地项目</button>}<div><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || !valid} onClick={() => onSave({ name: name.trim(), directories: normalized, default: makeDefault })}>{busy ? '保存中…' : '保存'}</button></div></div>
+      <fieldset className="project-sources"><legend><span>源文件夹</span><small>项目可访问的服务器目录</small></legend><div className="project-source-list">{directories.map((directory, index) => <div className="project-source" key={`${index}-${project?.id || 'new'}`}><FolderIcon /><input value={directory} aria-label={`源文件夹 ${index + 1}`} placeholder="/srv/projects/repository" onChange={(event) => updateDirectory(index, event.target.value)} /><button type="button" aria-label={`移除源文件夹 ${index + 1}`} disabled={busy} onClick={() => removeDirectory(index)}>×</button></div>)}{directories.length === 0 && <div className="project-source-empty"><strong>尚未添加源文件夹</strong><span>添加一个服务器目录后即可保存项目</span></div>}</div><button className="add-source" type="button" disabled={busy || directories.length >= 12} onClick={() => setDirectories((current) => [...current, ''])}><FolderIcon add />添加文件夹</button>{duplicateSources && <p className="project-field-error" role="status">同一个源文件夹不能重复添加</p>}<p className="project-source-help">列表中的目录都可以更换或移除；这里只修改项目配置，不会删除磁盘文件。</p></fieldset>
+      {project?.default ? <div className="project-default-state"><strong>当前默认项目</strong><span>浏览器或微信没有指定项目时使用</span></div> : <label className="project-default"><input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} /><span><strong>设为默认项目</strong><small>浏览器或微信没有指定项目时使用</small></span></label>}
+      <div className="project-dialog-actions">{project && <div className="project-remove"><button className="danger-link" type="button" disabled={busy || onlyProject} title={onlyProject ? '至少需要保留一个项目' : '移除项目配置'} onClick={onDelete}>移除本地项目</button>{onlyProject && <small>至少保留一个项目</small>}</div>}<div><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || !valid} onClick={() => onSave({ name: name.trim(), directories: normalized, default: makeDefault })}>{busy ? '保存中…' : '保存'}</button></div></div>
     </section>
   </div>
 }

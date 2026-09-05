@@ -231,16 +231,39 @@ body { overflow: hidden; background: #f7f7f5; }
 
 /* Codex-style project organization: projects group conversations and own one
    or more server source folders, while each conversation keeps a fixed cwd. */
-.session-project { margin: 2px 0 8px; }
-.session-project-head { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 2px 10px; color: #68746c; }
-.session-project-head > span { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.session-project-head svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.session-project-head strong { overflow: hidden; color: #4b5750; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.session-project-head small { display: grid; min-width: 17px; height: 17px; place-items: center; border-radius: 9px; color: #7c8780; background: #e8ebe8; font-size: 8px; }
-.session-project-head > button { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border: 0; border-radius: 7px; color: #8a938d; background: transparent; cursor: pointer; }
-.session-project-head > button:hover { color: #3e6f51; background: #e9eeea; }
-.session-project-head > button svg { width: 17px; }
+.session-project { margin: 0 0 5px; }
+.session-project-head { display: flex; min-height: 40px; align-items: center; justify-content: space-between; gap: 2px; padding: 0 2px; color: #748078; }
+.session-project-toggle { display: flex; min-width: 0; min-height: 40px; flex: 1; align-items: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 8px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.session-project-toggle:hover { background: #eef1ee; }
+.session-project-toggle:focus-visible, .session-project-edit:focus-visible { outline: 2px solid #6f9d80; outline-offset: -2px; }
+.session-project-head svg { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-project-head strong { overflow: hidden; color: #59645d; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.session-project-head small { display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 9px; color: #879088; background: #eaedea; font-family: var(--mono); font-size: 8px; font-weight: 500; }
+.session-project-chevron { display: grid; width: 12px; height: 12px; flex: 0 0 12px; place-items: center; transition: transform 180ms ease; }
+.session-project-chevron svg { width: 11px; height: 11px; }
+.session-project.collapsed .session-project-chevron { transform: rotate(-90deg); }
+.session-project-edit { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border: 0; border-radius: 8px; color: #8a938d; background: transparent; cursor: pointer; opacity: 0; transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease; }
+.session-project-head:hover .session-project-edit, .session-project-head:focus-within .session-project-edit { opacity: 1; }
+.session-project-edit:hover { color: #3e6f51; background: #e9eeea; }
+.session-project-edit svg { width: 17px; }
+.session-project-sessions { margin: 0 0 4px 17px; padding-left: 9px; border-left: 1px solid #dfe4e0; }
+.session-project-sessions .session-row { min-height: 52px; margin: 1px 0; border-radius: 8px; }
+.session-project-sessions .session-open { min-height: 52px; grid-template-columns: 6px minmax(0, 1fr); gap: 8px; padding: 8px 4px 8px 8px; }
+.session-project-sessions .status { width: 5px; height: 5px; margin-top: 5px; }
+.session-project-sessions .status.idle { background: #9ca69f; }
+.session-project-sessions .session-row.active .status.idle { background: #2b9b68; }
+.session-project-sessions .session-copy strong { color: #303832; font-size: 10.5px; font-weight: 580; }
+.session-project-sessions .session-copy small { margin-top: 4px; color: #8a958e; }
+.session-project-sessions .session-delete { width: 34px; height: 40px; flex-basis: 34px; margin-right: 1px; opacity: 0; transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease; }
+.session-project-sessions .session-row:hover .session-delete, .session-project-sessions .session-row:focus-within .session-delete { opacity: 1; }
+.session-project.collapsed { margin-bottom: 2px; }
 .session-more:hover { color: #3f7555; background: #e8f0ea; }
+@media (hover: none) {
+  .session-project-edit, .session-project-sessions .session-delete { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-project-chevron, .session-project-edit, .session-project-sessions .session-delete { transition: none; }
+}
 .project-picker > .project-picker-list { display: grid; max-height: 210px; grid-template-columns: 1fr; gap: 5px; overflow: auto; }
 .project-picker-list > button { display: grid; gap: 3px; min-height: 48px; padding: 8px 10px; border: 1px solid #dde4df; border-radius: 8px; color: #3e4c43; background: #fff; cursor: pointer; text-align: left; }
 .project-picker-list > button:hover { border-color: #9db5a5; }.project-picker-list > button.selected { border-color: #70a082; background: #edf5ef; }
@@ -253,19 +276,34 @@ body { overflow: hidden; background: #f7f7f5; }
 .project-name-input svg, .project-source svg { width: 19px; height: 19px; justify-self: center; fill: none; stroke: #66736b; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .project-name-input input { width: 100%; height: 44px; padding: 0 13px; border: 0; border-left: 1px solid #e5e8e5; outline: 0; color: #273129; font-size: 14px; }
 .project-field > input:focus, .project-field > select:focus, .project-name-input:focus-within, .project-source:focus-within { border-color: #6f9d80; box-shadow: 0 0 0 3px #e2eee6; outline: 0; }
-.project-sources { margin: 0; padding: 0; border: 0; }.project-sources legend { margin-bottom: 8px; color: #49574e; font-size: 11px; font-weight: 600; }
-.project-source { display: grid; min-height: 46px; grid-template-columns: 48px minmax(0, 1fr) 44px; align-items: center; margin-bottom: 7px; overflow: hidden; border: 1px solid #dde2de; border-radius: 9px; background: #fafbfa; }
+.project-sources { margin: 0; padding: 0; border: 0; }
+.project-sources legend { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: #49574e; font-size: 11px; font-weight: 600; }
+.project-sources legend small { color: #929c95; font-size: 9px; font-weight: 400; }
+.project-source-list { display: grid; gap: 7px; }
+.project-source { display: grid; min-height: 46px; grid-template-columns: 48px minmax(0, 1fr) 44px; align-items: center; overflow: hidden; border: 1px solid #dde2de; border-radius: 9px; background: #fafbfa; }
 .project-source input { width: 100%; height: 44px; padding: 0 11px; border: 0; border-right: 1px solid #e5e8e5; border-left: 1px solid #e5e8e5; outline: 0; color: #354139; background: transparent; font-family: var(--mono); font-size: 10px; }
 .project-source button { height: 44px; border: 0; color: #8b958e; background: transparent; cursor: pointer; font-size: 18px; }.project-source button:hover:not(:disabled) { color: #a04a40; background: #fff0ed; }.project-source button:disabled { cursor: default; opacity: .3; }
-.add-source { display: flex; width: 100%; min-height: 44px; align-items: center; gap: 10px; padding: 0 15px; border: 1px dashed #cfd8d1; border-radius: 9px; color: #477158; background: #f7faf8; cursor: pointer; font-size: 11px; font-weight: 600; }.add-source:hover { border-color: #82a38d; background: #eef5f0; }.add-source svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.project-default { display: flex; min-height: 44px; align-items: center; gap: 9px; margin-top: 13px; color: #5f6c64; font-size: 10px; cursor: pointer; }.project-default input { width: 16px; height: 16px; accent-color: var(--green); }
+.project-source-empty { display: grid; min-height: 72px; place-content: center; gap: 4px; border: 1px dashed #d4dcd6; border-radius: 9px; color: #8b958e; background: #fafbfa; font-size: 9px; text-align: center; }
+.project-source-empty strong { color: #5f6b63; font-size: 11px; }
+.add-source { display: flex; width: 100%; min-height: 44px; align-items: center; gap: 10px; margin-top: 7px; padding: 0 15px; border: 1px dashed #cfd8d1; border-radius: 9px; color: #477158; background: #f7faf8; cursor: pointer; font-size: 11px; font-weight: 600; }.add-source:hover { border-color: #82a38d; background: #eef5f0; }.add-source svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.project-field-error { margin: 7px 2px 0; color: #a14f45; font-size: 9px; }
+.project-source-help { margin: 7px 2px 0; color: #8a958e; font-size: 9px; line-height: 1.5; }
+.project-default, .project-default-state { display: grid; min-height: 52px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 10px; margin: 14px 0 18px; padding: 8px 11px; border: 1px solid #e2e7e3; border-radius: 9px; color: #5f6c64; background: #fafbfa; }
+.project-default { cursor: pointer; }
+.project-default:hover { border-color: #c9d8cd; background: #f6faf7; }
+.project-default input { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
+.project-default > span, .project-default-state { font-size: 10px; }
+.project-default strong, .project-default small { display: block; }.project-default strong { color: #46534a; font-size: 10px; }.project-default small { margin-top: 3px; color: #89938c; font-size: 9px; font-weight: 400; }
+.project-default-state { display: flex; justify-content: space-between; gap: 16px; color: #67736a; background: #f4f7f4; }
+.project-default-state strong { color: #3f654c; font-size: 10px; }.project-default-state span { color: #869087; font-size: 9px; }
 .project-help { margin: 0 0 20px; color: #849087; font-size: 9px; line-height: 1.6; }
-.project-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid #e8ebe8; }.project-dialog-actions > div { display: flex; gap: 8px; margin-left: auto; }.project-dialog-actions button { min-height: 42px; }
+.project-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 15px; border-top: 1px solid #e8ebe8; }.project-dialog-actions > div:last-child { display: flex; gap: 8px; margin-left: auto; }.project-dialog-actions button { min-height: 42px; }
+.project-remove { display: flex; align-items: center; gap: 9px; }.project-remove small { color: #929b94; font-size: 9px; white-space: nowrap; }
 .danger-link { display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 0; border-radius: 8px; color: #a0483f; background: #fff0ed; cursor: pointer; font-size: 10px; font-weight: 600; }.danger-link:hover:not(:disabled) { background: #fbe2de; }.danger-link:disabled { color: #a5aaa6; background: #f2f3f2; cursor: default; }.danger-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .session-project-fact { display: grid; gap: 6px; margin: 0 0 22px; padding: 12px; border-radius: 9px; color: #7c8780; background: #f5f7f5; font-size: 9px; }.session-project-fact code { overflow-wrap: anywhere; color: #415249; font-family: var(--mono); font-size: 9px; }
 
 @media (max-width: 700px) {
-  .project-dialog, .session-dialog { padding: 20px; }.project-dialog-actions { align-items: stretch; flex-direction: column; }.project-dialog-actions > div { width: 100%; margin-left: 0; }.project-dialog-actions > div button { flex: 1; }.danger-link { justify-content: center; }
+  .project-dialog, .session-dialog { padding: 20px; }.project-sources legend { align-items: flex-start; flex-direction: column; gap: 3px; }.project-default-state { align-items: flex-start; flex-direction: column; gap: 3px; }.project-dialog-actions { align-items: stretch; flex-direction: column; }.project-dialog-actions > div, .project-dialog-actions > div:last-child { width: 100%; margin-left: 0; }.project-dialog-actions > div:last-child button { flex: 1; }.project-remove { justify-content: space-between; }.danger-link { justify-content: center; }
 }
 
 /* 左下角只保留一个轻量设置入口，避免把设置分区摘要挤进导航。 */
