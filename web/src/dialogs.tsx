@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type DirectoryBrowserResponse } from './api'
 import { FolderIcon, TrashIcon } from './ui'
 import type { Bootstrap, Session } from './types'
+import { sessionDisplayTitle } from './sessionState'
 export function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -23,7 +24,7 @@ export function ConfirmDialog({ title, description, subject, confirmLabel, busy,
 }
 
 export function RenameSessionDialog({ session, projects, busy, onCancel, onSave, onDelete }: { session: Session; projects: Bootstrap['projects']; busy: boolean; onCancel: () => void; onSave: (title: string, projectId: string) => void; onDelete: () => void }) {
-  const [title, setTitle] = useState(session.title)
+  const [title, setTitle] = useState(sessionDisplayTitle(session))
   const [projectId, setProjectId] = useState(session.projectId || '')
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {

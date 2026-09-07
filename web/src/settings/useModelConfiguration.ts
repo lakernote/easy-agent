@@ -59,11 +59,46 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     } finally { setTestingModel(false) }
   }
 
+  const draftProfile = (runtime: ModelSettings['runtime']): ModelSettings => {
+    const saved = data.modelProfiles.find((profile) => profile.settings.runtime === runtime)?.settings
+    const seed = saved || data.model
+    const common = {
+      ...seed,
+      profileId: `${runtime}-${Date.now()}`,
+      profileName: `${runtime === 'codex' ? 'Codex' : 'EasyAgent'} 新配置`,
+      runtime,
+      apiKey: '',
+      secretConfigured: false,
+    }
+    if (runtime === 'codex') {
+      return {
+        ...common,
+        provider: 'codex',
+        protocol: 'app_server',
+        baseUrl: '',
+        model: '',
+        apiKeyEnv: '',
+        thinking: '',
+        contextWindowTokens: 0,
+        compressionThresholdPercent: 0,
+        turnTimeoutSeconds: data.modelRules.defaultCodexTurnTimeoutSeconds,
+      }
+    }
+    const ollamaBase = data.ollama.baseUrl.replace(/\/+$/, '')
+    return {
+      ...common,
+      provider: saved?.provider || (data.ollama.running ? 'ollama' : 'openai'),
+      protocol: saved?.protocol && saved.protocol !== 'app_server' ? saved.protocol : 'chat_completions',
+      baseUrl: saved?.baseUrl || (data.ollama.running ? `${ollamaBase}/v1` : ''),
+      model: saved?.model || '',
+      apiKeyEnv: saved?.apiKeyEnv || '',
+      thinking: saved?.thinking || '',
+    }
+  }
+
   const selectRuntime = (runtime: ModelSettings['runtime']) => {
     const existing = data.modelProfiles.find((profile) => profile.settings.runtime === runtime)
-    setModel(existing ? { ...existing.settings, profileId: existing.id, profileName: existing.name } : (current) => runtime === 'codex'
-      ? { ...current, profileId: `codex-${Date.now()}`, profileName: 'Codex 新配置', runtime, provider: 'codex', protocol: 'app_server', baseUrl: '', apiKey: '', apiKeyEnv: '', thinking: '', contextWindowTokens: 0, compressionThresholdPercent: 0, model: '', turnTimeoutSeconds: data.modelRules.defaultCodexTurnTimeoutSeconds }
-      : { ...current, profileId: `easyagent-${Date.now()}`, profileName: 'EasyAgent 新配置', runtime, provider: data.ollama.running ? 'ollama' : current.provider === 'codex' ? 'ollama' : current.provider, protocol: current.protocol === 'app_server' ? 'chat_completions' : current.protocol, baseUrl: current.baseUrl || data.ollama.baseUrl })
+    setModel(existing ? { ...existing.settings, profileId: existing.id, profileName: existing.name } : draftProfile(runtime))
     setModelNotice(null); onError('')
   }
 
@@ -73,25 +108,33 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     setModelNotice(null); onError('')
   }
 
-  const createProfile = () => {
-    const nextID = `${model.runtime}-${Date.now()}`
-    setModel({ ...model, profileId: nextID, profileName: `${model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} 新配置` })
+  const createProfile = (runtime: ModelSettings['runtime'] = model.runtime) => {
+    setModel(draftProfile(runtime))
     setModelNotice(null); onError('')
   }
 
-  const openProfileEditor = (profile?: ModelProfile) => {
+  const openProfileEditor = (profile?: ModelProfile, runtime: ModelSettings['runtime'] = model.runtime) => {
+    setModelEditorSnapshot({ ...model })
     if (profile) {
-      setModelEditorSnapshot({ ...model }); selectProfile(profile); setModelEditorMode('edit')
+      selectProfile(profile); setModelEditorMode('edit')
     } else {
-      setModelEditorSnapshot({ ...data.model }); createProfile(); setModelEditorMode('new')
+      createProfile(runtime); setModelEditorMode('new')
     }
     setModelEditorOpen(true); setModelNotice(null); onError('')
   }
 
   const closeModelEditor = () => {
     if (savingModel) return
-    if (modelEditorSnapshot) setModel({ ...modelEditorSnapshot })
-    else if (!currentProfileSaved) setModel({ ...data.model })
+    const savedSnapshot = modelEditorSnapshot && data.modelProfiles.some((profile) => profile.id === modelEditorSnapshot.profileId)
+      ? modelEditorSnapshot
+      : null
+    const savedRuntimeProfile = data.modelProfiles.find((profile) => profile.settings.runtime === model.runtime)
+    if (savedSnapshot) setModel({ ...savedSnapshot })
+    else if (!currentProfileSaved) {
+      setModel(savedRuntimeProfile
+        ? { ...savedRuntimeProfile.settings, profileId: savedRuntimeProfile.id, profileName: savedRuntimeProfile.name }
+        : { ...data.model })
+    }
     setModelEditorSnapshot(null); setModelEditorOpen(false); setModelNotice(null); onError('')
   }
 

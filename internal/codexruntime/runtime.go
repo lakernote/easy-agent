@@ -4,7 +4,6 @@
 package codexruntime
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -287,8 +286,6 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		stopProcess(command, stdin)
 	}()
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	type readResult struct {
 		message rpcMessage
 		err     error
@@ -303,19 +300,19 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		}
 	}
 	go func() {
-		for scanner.Scan() {
+		decoder := json.NewDecoder(stdout)
+		for {
 			var message rpcMessage
-			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			if err := decoder.Decode(&message); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
 				emitReadResult(readResult{err: fmt.Errorf("Codex app-server 返回无效 JSON: %w", err)})
 				return
 			}
 			if !emitReadResult(readResult{message: message}) {
 				return
 			}
-		}
-		if err := scanner.Err(); err != nil {
-			emitReadResult(readResult{err: err})
-			return
 		}
 		if stderr := strings.TrimSpace(stderrTail.Snapshot()); stderr != "" {
 			emitReadResult(readResult{err: fmt.Errorf("Codex app-server 已退出: %s", stderr)})

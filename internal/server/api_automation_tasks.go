@@ -70,7 +70,7 @@ func (server *Server) updateAutomationTask(response http.ResponseWriter, request
 	current, err := server.store.GetAutomationTask(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(response, http.StatusNotFound, "自动化任务不存在")
+			writeError(response, http.StatusNotFound, "定时任务不存在")
 		} else {
 			writeError(response, http.StatusInternalServerError, err.Error())
 		}
@@ -98,7 +98,7 @@ func (server *Server) updateAutomationTask(response http.ResponseWriter, request
 	updated, err := server.store.UpdateAutomationTask(value)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(response, http.StatusNotFound, "自动化任务不存在")
+			writeError(response, http.StatusNotFound, "定时任务不存在")
 		} else {
 			writeError(response, http.StatusConflict, err.Error())
 		}
@@ -110,7 +110,7 @@ func (server *Server) updateAutomationTask(response http.ResponseWriter, request
 func (server *Server) deleteAutomationTask(response http.ResponseWriter, request *http.Request) {
 	if err := server.store.DeleteAutomationTask(request.PathValue("id")); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(response, http.StatusNotFound, "自动化任务不存在")
+			writeError(response, http.StatusNotFound, "定时任务不存在")
 		} else {
 			writeError(response, http.StatusInternalServerError, err.Error())
 		}
@@ -158,14 +158,14 @@ func (server *Server) runAutomationTask(response http.ResponseWriter, request *h
 	task, err := server.store.GetAutomationTask(request.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(response, http.StatusNotFound, "自动化任务不存在")
+			writeError(response, http.StatusNotFound, "定时任务不存在")
 		} else {
 			writeError(response, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
 	if !task.Enabled {
-		writeError(response, http.StatusConflict, "请先启用自动化任务")
+		writeError(response, http.StatusConflict, "请先启用定时任务")
 		return
 	}
 	sessionID, err := server.triggerAutomationTask(request.Context(), task)
@@ -288,7 +288,7 @@ func (server *Server) startAutomationSession(ctx context.Context, task store.Aut
 	}
 	id := newID()
 	workspace := server.prepareSessionWorkspace(ctx, id, environment.Workspace(), runtimeSettings)
-	if _, err := server.store.CreateSession(store.CreateSessionParams{ID: id, Title: "自动化 · " + task.Name, Runtime: model.Runtime, Channel: store.ChannelAutomation, ProfileID: model.ProfileID, Model: model.Model, ProjectID: task.ProjectID, Workspace: workspace.Execution, CreatedAt: time.Now()}); err != nil {
+	if _, err := server.store.CreateSession(store.CreateSessionParams{ID: id, Title: task.Name, Runtime: model.Runtime, Channel: store.ChannelAutomation, ProfileID: model.ProfileID, Model: model.Model, ProjectID: task.ProjectID, Workspace: workspace.Execution, CreatedAt: time.Now()}); err != nil {
 		server.discardPreparedWorkspace(workspace)
 		return "", err
 	}

@@ -109,7 +109,7 @@ func (server *Server) getCodexThreads(response http.ResponseWriter, request *htt
 }
 
 func (server *Server) getCodexThread(response http.ResponseWriter, request *http.Request) {
-	value, err := server.codexQueryWithParams(request.Context(), server.env.Workspace(), "thread/read", map[string]any{"threadId": request.PathValue("id"), "includeTurns": true})
+	value, err := server.codexQueryWithParams(request.Context(), server.env.Workspace(), "thread/read", map[string]any{"threadId": request.PathValue("id"), "includeTurns": false})
 	if err != nil {
 		writeError(response, http.StatusServiceUnavailable, err.Error())
 		return

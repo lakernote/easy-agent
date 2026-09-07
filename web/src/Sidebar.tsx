@@ -1,21 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import type { Bootstrap, Session } from './types'
-import { isActive, type Page } from './sessionState'
+import { isActive, isAutomationSession, sessionDisplayTitle, type Page } from './sessionState'
 import { formatTime, statusLabel } from './format'
 import { ChevronIcon, Icon, Logo, MoreIcon, ProjectIcon, WeixinIcon } from './ui'
 import { ConfirmDialog, ProjectDialog, RenameSessionDialog } from './dialogs'
 
 type Project = Bootstrap['projects'][number]
 const collapsedProjectsKey = 'easyagent.sidebar.collapsed-projects'
-
-function isAutomationSession(session: Session) {
-  return session.title.startsWith('自动化 · ')
-}
-
-function sessionDisplayTitle(session: Session) {
-  return isAutomationSession(session) ? session.title.replace(/^自动化 · /, '') : session.title
-}
 
 function initialCollapsedProjects() {
   try {
@@ -148,9 +140,11 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
 
   const leaveManaging = () => { setManaging(false); setSelectedIds(new Set()) }
   return <aside className="sidebar">
-    <div className="brand"><div className="brand-mark"><Logo /></div><div><strong>EasyAgent</strong><small>研发 · 测试 · 运维</small></div></div>
-    <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
-    <button className={`automation-nav ${page === 'automations' ? 'active' : ''}`} type="button" aria-current={page === 'automations' ? 'page' : undefined} onClick={() => onPage('automations')}><Icon name="automation" /><span><strong>定时任务</strong></span></button>
+    <div className="brand"><div className="brand-mark"><Logo /></div><strong>EasyAgent</strong></div>
+    <div className="sidebar-quick-actions" aria-label="快捷操作">
+      <button className="new-chat" onClick={onNew}><span aria-hidden="true">＋</span><strong>新会话</strong></button>
+      <button className={`automation-nav ${page === 'automations' ? 'active' : ''}`} type="button" aria-current={page === 'automations' ? 'page' : undefined} onClick={() => onPage('automations')}><Icon name="automation" /><span><strong>定时任务</strong></span></button>
+    </div>
     <nav className="primary-nav" aria-label="主导航"><button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button><button className={page === 'automations' ? 'active' : ''} aria-current={page === 'automations' ? 'page' : undefined} onClick={() => onPage('automations')}><Icon name="automation" />定时任务</button></nav>
     <div className="session-label"><span>项目与会话 <small>{data.sessions.length}</small></span><div><button aria-label="添加项目" title="添加项目" onClick={() => openProject(null)}>＋</button><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
     <div className="session-controls"><label className="session-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedIds(new Set()) }} placeholder="搜索会话或项目" aria-label="搜索会话或项目" /></label><select value={sort} onChange={(event) => setSort(event.target.value as 'newest' | 'oldest')} aria-label="按时间排序"><option value="newest">最新</option><option value="oldest">最早</option></select></div>

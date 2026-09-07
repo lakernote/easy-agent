@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { APIError, api } from './api'
 import type { Bootstrap, Session } from './types'
-import { isActive, mergeSessionHistory, mergeSessionSnapshot, updateSessionSummary, type Page } from './sessionState'
+import { isActive, mergeSessionHistory, mergeSessionSnapshot, sessionDisplayTitle, updateSessionSummary, type Page } from './sessionState'
 import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } from './dialogs'
 import { Logo } from './ui'
 import { Sidebar } from './Sidebar'
@@ -160,7 +160,7 @@ export default function App() {
     <main className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
-        <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : page === 'automations' ? '定时任务' : '设置'}</div>
+        <div className="topbar-title">{page === 'chat' ? (session ? sessionDisplayTitle(session) : '新会话') : page === 'automations' ? '定时任务' : '设置'}</div>
         <div className="topbar-actions">
           {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
           {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}

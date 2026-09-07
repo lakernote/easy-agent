@@ -18,9 +18,9 @@ type SettingsShellProps = {
 }
 
 const sections: { id: SettingsSection; label: string; description: string }[] = [
-  { id: 'runtime', label: '运行时', description: '选择执行引擎' },
+  { id: 'runtime', label: '运行时', description: '选择默认执行引擎' },
   { id: 'tasks', label: '任务设置', description: '并发、超时与恢复' },
-  { id: 'models', label: '模型配置', description: '按 Runtime 保存' },
+  { id: 'models', label: '模型配置', description: '按运行时管理' },
   { id: 'skills', label: 'Skills', description: '按需加载能力' },
   { id: 'tools', label: '工具与 MCP', description: '共享工具与连接' },
   { id: 'usage', label: '用量', description: '调用统计' },
@@ -38,7 +38,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
     ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。'
     : selected === 'weixin'
       ? '管理团队微信绑定与远程启停；微信只回传必要状态和最终任务结果。'
-      : '选择运行时，并管理共享任务策略、模型、Skills、工具与用量。新会话会固定创建时的运行环境。'
+      : '先选择 Runtime，再管理对应模型配置；任务策略、Skills 与 MCP 在运行时之间共享。'
   const [showPassword, setShowPassword] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -94,7 +94,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
           <span className="settings-nav-index">{String(index + 1).padStart(2, '0')}</span>
           <span><strong>{section.label}</strong><small>{section.description}</small></span>
         </button>)}
-        <p className="settings-side-note">Skills 与 MCP 是共享能力；模型配置按 Runtime 分开保存。</p>
+        <p className="settings-side-note">Runtime 决定执行方式；每个 Runtime 独立管理模型配置，Skills 与 MCP 共享。</p>
       </nav>
       <main className="settings-hub-content">
         {selected === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
