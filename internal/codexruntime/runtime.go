@@ -284,9 +284,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		if ctx.Err() != nil && turnID != "" {
 			interrupt()
 		}
-		_ = stdin.Close()
-		terminateProcessTree(command)
-		_ = command.Wait()
+		stopProcess(command, stdin)
 	}()
 
 	scanner := bufio.NewScanner(stdout)

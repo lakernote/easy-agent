@@ -288,7 +288,7 @@ func (server *Server) startAutomationSession(ctx context.Context, task store.Aut
 	}
 	id := newID()
 	workspace := server.prepareSessionWorkspace(ctx, id, environment.Workspace(), runtimeSettings)
-	if _, err := server.store.CreateSession(store.CreateSessionParams{ID: id, Title: "自动化 · " + task.Name, Runtime: model.Runtime, ProfileID: model.ProfileID, Model: model.Model, ProjectID: task.ProjectID, Workspace: workspace.Execution, CreatedAt: time.Now()}); err != nil {
+	if _, err := server.store.CreateSession(store.CreateSessionParams{ID: id, Title: "自动化 · " + task.Name, Runtime: model.Runtime, Channel: store.ChannelAutomation, ProfileID: model.ProfileID, Model: model.Model, ProjectID: task.ProjectID, Workspace: workspace.Execution, CreatedAt: time.Now()}); err != nil {
 		server.discardPreparedWorkspace(workspace)
 		return "", err
 	}

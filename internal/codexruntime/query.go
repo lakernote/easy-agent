@@ -49,9 +49,7 @@ func Call(ctx context.Context, config Config, method string, params any) (json.R
 		return nil, fmt.Errorf("启动 Codex app-server: %w", err)
 	}
 	defer func() {
-		_ = stdin.Close()
-		terminateProcessTree(command)
-		_ = command.Wait()
+		stopProcess(command, stdin)
 	}()
 
 	type readResult struct {

@@ -153,6 +153,7 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 		workspace := manager.server.prepareSessionWorkspace(manager.server.ctx, sessionID, runEnvironment.Workspace(), runtimeSettings)
 		if _, err := manager.server.store.CreateSession(store.CreateSessionParams{
 			ID: sessionID, Title: makeTitle(text), Runtime: model.Runtime,
+			Channel:   store.ChannelWeixin,
 			ProfileID: model.ProfileID, Model: model.Model, ProjectID: project.ID,
 			Workspace: workspace.Execution, CreatedAt: now,
 		}); err != nil {

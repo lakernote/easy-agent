@@ -90,6 +90,7 @@ export type Session = {
   status: 'idle' | 'queued' | 'paused' | 'running' | 'failed' | 'canceled'
   error?: string
   runtime: 'easyagent' | 'codex'
+  channel?: 'web' | 'weixin' | 'automation' | string
   model?: string
   workspace: string
   sourceWorkspace?: string

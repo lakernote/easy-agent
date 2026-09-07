@@ -10,6 +10,9 @@ import (
 const (
 	RuntimeEasyAgent                   = "easyagent"
 	RuntimeCodex                       = "codex"
+	ChannelWeb                         = "web"
+	ChannelWeixin                      = "weixin"
+	ChannelAutomation                  = "automation"
 	DefaultModelProtocol               = "chat_completions"
 	DefaultOllamaBaseURL               = "http://127.0.0.1:11434/v1"
 	DefaultMaxOutputTokens             = 1600

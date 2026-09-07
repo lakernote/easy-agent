@@ -190,6 +190,7 @@ type Session struct {
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 	Runtime   string `json:"runtime"`
+	Channel   string `json:"channel,omitempty"`
 	ProfileID string `json:"profileId,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Workspace string `json:"workspace"`

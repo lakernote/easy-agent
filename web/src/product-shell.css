@@ -267,6 +267,10 @@ body { overflow: hidden; background: #f7f7f5; }
 .session-project-sessions .session-type-icon.running { border-color: #cfe2ef; color: #4b82a7; background: #edf5fa; }
 .session-project-sessions .session-type-icon.queued { border-color: #f0ddb9; color: #b9791e; background: #fff7e9; }
 .session-project-sessions .session-type-icon.failed { border-color: #efd1cb; color: #b45045; background: #fff3f0; }
+.session-project-sessions .session-type-icon.weixin { border-color: #b8dcf7; color: #0f7ea8; background: #eaf7ff; }
+.session-project-sessions .session-type-icon.weixin.running { border-color: #b9d5f0; color: #3576a8; background: #edf5fb; }
+.session-project-sessions .session-type-icon.weixin.queued { border-color: #c5dcfa; color: #2563eb; background: #eff6ff; }
+.session-project-sessions .session-type-icon.weixin.failed { border-color: #efd1cb; color: #b45045; background: #fff3f0; }
 .session-project-sessions .status.idle { background: #9ca69f; }
 .session-project-sessions .session-row.active .status.idle { background: #2b9b68; }
 .session-project-sessions .session-copy strong { color: #303832; font-size: 10.5px; font-weight: 580; }

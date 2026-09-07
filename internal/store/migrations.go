@@ -72,9 +72,10 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
   title TEXT NOT NULL,
 	  project_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
-  error TEXT NOT NULL,
-  runtime TEXT NOT NULL DEFAULT 'easyagent',
-  profile_id TEXT NOT NULL DEFAULT '',
+	  error TEXT NOT NULL,
+	  runtime TEXT NOT NULL DEFAULT 'easyagent',
+	  channel TEXT NOT NULL DEFAULT 'web',
+	  profile_id TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL,
   workspace TEXT NOT NULL DEFAULT '',
   source_workspace TEXT NOT NULL DEFAULT '',
@@ -212,6 +213,20 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("迁移 ea_sessions.profile_id: %w", err)
 		}
+	}
+	var channelColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name='channel'`).Scan(&channelColumn); err != nil {
+		return err
+	}
+	if channelColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN channel TEXT NOT NULL DEFAULT 'web'`); err != nil {
+			return fmt.Errorf("迁移 ea_sessions.channel: %w", err)
+		}
+	}
+	// Older databases did not record the source channel. The account pointer is
+	// the only unambiguous relation available for existing WeChat sessions.
+	if _, err := store.db.Exec(`UPDATE ea_sessions SET channel='weixin' WHERE id IN (SELECT current_session_id FROM ea_weixin_accounts WHERE current_session_id <> '') AND channel='web'`); err != nil {
+		return fmt.Errorf("迁移微信会话来源: %w", err)
 	}
 	for _, column := range []struct {
 		name       string

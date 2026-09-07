@@ -3,7 +3,7 @@ import { api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, type Page } from './sessionState'
 import { formatTime, statusLabel } from './format'
-import { ChevronIcon, Icon, Logo, MoreIcon, ProjectIcon } from './ui'
+import { ChevronIcon, Icon, Logo, MoreIcon, ProjectIcon, WeixinIcon } from './ui'
 import { ConfirmDialog, ProjectDialog, RenameSessionDialog } from './dialogs'
 
 type Project = Bootstrap['projects'][number]
@@ -137,10 +137,11 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
 
   const renderSession = (item: Session) => {
     const automation = isAutomationSession(item)
+    const weixin = item.channel === 'weixin'
     const title = sessionDisplayTitle(item)
     return <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${automation ? 'automation-session' : ''} ${managing ? 'managing' : ''}`}>
       {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${title}`} /></label>}
-      <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={title}>{automation ? <span className={`session-type-icon automation ${item.status}`} aria-label="定时任务"><Icon name="automation" /></span> : <span className={`status ${item.status}`} />}<span className="session-copy"><strong>{title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
+      <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={title}>{automation ? <span className={`session-type-icon automation ${item.status}`} aria-label="定时任务"><Icon name="automation" /></span> : weixin ? <span className={`session-type-icon weixin ${item.status}`} aria-label="微信会话"><WeixinIcon /></span> : <span className={`status ${item.status}`} />}<span className="session-copy"><strong>{title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
       {!managing && <button className="session-delete session-more" aria-label={`编辑会话 ${title}`} title="编辑会话" onClick={() => setEditingSession(item)}><MoreIcon /></button>}
     </div>
   }

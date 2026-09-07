@@ -75,6 +75,9 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		turnContext, turnCancel := context.WithTimeout(taskContext, time.Duration(runtimeSettings.TurnTimeoutSeconds)*time.Second)
 		defer turnCancel()
 		if err := server.executeSessionTurn(turnContext, id, model, &usage); err != nil {
+			if errors.Is(err, context.Canceled) && server.ctx.Err() != nil {
+				err = errors.New("服务正在停止，任务已中断；恢复后请确认工作区状态，再重新发送")
+			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				err = errors.New("整轮任务超过配置的时间上限")
 			}

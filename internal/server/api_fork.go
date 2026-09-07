@@ -86,6 +86,7 @@ func (server *Server) forkSession(response http.ResponseWriter, request *http.Re
 	}
 	if _, err := server.store.CreateSession(store.CreateSessionParams{
 		ID: id, Title: titlePrefix + source.Title, Runtime: source.Runtime,
+		Channel:   source.Channel,
 		ProfileID: source.ProfileID, Model: source.Model, ProjectID: source.ProjectID,
 		Workspace: workspace.Execution, CreatedAt: time.Now(),
 	}); err != nil {

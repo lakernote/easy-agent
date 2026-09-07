@@ -145,6 +145,9 @@ export function explainRunError(error?: string, ollamaRunning = false) {
       ? { title: '本地模型连接已恢复', message: '该轮执行时无法连接 Ollama；现在服务已经恢复，直接点击“重新发送”即可，不需要新建会话。' }
       : { title: '无法连接本地模型', message: 'EasyAgent 正常运行，但 Ollama 没有启动。启动 Ollama 后点击“重新发送”即可，不需要新建会话。' }
   }
+  if (/already has an active writer|active writer/i.test(value)) {
+    return { title: 'Codex 会话正在被占用', message: '同一个 Codex thread 仍有其他执行进程在写入，常见于上一轮尚未完全退出，或同一会话同时在另一个窗口运行。请先关闭重复执行，等待几秒后再重试；如果仍然占用，请新建会话。' }
+  }
   if (/Codex.*整轮任务|整轮任务.*上限/i.test(value)) {
     return { title: 'Codex 整轮任务超时', message: '这轮任务包含思考、命令、文件变更、MCP 和审批等待，累计超过了整轮任务上限。可到“模型与工具”增加上限，或拆分任务后重试。' }
   }
