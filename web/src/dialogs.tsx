@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { api, type DirectoryBrowserResponse } from './api'
 import { FolderIcon, TrashIcon } from './ui'
 import type { Bootstrap, Session } from './types'
 export function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
@@ -46,10 +47,57 @@ export function RenameSessionDialog({ session, projects, busy, onCancel, onSave,
 
 type Project = Bootstrap['projects'][number]
 
+function FolderPickerDialog({ initialPath, busy, onCancel, onSelect }: { initialPath: string; busy: boolean; onCancel: () => void; onSelect: (path: string) => void }) {
+  const [path, setPath] = useState(initialPath)
+  const [browser, setBrowser] = useState<DirectoryBrowserResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const pathRef = useRef<HTMLInputElement>(null)
+
+  const load = async (nextPath: string) => {
+    setLoading(true); setError('')
+    try {
+      const result = await api.browseDirectories(nextPath.trim())
+      setBrowser(result); setPath(result.path)
+    } catch (reason) {
+      setError((reason as Error).message || '无法读取服务器目录')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => {
+    pathRef.current?.focus()
+    void load(initialPath)
+    const closeWithEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onCancel() }
+    document.addEventListener('keydown', closeWithEscape)
+    return () => document.removeEventListener('keydown', closeWithEscape)
+  }, [busy, initialPath, onCancel])
+
+  return <div className="modal-backdrop folder-picker-backdrop" onMouseDown={() => !busy && onCancel()}>
+    <section className="modal folder-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><p className="eyebrow">服务器目录</p><h2 id="folder-picker-title">选择源文件夹</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
+      <p className="modal-copy">浏览 EasyAgent 所在服务器上的目录，进入子目录后再使用当前目录。</p>
+      <form className="folder-picker-path" onSubmit={(event) => { event.preventDefault(); void load(path) }}>
+        <FolderIcon /><input ref={pathRef} value={path} aria-label="服务器目录路径" placeholder="输入服务器绝对路径" onChange={(event) => setPath(event.target.value)} /><button className="ghost-button" type="submit" disabled={loading}>打开</button>
+      </form>
+      <div className="folder-picker-current"><span>当前位置</span><code title={browser?.path || path}>{browser?.path || path || '读取中…'}</code></div>
+      <div className="folder-picker-list" aria-live="polite">
+        {!loading && !error && <div className="folder-picker-list-head"><span>目录</span><small>{browser?.directories.length || 0} 个文件夹</small></div>}
+        {loading && <div className="folder-picker-state">正在读取目录…</div>}
+        {!loading && error && <div className="folder-picker-state error"><strong>读取失败</strong><span>{error}</span><button className="ghost-button" type="button" onClick={() => void load(path)}>重试</button></div>}
+        {!loading && !error && browser?.parent && <button className="folder-picker-entry parent" type="button" onClick={() => void load(browser.parent || '')}><FolderIcon /><span><strong>返回上一级</strong><small>{browser.parent}</small></span></button>}
+        {!loading && !error && browser?.directories.map((directory) => <button className="folder-picker-entry" type="button" key={directory.path} onClick={() => void load(directory.path)}><FolderIcon /><span><strong>{directory.name}</strong><small>{directory.path}</small></span><span className="folder-picker-entry-arrow">›</span></button>)}
+        {!loading && !error && browser?.directories.length === 0 && <div className="folder-picker-state">这个目录下没有可继续浏览的子文件夹。</div>}
+      </div>
+      <div className="folder-picker-actions"><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || loading || !browser} onClick={() => browser && onSelect(browser.path)}>使用此目录</button></div>
+    </section>
+  </div>
+}
+
 export function ProjectDialog({ project, projectCount, busy, onCancel, onSave, onDelete }: { project: Project | null; projectCount: number; busy: boolean; onCancel: () => void; onSave: (value: { name: string; directories: string[]; default: boolean }) => void; onDelete: () => void }) {
   const [name, setName] = useState(project?.name || '')
   const [directories, setDirectories] = useState<string[]>(project?.directories.length ? project.directories : [''])
   const [makeDefault, setMakeDefault] = useState(project?.default || false)
+  const [folderPickerIndex, setFolderPickerIndex] = useState<number | null>(null)
   const nameRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     nameRef.current?.focus()
@@ -68,10 +116,11 @@ export function ProjectDialog({ project, projectCount, busy, onCancel, onSave, o
     <section className="modal project-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
       <div className="modal-head"><div><p className="eyebrow">项目设置</p><h2 id="project-dialog-title">{project ? '编辑项目' : '添加项目'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
       <label className="project-field"><span>项目名称</span><div className="project-name-input"><FolderIcon /><input ref={nameRef} value={name} maxLength={60} placeholder="例如 EasyAgent" onChange={(event) => setName(event.target.value)} /></div></label>
-      <fieldset className="project-sources"><legend><span>源文件夹</span><small>项目可访问的服务器目录</small></legend><div className="project-source-list">{directories.map((directory, index) => <div className="project-source" key={`${index}-${project?.id || 'new'}`}><FolderIcon /><input value={directory} aria-label={`源文件夹 ${index + 1}`} placeholder="/srv/projects/repository" onChange={(event) => updateDirectory(index, event.target.value)} /><button type="button" aria-label={`移除源文件夹 ${index + 1}`} disabled={busy} onClick={() => removeDirectory(index)}>×</button></div>)}{directories.length === 0 && <div className="project-source-empty"><strong>尚未添加源文件夹</strong><span>添加一个服务器目录后即可保存项目</span></div>}</div><button className="add-source" type="button" disabled={busy || directories.length >= 12} onClick={() => setDirectories((current) => [...current, ''])}><FolderIcon add />添加文件夹</button>{duplicateSources && <p className="project-field-error" role="status">同一个源文件夹不能重复添加</p>}<p className="project-source-help">列表中的目录都可以更换或移除；这里只修改项目配置，不会删除磁盘文件。</p></fieldset>
+      <fieldset className="project-sources"><legend><span>源文件夹</span><small>输入服务器路径，或浏览选择目录</small></legend><p className="project-sources-note">第一个目录会作为新会话的默认工作目录，最多可添加 12 个目录。</p><div className="project-source-list">{directories.map((directory, index) => <div className="project-source" key={`${index}-${project?.id || 'new'}`}><button className="project-source-pick" type="button" aria-label={`选择源文件夹 ${index + 1}`} title="浏览选择服务器目录" disabled={busy} onClick={() => setFolderPickerIndex(index)}><FolderIcon /><span>选择</span></button><input value={directory} aria-label={`源文件夹 ${index + 1}`} placeholder="/srv/projects/repository" onChange={(event) => updateDirectory(index, event.target.value)} /><button className="project-source-remove" type="button" aria-label={`移除源文件夹 ${index + 1}`} disabled={busy} onClick={() => removeDirectory(index)}>×</button></div>)}{directories.length === 0 && <div className="project-source-empty"><strong>尚未添加源文件夹</strong><span>添加一个服务器目录后即可保存项目</span></div>}</div><button className="add-source" type="button" disabled={busy || directories.length >= 12} onClick={() => setDirectories((current) => [...current, ''])}><FolderIcon add />添加另一个文件夹</button>{duplicateSources && <p className="project-field-error" role="status">同一个源文件夹不能重复添加</p>}<p className="project-source-help">这里只修改项目配置，不会删除服务器上的文件。</p></fieldset>
       {project?.default ? <div className="project-default-state"><strong>当前默认项目</strong><span>浏览器或微信没有指定项目时使用</span></div> : <label className="project-default"><input type="checkbox" checked={makeDefault} onChange={(event) => setMakeDefault(event.target.checked)} /><span><strong>设为默认项目</strong><small>浏览器或微信没有指定项目时使用</small></span></label>}
       <div className="project-dialog-actions">{project && <div className="project-remove"><button className="danger-link" type="button" disabled={busy || onlyProject} title={onlyProject ? '至少需要保留一个项目' : '移除项目配置'} onClick={onDelete}>移除本地项目</button>{onlyProject && <small>至少保留一个项目</small>}</div>}<div><button className="ghost-button" type="button" disabled={busy} onClick={onCancel}>取消</button><button className="primary-button" type="button" disabled={busy || !valid} onClick={() => onSave({ name: name.trim(), directories: normalized, default: makeDefault })}>{busy ? '保存中…' : '保存'}</button></div></div>
     </section>
+    {folderPickerIndex !== null && <FolderPickerDialog initialPath={directories[folderPickerIndex] || ''} busy={busy} onCancel={() => setFolderPickerIndex(null)} onSelect={(path) => { updateDirectory(folderPickerIndex, path); setFolderPickerIndex(null) }} />}
   </div>
 }
 

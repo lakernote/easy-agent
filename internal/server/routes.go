@@ -9,6 +9,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("PUT /api/v1/auth/password", server.changePassword)
 	server.mux.HandleFunc("GET /api/v1/health", server.health)
 	server.mux.HandleFunc("GET /api/v1/bootstrap", server.bootstrap)
+	server.mux.HandleFunc("GET /api/v1/filesystem/directories", server.browseDirectories)
 	server.mux.HandleFunc("PUT /api/v1/runtime/settings", server.saveRuntimeSettings)
 	server.mux.HandleFunc("GET /api/v1/channels/weixin", server.getWeixin)
 	server.mux.HandleFunc("PUT /api/v1/channels/weixin", server.saveWeixinSettings)

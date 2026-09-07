@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,6 +18,64 @@ type projectRequest struct {
 	Name        string   `json:"name"`
 	Directories []string `json:"directories"`
 	Default     bool     `json:"default"`
+}
+
+type directoryEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type directoryBrowserResponse struct {
+	Path        string           `json:"path"`
+	Parent      string           `json:"parent,omitempty"`
+	Directories []directoryEntry `json:"directories"`
+}
+
+// browseDirectories lists only directories on the EasyAgent server. The browser
+// needs this instead of a native file picker because the project paths belong to
+// the server process, not to the computer that opened the web page.
+func (server *Server) browseDirectories(response http.ResponseWriter, request *http.Request) {
+	path := strings.TrimSpace(request.URL.Query().Get("path"))
+	if path == "" {
+		path = server.env.Workspace()
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "无法解析目录路径")
+		return
+	}
+	absolute = filepath.Clean(absolute)
+	info, err := os.Stat(absolute)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "目录不存在或无法访问")
+		return
+	}
+	if !info.IsDir() {
+		writeError(response, http.StatusBadRequest, "所选路径不是目录")
+		return
+	}
+	entries, err := os.ReadDir(absolute)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "无法读取目录内容")
+		return
+	}
+	directories := make([]directoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		candidate := filepath.Join(absolute, entry.Name())
+		childInfo, statErr := os.Stat(candidate)
+		if statErr != nil || !childInfo.IsDir() {
+			continue
+		}
+		directories = append(directories, directoryEntry{Name: entry.Name(), Path: candidate})
+	}
+	sort.Slice(directories, func(left, right int) bool {
+		return strings.ToLower(directories[left].Name) < strings.ToLower(directories[right].Name)
+	})
+	parent := filepath.Dir(absolute)
+	if parent == absolute {
+		parent = ""
+	}
+	writeJSON(response, http.StatusOK, directoryBrowserResponse{Path: absolute, Parent: parent, Directories: directories})
 }
 
 func (server *Server) ensureDefaultProject() error {

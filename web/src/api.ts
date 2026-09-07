@@ -9,6 +9,12 @@ export class APIError extends Error {
   }
 }
 
+export type DirectoryBrowserResponse = {
+  path: string
+  parent?: string
+  directories: { name: string; path: string }[]
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -28,6 +34,7 @@ export const api = {
   logout: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) => request<{ authenticated: boolean; message: string }>('/api/v1/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
+  browseDirectories: (path = '') => request<DirectoryBrowserResponse>(`/api/v1/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   saveRuntimeSettings: (settings: Bootstrap['runtimeSettings']) => request<Bootstrap['runtimeSettings']>('/api/v1/runtime/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   weixin: () => request<WeixinState>('/api/v1/channels/weixin'),
   saveWeixinSettings: (enabled: boolean) => request<WeixinState>('/api/v1/channels/weixin', { method: 'PUT', body: JSON.stringify({ enabled }) }),
