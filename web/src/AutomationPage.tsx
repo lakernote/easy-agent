@@ -94,16 +94,16 @@ export function AutomationPage({ data, onError, onOpenSession }: { data: Bootstr
 
   return <section className="automation-page" aria-labelledby="automation-title">
     <header className="automation-head">
-      <div><p className="settings-kicker">执行编排</p><h1 id="automation-title">自动化任务</h1><p>把固定 Prompt 和项目执行上下文保存下来，按需手动运行或定时触发。每次执行都会生成一条普通会话。</p></div>
+      <div><p className="settings-kicker">任务调度</p><h1 id="automation-title">定时任务</h1><p>保存固定 Prompt 和项目执行上下文，手动运行或按 Cron 规则定时触发。</p></div>
       <button className="primary-button automation-create" type="button" onClick={openCreate}>＋ 新建任务</button>
     </header>
     <div className="automation-capabilities" aria-label="触发方式状态"><div className="automation-capability active"><Icon name="automation" /><span><strong>手动 / 定时</strong><small>当前可用</small></span></div></div>
     <div className="automation-toolbar"><span>{loading ? '正在读取任务…' : `${tasks.length} 个任务`}</span><small>定时任务由服务器后台执行，浏览器关闭后仍会继续。</small></div>
-    {loading && <div className="automation-empty"><span className="spinner" /><span>正在加载自动化任务…</span></div>}
-    {!loading && tasks.length === 0 && <div className="automation-empty"><div className="automation-empty-mark"><Icon name="automation" /></div><strong>还没有自动化任务</strong><span>先保存一个固定 Prompt，之后可以一键重复执行。</span><button className="ghost-button" type="button" onClick={openCreate}>创建第一个任务</button></div>}
+    {loading && <div className="automation-empty"><span className="spinner" /><span>正在加载定时任务…</span></div>}
+    {!loading && tasks.length === 0 && <div className="automation-empty"><div className="automation-empty-mark"><Icon name="automation" /></div><strong>还没有定时任务</strong><span>先保存一个固定 Prompt，之后可以手动或按 Cron 规则运行。</span><button className="ghost-button" type="button" onClick={openCreate}>创建第一个任务</button></div>}
     {!loading && tasks.length > 0 && <div className="automation-list">{tasks.map((task) => <AutomationRow key={task.id} task={task} projects={data.projects} running={runningID === task.id} onRun={() => void run(task)} onEdit={() => openEdit(task)} onDelete={() => setPendingDelete(task)} onOpenSession={onOpenSession} />)}</div>}
     {creating && <AutomationEditor key={editing?.id || 'new'} task={editing} data={data} busy={saving} onCancel={closeEditor} onSave={(value) => void save(value)} />}
-    {pendingDelete && <ConfirmDialog title="删除这个自动化任务？" description="只会删除任务配置，不会删除已经生成的会话、Trace 或服务器文件。" subject={pendingDelete.name} confirmLabel="删除任务" busy={saving} onCancel={() => setPendingDelete(null)} onConfirm={() => void remove()} />}
+    {pendingDelete && <ConfirmDialog title="删除这个定时任务？" description="只会删除任务配置，不会删除已经生成的会话、Trace 或服务器文件。" subject={pendingDelete.name} confirmLabel="删除任务" busy={saving} onCancel={() => setPendingDelete(null)} onConfirm={() => void remove()} />}
     {notice && <div className="automation-notice" role="status">{notice}</div>}
   </section>
 }
@@ -136,7 +136,7 @@ function AutomationEditor({ task, data, busy, onCancel, onSave }: { task: Automa
 
   return <div className="modal-backdrop" onMouseDown={() => !busy && onCancel()}>
     <section className="modal automation-editor" role="dialog" aria-modal="true" aria-labelledby="automation-editor-title" onMouseDown={(event) => event.stopPropagation()}>
-      <div className="modal-head"><div><p className="eyebrow">自动化任务</p><h2 id="automation-editor-title">{task ? '编辑任务' : '新建任务'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
+      <div className="modal-head"><div><p className="eyebrow">定时任务</p><h2 id="automation-editor-title">{task ? '编辑任务' : '新建任务'}</h2></div><button type="button" aria-label="关闭" disabled={busy} onClick={onCancel}>×</button></div>
       <p className="modal-copy">先定义一次任务上下文；任务可以手动运行，也可以单独启用 Cron 定时。</p>
       <div className="automation-form">
         <label><span>任务名称</span><input autoFocus value={name} maxLength={80} placeholder="例如 每日检查构建状态" onChange={(event) => setName(event.target.value)} /></label>
