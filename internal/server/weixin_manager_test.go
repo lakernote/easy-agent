@@ -88,20 +88,20 @@ func TestDecodeWeixinImageCreatesSharedAttachment(t *testing.T) {
 	}
 }
 
-func TestNativeWeixinVoiceTextKeepsPlayableAttachment(t *testing.T) {
-	gateway := &fakeWeixinGateway{media: append([]byte("RIFF"), make([]byte, 48)...)}
+func TestNativeWeixinVoiceTextDoesNotDownloadAudio(t *testing.T) {
+	gateway := &fakeWeixinGateway{}
 	manager := &weixinManager{gateway: gateway}
 	text, attachments, err := manager.decodeWeixinMessage(context.Background(), store.WeixinAccount{}, weixin.Message{Items: []weixin.MessageItem{{Type: 3, VoiceItem: &weixin.VoiceItem{Text: "运行全部测试", Media: &weixin.CDNMedia{FullURL: "https://novac2c.cdn.weixin.qq.com/voice"}}}}})
-	if err != nil || text != "运行全部测试" || len(attachments) != 1 || attachments[0].Kind != "audio" || gateway.downloadCalls != 1 {
+	if err != nil || text != "运行全部测试" || len(attachments) != 0 || gateway.downloadCalls != 0 {
 		t.Fatalf("unexpected native voice decode: text=%q attachments=%+v calls=%d err=%v", text, attachments, gateway.downloadCalls, err)
 	}
 }
 
-func TestUntranscribedWeixinVoiceIsDecodedButNotGivenText(t *testing.T) {
-	gateway := &fakeWeixinGateway{media: append([]byte("RIFF"), make([]byte, 48)...)}
+func TestUntranscribedWeixinVoiceRequestsTextWithoutDownload(t *testing.T) {
+	gateway := &fakeWeixinGateway{}
 	manager := &weixinManager{gateway: gateway}
 	text, attachments, err := manager.decodeWeixinMessage(context.Background(), store.WeixinAccount{}, weixin.Message{Items: []weixin.MessageItem{{Type: 3, VoiceItem: &weixin.VoiceItem{Media: &weixin.CDNMedia{FullURL: "https://novac2c.cdn.weixin.qq.com/voice"}}}}})
-	if err != nil || text != "" || !onlyAudioAttachments(attachments) || gateway.downloadCalls != 1 {
+	if !errors.Is(err, errWeixinVoiceNeedsText) || text != "" || len(attachments) != 0 || gateway.downloadCalls != 0 {
 		t.Fatalf("unexpected untranscribed voice decode: text=%q attachments=%+v calls=%d err=%v", text, attachments, gateway.downloadCalls, err)
 	}
 }
@@ -253,44 +253,6 @@ func TestWeixinAPIBindsMultipleAccountsWithoutExposingSecrets(t *testing.T) {
 	encoded, _ := json.Marshal(state)
 	if len(state.Accounts) != 2 || bytes.Contains(encoded, []byte("token-")) || bytes.Contains(encoded, []byte("weixin-user-000001")) || bytes.Contains(encoded, []byte("lastMessageAt")) {
 		t.Fatalf("绑定列表数量或脱敏错误: %s", encoded)
-	}
-}
-
-func TestUntranscribedVoiceIsSavedWithoutQueueingAgent(t *testing.T) {
-	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
-	defer application.Shutdown(context.Background())
-	now := time.Now().UTC()
-	account := store.WeixinAccount{ID: "bot-voice", Label: "小王", UserID: "user-voice", Token: "token-voice", BaseURL: weixin.DefaultBaseURL, Enabled: true, CreatedAt: now, UpdatedAt: now}
-	if err := database.SaveWeixinAccount(account); err != nil {
-		t.Fatal(err)
-	}
-	attachments := []store.Attachment{{ID: "voice-1", Name: "weixin-voice.wav", MIMEType: "audio/wav", Kind: "audio", Size: 8, Data: []byte("RIFFtest")}}
-	sessionID, err := application.weixin.saveUntranscribedVoice(account, attachments, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := database.LoadSessionWindow(sessionID, 10, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	savedAccount, err := database.GetWeixinAccount(account.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Status != "idle" || len(loaded.Messages) != 1 || !onlyAudioAttachments(loaded.Messages[0].Attachments) || application.tasks.has(sessionID) {
-		t.Fatalf("untranscribed voice should be stored without a task: session=%+v", loaded)
-	}
-	if savedAccount.CurrentSessionID != sessionID || savedAccount.PendingMessageID != 0 || savedAccount.DeliveredMessageID != 0 {
-		t.Fatalf("untranscribed voice corrupted delivery state: %+v", savedAccount)
 	}
 }
 

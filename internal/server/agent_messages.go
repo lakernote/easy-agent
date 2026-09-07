@@ -12,8 +12,7 @@ func toCoreMessage(value store.Message) agent.Message {
 	message := agent.Message{Role: agent.Role(value.Role), Content: value.Content, ToolCallID: value.ToolCallID, Name: value.Name}
 	for _, attachment := range value.Attachments {
 		// EasyAgent's OpenAI-compatible adapters currently have no portable
-		// audio input shape. WeChat's native transcript remains in Content, while
-		// the original audio stays in SQLite for playback and audit only.
+		// audio input shape. Keep legacy persisted audio out of model requests.
 		if attachment.Kind == "audio" {
 			continue
 		}

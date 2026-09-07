@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -93,25 +94,16 @@ func (manager *weixinManager) handleMessage(ctx context.Context, account store.W
 	}
 	text, attachments, err := manager.decodeWeixinMessage(ctx, account, message)
 	if err != nil {
+		if errors.Is(err, errWeixinVoiceNeedsText) {
+			_ = manager.server.store.RecordWeixinMessage(account.ID, createdAt, time.Now())
+			manager.send(account, message.FromUserID, message.ContextToken, "这条语音没有取得微信文字，因此没有启动 Agent。\n请补发文字说明后重试。")
+			return
+		}
 		manager.send(account, message.FromUserID, message.ContextToken, "消息处理失败："+err.Error())
 		return
 	}
 	if text == "" && len(attachments) == 0 {
-		manager.send(account, message.FromUserID, message.ContextToken, "暂时无法识别这条消息；当前支持文字、语音、图片、PDF 和文本/代码文件。")
-		return
-	}
-	if text == "" && onlyAudioAttachments(attachments) {
-		sessionID, saveErr := manager.saveUntranscribedVoice(account, attachments, createdAt)
-		if saveErr != nil {
-			manager.send(account, message.FromUserID, message.ContextToken, "语音保存失败："+saveErr.Error())
-			return
-		}
-		_ = manager.server.store.RecordWeixinMessage(account.ID, createdAt, time.Now())
-		sessionTitle := "未转写的微信语音"
-		if session, loadErr := manager.server.store.LoadSessionWindow(sessionID, 1, 1); loadErr == nil {
-			sessionTitle = session.Title
-		}
-		manager.send(account, message.FromUserID, message.ContextToken, "这条语音没有取得微信文字，已保存到 Web 会话，但没有启动 Agent。\n请补发文字说明后重试。\n会话："+sessionTitle)
+		manager.send(account, message.FromUserID, message.ContextToken, "暂时无法识别这条消息；当前支持文字、带微信文字的语音、图片、PDF 和文本/代码文件。")
 		return
 	}
 	if manager.handleCommand(account, message, text) {

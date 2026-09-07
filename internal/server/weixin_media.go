@@ -12,10 +12,13 @@ import (
 	"github.com/lakernote/easy-agent/internal/weixin"
 )
 
+var errWeixinVoiceNeedsText = errors.New("微信语音没有取得可用文字")
+
 func (manager *weixinManager) decodeWeixinMessage(ctx context.Context, account store.WeixinAccount, message weixin.Message) (string, []store.Attachment, error) {
 	text := messageText(message)
 	attachments := make([]store.Attachment, 0, len(message.Items))
 	total := 0
+	hasUntranscribedVoice := false
 	for _, item := range message.Items {
 		switch item.Type {
 		case 1:
@@ -43,32 +46,11 @@ func (manager *weixinManager) decodeWeixinMessage(ctx context.Context, account s
 			if item.VoiceItem == nil {
 				continue
 			}
-			hasNativeText := strings.TrimSpace(item.VoiceItem.Text) != ""
-			if item.VoiceItem.Media == nil {
-				if hasNativeText {
-					continue
-				}
-				return "", nil, errors.New("微信语音没有文字或可下载的音频")
+			// ClawBot normally includes WeChat's own transcript in VoiceItem.Text.
+			// Use that text directly and avoid downloading or decoding SILK audio.
+			if strings.TrimSpace(item.VoiceItem.Text) == "" {
+				hasUntranscribedVoice = true
 			}
-			encrypted, err := manager.gateway.DownloadMedia(ctx, *item.VoiceItem.Media, item.VoiceItem.Media.AESKey)
-			if err != nil {
-				if hasNativeText {
-					continue
-				}
-				return "", nil, fmt.Errorf("下载语音: %w", err)
-			}
-			audio, mimeType, name, err := weixin.DecodeVoice(encrypted, item.VoiceItem.SampleRate)
-			if err != nil {
-				if hasNativeText {
-					continue
-				}
-				return "", nil, err
-			}
-			if len(audio) > maxAttachmentBytes {
-				return "", nil, errors.New("解码后的微信语音超过 5 MiB")
-			}
-			total += len(audio)
-			attachments = append(attachments, store.Attachment{ID: newID(), Name: name, MIMEType: mimeType, Kind: "audio", Size: int64(len(audio)), Data: audio})
 		case 4:
 			if item.FileItem == nil || item.FileItem.Media == nil {
 				continue
@@ -84,7 +66,7 @@ func (manager *weixinManager) decodeWeixinMessage(ctx context.Context, account s
 			total += len(data)
 			attachments = append(attachments, attachment)
 		case 5:
-			return "", nil, errors.New("微信视频尚未接入；请改发图片、语音或文件")
+			return "", nil, errors.New("微信视频尚未接入；请改发文字、图片或文件")
 		}
 		if len(attachments) > maxAttachmentCount {
 			return "", nil, fmt.Errorf("一条微信消息最多处理 %d 个附件", maxAttachmentCount)
@@ -92,6 +74,9 @@ func (manager *weixinManager) decodeWeixinMessage(ctx context.Context, account s
 		if total > maxAttachmentTotalBytes {
 			return "", nil, errors.New("微信附件总大小超过 10 MiB")
 		}
+	}
+	if text == "" && len(attachments) == 0 && hasUntranscribedVoice {
+		return "", nil, errWeixinVoiceNeedsText
 	}
 	return text, attachments, nil
 }
@@ -144,16 +129,4 @@ func defaultWeixinMediaPrompt(attachments []store.Attachment) string {
 		}
 	}
 	return "请分析微信发送的文件。"
-}
-
-func onlyAudioAttachments(attachments []store.Attachment) bool {
-	if len(attachments) == 0 {
-		return false
-	}
-	for _, attachment := range attachments {
-		if attachment.Kind != "audio" {
-			return false
-		}
-	}
-	return true
 }
