@@ -13,6 +13,10 @@ function isAutomationSession(session: Session) {
   return session.title.startsWith('自动化 · ')
 }
 
+function sessionDisplayTitle(session: Session) {
+  return isAutomationSession(session) ? session.title.replace(/^自动化 · /, '') : session.title
+}
+
 function initialCollapsedProjects() {
   try {
     const value = JSON.parse(window.localStorage.getItem(collapsedProjectsKey) || '[]')
@@ -38,12 +42,10 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
   const loadingOlderSessionsRef = useRef(false)
   const displayVersion = import.meta.env.VITE_APP_VERSION ? `v${import.meta.env.VITE_APP_VERSION}` : 'dev'
 
-  const conversationSessions = useMemo(() => data.sessions.filter((item) => !isAutomationSession(item)), [data.sessions])
-
   const visibleSessions = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase()
     const projects = new Map(data.projects.map((item) => [item.id, item]))
-    return conversationSessions.filter((item) => {
+    return data.sessions.filter((item) => {
       if (!keyword) return true
       const project = projects.get(item.projectId || '')
       return item.title.toLocaleLowerCase().includes(keyword) || (item.model || '').toLocaleLowerCase().includes(keyword) || (project?.name || '').toLocaleLowerCase().includes(keyword) || (project?.directories.join(' ') || '').toLocaleLowerCase().includes(keyword)
@@ -51,7 +53,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
       const difference = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()
       return sort === 'newest' ? -difference : difference
     })
-  }, [conversationSessions, data.projects, query, sort])
+  }, [data.projects, data.sessions, query, sort])
 
   const projectGroups = useMemo(() => {
     const groups: { project: Project | null; sessions: Session[] }[] = data.projects.map((project) => ({ project, sessions: visibleSessions.filter((item) => item.projectId === project.id) }))
@@ -133,11 +135,15 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
     finally { setSavingMetadata(false) }
   }
 
-  const renderSession = (item: Session) => <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${managing ? 'managing' : ''}`}>
-    {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${item.title}`} /></label>}
-    <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={item.title}><span className={`status ${item.status}`} /><span className="session-copy"><strong>{item.title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
-    {!managing && <button className="session-delete session-more" aria-label={`编辑会话 ${item.title}`} title="编辑会话" onClick={() => setEditingSession(item)}><MoreIcon /></button>}
-  </div>
+  const renderSession = (item: Session) => {
+    const automation = isAutomationSession(item)
+    const title = sessionDisplayTitle(item)
+    return <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${automation ? 'automation-session' : ''} ${managing ? 'managing' : ''}`}>
+      {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${title}`} /></label>}
+      <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={title}>{automation ? <span className={`session-type-icon automation ${item.status}`} aria-label="定时任务"><Icon name="automation" /></span> : <span className={`status ${item.status}`} />}<span className="session-copy"><strong>{title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
+      {!managing && <button className="session-delete session-more" aria-label={`编辑会话 ${title}`} title="编辑会话" onClick={() => setEditingSession(item)}><MoreIcon /></button>}
+    </div>
+  }
 
   const leaveManaging = () => { setManaging(false); setSelectedIds(new Set()) }
   return <aside className="sidebar">
@@ -145,12 +151,12 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
     <button className="new-chat" onClick={onNew}><span>＋</span> 新会话 <kbd>⌘ K</kbd></button>
     <button className={`automation-nav ${page === 'automations' ? 'active' : ''}`} type="button" aria-current={page === 'automations' ? 'page' : undefined} onClick={() => onPage('automations')}><Icon name="automation" /><span><strong>定时任务</strong></span></button>
     <nav className="primary-nav" aria-label="主导航"><button className={page === 'chat' ? 'active' : ''} aria-current={page === 'chat' ? 'page' : undefined} onClick={() => onPage('chat')}><Icon name="chat" />对话</button><button className={page === 'automations' ? 'active' : ''} aria-current={page === 'automations' ? 'page' : undefined} onClick={() => onPage('automations')}><Icon name="automation" />定时任务</button></nav>
-    <div className="session-label"><span>项目与会话 <small>{conversationSessions.length}</small></span><div><button aria-label="添加项目" title="添加项目" onClick={() => openProject(null)}>＋</button><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
+    <div className="session-label"><span>项目与会话 <small>{data.sessions.length}</small></span><div><button aria-label="添加项目" title="添加项目" onClick={() => openProject(null)}>＋</button><button onClick={managing ? leaveManaging : () => setManaging(true)}>{managing ? '完成' : '管理'}</button><button aria-label="刷新会话" title="刷新会话" onClick={() => onRefresh().catch((reason) => onError(reason.message))}>↻</button></div></div>
     <div className="session-controls"><label className="session-search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedIds(new Set()) }} placeholder="搜索会话或项目" aria-label="搜索会话或项目" /></label><select value={sort} onChange={(event) => setSort(event.target.value as 'newest' | 'oldest')} aria-label="按时间排序"><option value="newest">最新</option><option value="oldest">最早</option></select></div>
     {managing && <div className="session-manage"><button onClick={toggleAll} disabled={!selectableSessions.length}>{allSelected ? '取消全选' : '全选'}</button><span>已选 {selectedCount}</span><button className="manage-delete" onClick={requestRemoveSelected} disabled={!selectedCount || deleting}>{deleting ? '删除中…' : `删除${selectedCount ? ` (${selectedCount})` : ''}`}</button></div>}
     <div ref={sessionListRef} className="session-list">
-      {conversationSessions.length === 0 && data.projects.length === 0 && <div className="empty-list">还没有项目和对话</div>}
-      {conversationSessions.length > 0 && visibleSessions.length === 0 && <div className="empty-list"><strong>没有匹配的会话</strong><button onClick={() => setQuery('')}>清空搜索</button></div>}
+      {data.sessions.length === 0 && data.projects.length === 0 && <div className="empty-list">还没有项目和对话</div>}
+      {data.sessions.length > 0 && visibleSessions.length === 0 && <div className="empty-list"><strong>没有匹配的会话</strong><button onClick={() => setQuery('')}>清空搜索</button></div>}
       {projectGroups.map((group) => {
         const groupID = group.project?.id || 'unassigned'
         const collapsed = collapsedProjects.has(groupID)
