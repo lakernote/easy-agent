@@ -88,11 +88,19 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 - 支持排队、暂停、继续、停止和重启恢复；默认并发 4、单轮最长 12 小时，均可在设置中调整。
 - Git 项目可按会话创建 worktree；源仓库有未提交修改时不会自动隔离。Codex 会话还支持 thread 继续、读取和分支。
 
+<p align="center">
+  <img src="docs/images/model-and-tools.png" alt="EasyAgent 运行时与模型设置" width="920" />
+</p>
+
 ## 内置能力
 
 内置 Skills 聚焦项目理解、问题分析、代码审查、API 设计、测试与 E2E、事故 RCA、发布工程、文档维护、Git worktree 和网页研究。GitHub、Context7、Playwright、OpenAI Docs 等 MCP 可在设置页启用，供两个 Runtime 共用。
 
 Skills 和大型工具组按需加载，减少无关上下文。网页研究会先发现候选，再读取原始来源后回答。
+
+<p align="center">
+  <img src="docs/images/skills.png" alt="EasyAgent Skills 能力库" width="920" />
+</p>
 
 ## 微信远程
 

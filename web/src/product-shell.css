@@ -625,6 +625,13 @@ body { background: #f7f9fd; }
 .login-logo { filter: drop-shadow(0 8px 14px #1d4ed824); }
 .session-project-head .project-icon { color: #2563eb; background: #eaf2ff; }
 .session-project-toggle:hover .project-icon { color: #1d4ed8; background: #dbeafe; }
+.session-project-toggle:hover { background: #eef4ff; }
+.session-project-toggle:focus-visible, .session-project-edit:focus-visible { outline-color: #60a5fa; }
+.session-project-head strong { color: #52627a; }
+.session-project-head small { color: #7c8da5; background: #eaf2ff; }
+.session-project-edit { color: #8090a4; }
+.session-project-edit:hover { color: #315da8; background: #e8f0ff; }
+.session-project-sessions { border-left-color: #d9e5f3; }
 .session-project-sessions .session-type-icon.automation { border-color: #c9dcfa; color: #2563eb; background: #edf4ff; }
 .session-project-sessions .session-type-icon.automation.running { border-color: #b9d5f0; color: #3576a8; background: #edf5fb; }
 .automation-empty-mark { color: #2563eb; background: #eaf2ff; }
@@ -669,3 +676,245 @@ body { background: #f7f9fd; }
 .composer-workspace:focus-visible { outline-color: #60a5fa; }
 .workspace-picker input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
 .automation-notice { border-color: #c9dcfa; color: #315da8; background: #eff6ff; }
+
+/* Keep channel and workspace controls on the business-blue brand system. */
+.weixin-global.enabled { border-color: #c9dcfa; background: #f5f8ff; }
+.weixin-global strong { color: #315da8; }
+.weixin-refresh { color: #2563eb; }
+.weixin-refresh > span { color: #2563eb; }
+.weixin-notice { border-color: #c9dcfa; color: #315da8; background: #eff6ff; }
+.weixin-section-title > span { color: #315da8; background: #eaf2ff; }
+.weixin-bind-form input:focus, .weixin-verify input:focus, .weixin-account-name input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.weixin-login { border-color: #c9dcfa; background: #f5f8ff; }
+.weixin-qr { color: #2563eb; }
+.weixin-login-copy h4 { color: #1f3565; }
+.weixin-avatar { color: #2563eb; background: #eaf2ff; }
+.weixin-account-name button { color: #315da8; }
+.weixin-account-name button:hover:not(:disabled) { background: #e8f0ff; }
+.weixin-commands code { color: #2563eb; background: #eaf2ff; }
+.workspace-mode-list > button:hover { border-color: #9bb8e8; }
+.workspace-mode-list > button.selected { border-color: #7aa7e8; background: #eff6ff; box-shadow: inset 3px 0 #2563eb; }
+.workspace-mode-list em { color: #315da8; background: #eaf2ff; }
+.automation-schedule-rows select:focus, .automation-schedule-rows input[type="time"]:focus { box-shadow: 0 0 0 3px #dbeafe; }
+
+/* Give the persistent sidebar actions a clear blue interaction hierarchy. */
+.sidebar-settings { color: #5f6f86; }
+.sidebar-settings svg { color: #7183a0; }
+.sidebar-settings:hover { color: #1d4ed8; background: #eef4ff; }
+.sidebar-settings:hover svg { color: #2563eb; }
+.sidebar-settings:focus-visible { outline-color: #60a5fa; box-shadow: none; }
+.sidebar-foot { color: #64748b; background: #f3f6fb; }
+.sidebar-foot a { min-height: 40px; color: #52627a; }
+.sidebar-foot a:hover { color: #1d4ed8; }
+.sidebar-foot small { padding: 3px 7px; border: 1px solid #d5e2f5; border-radius: 999px; color: #607089; background: #e8f0ff; line-height: 1.2; }
+
+/* Settings center: one business-blue interaction system across every section. */
+.settings-hub {
+  --settings-primary: #2563eb;
+  --settings-primary-strong: #1d4ed8;
+  --settings-primary-soft: #eff6ff;
+  --settings-primary-muted: #e8f0ff;
+  --settings-line: #dfe7f2;
+  --settings-line-strong: #c6d7ee;
+  --settings-surface: #f8faff;
+  --settings-surface-raised: #fbfdff;
+  --settings-text: #1e293b;
+  --settings-text-secondary: #52627a;
+  --settings-text-muted: #7b8798;
+  color: var(--settings-text);
+}
+.settings-hub-header { border-bottom-color: var(--settings-line); }
+.settings-hub-header h1 { color: #172033; }
+.settings-hub-header p:last-child { color: #667085; }
+.settings-hub .settings-kicker, .settings-hub .eyebrow { color: var(--settings-primary); }
+.settings-hub-context { border-left-color: var(--settings-line); color: var(--settings-text-secondary); }
+.settings-hub-context small { color: #8794a7; }
+.settings-hub-context strong { color: #30415e; }
+.settings-hub .account-logout { min-height: 40px; border-color: #d5dfed; color: #607089; }
+.settings-hub .account-logout:hover { color: #a04439; border-color: #e6c4bf; background: #fff7f5; }
+
+.settings-side-label { color: #8a97aa; }
+.settings-side-nav button { color: #65748a; transition: color .16s ease, background .16s ease; }
+.settings-side-nav button:hover { color: var(--settings-primary-strong); background: #f1f6ff; }
+.settings-side-nav button.active, .settings-side-nav button.active:hover { color: #1e40af; background: var(--settings-primary-muted); }
+.settings-side-nav button small { color: #8b98aa; }
+.settings-side-nav button.active small { color: #657da5; }
+.settings-nav-index { color: #9aa7b8; }
+.settings-side-nav button.active .settings-nav-index { color: var(--settings-primary); }
+.settings-side-nav button:focus-visible { box-shadow: 0 0 0 2px #93b4ed; }
+.settings-side-note { border-top-color: var(--settings-line); color: #8a97a8; }
+
+.settings-hub-content .runtime-rail-head, .settings-hub-content .runtime-main-head,
+.settings-hub .section-heading, .settings-hub .model-catalog-head,
+.settings-hub .skill-form-actions { border-color: var(--settings-line); }
+.settings-hub-content .runtime-rail-head > div > strong,
+.settings-hub .runtime-main-head h2, .settings-hub .section-heading h2,
+.settings-hub .model-catalog-head h2, .settings-hub .settings-section-heading h2,
+.settings-hub .editor-title h2 { color: var(--settings-text); }
+.settings-hub-content .runtime-rail-head > small,
+.settings-hub-content .runtime-rail-foot, .settings-hub .runtime-main-head p:last-child,
+.settings-hub .section-heading p, .settings-hub .model-catalog-head p:last-child,
+.settings-hub .settings-section-heading p:last-child, .settings-hub .field-help,
+.settings-hub .directory-foot { color: var(--settings-text-muted); }
+.settings-hub-content .runtime-rail-foot { border-top-color: var(--settings-line); }
+.settings-hub .tag, .settings-hub .settings-count, .settings-hub .runtime-chip {
+  color: var(--settings-primary-strong);
+  background: var(--settings-primary-muted);
+}
+.settings-hub .section-block, .settings-hub .model-catalog,
+.settings-hub .split-settings, .settings-hub .account-panel,
+.settings-hub .usage-kpis, .settings-hub .usage-panel,
+.settings-hub .weixin-bind, .settings-hub .weixin-list { border-color: var(--settings-line); }
+.settings-hub .ghost-button { border-color: #d5dfed; color: #334155; background: #fff; }
+.settings-hub .ghost-button:hover:not(:disabled) { border-color: #9bb8e8; color: var(--settings-primary-strong); background: #f5f8ff; }
+.settings-hub .ghost-button:focus-visible, .settings-hub .primary-button:focus-visible,
+.settings-hub .profile-activate:focus-visible, .settings-hub .profile-edit:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+.settings-hub label { color: var(--settings-text-secondary); }
+.settings-hub input, .settings-hub textarea, .settings-hub select { border-color: #d4dfed; color: #1f2937; background: #fff; }
+.settings-hub input:focus, .settings-hub textarea:focus, .settings-hub select:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.settings-hub .switch input:checked + span { background: var(--settings-primary); }
+.settings-hub .switch input:focus-visible + span { box-shadow: 0 0 0 3px #dbeafe, 0 0 0 5px #60a5fa; }
+
+/* Runtime and shared task policy. Health dots intentionally remain semantic green. */
+.settings-hub-content .runtime-nav-item { border-color: var(--settings-line); color: var(--settings-text-secondary); background: #fff; }
+.settings-hub-content .runtime-nav-item:hover { border-color: #aac4e8; color: var(--settings-primary-strong); background: #f5f8ff; }
+.settings-hub-content .runtime-nav-item.selected,
+.settings-hub-content .runtime-nav-item.selected:hover { color: #1e40af; border-color: #8eb3ea; background: var(--settings-primary-soft); }
+.settings-hub-content .runtime-nav-item.selected .runtime-nav-dot { box-shadow: 0 0 0 4px #dbeafe; }
+.settings-hub-content .runtime-nav-item.selected em { color: var(--settings-primary-strong); }
+.settings-hub .runtime-status { border: 1px solid #d2e1f5; background: var(--settings-primary-soft); }
+.settings-hub .runtime-summary { border-color: var(--settings-line); background: var(--settings-surface); }
+.settings-hub .runtime-summary strong { color: #1f3d6b; }
+.settings-hub .runtime-summary span { color: var(--settings-text-muted); }
+.settings-hub .runtime-boundary-note, .settings-hub .capability-note { border-left-color: var(--settings-primary); color: #315da8; background: var(--settings-primary-soft); }
+.settings-hub .runtime-boundary-note strong, .settings-hub .capability-note strong { color: #1e40af; }
+.settings-hub .runtime-boundary-note span { color: #637692; }
+.settings-hub .task-settings-panel .section-heading { border-bottom-color: var(--settings-line); }
+.settings-hub .task-settings-grid { border-top-color: var(--settings-line); border-left-color: var(--settings-line); }
+.settings-hub .task-settings-grid > section { border-right-color: var(--settings-line); border-bottom-color: var(--settings-line); background: var(--settings-surface-raised); }
+.settings-hub .task-setting-heading > span { color: var(--settings-primary); }
+.settings-hub .task-setting-heading strong { color: #30415e; }
+.settings-hub .task-setting-heading small, .settings-hub .task-settings-grid label > small,
+.settings-hub .task-toggle small { color: var(--settings-text-muted); }
+.settings-hub .task-settings-grid label > input[type="number"] { border-color: #d4dfed; color: #1f2937; }
+.settings-hub .task-toggle input { accent-color: var(--settings-primary); }
+.settings-hub .recovery-policy { border-color: var(--settings-line); background: #f5f8ff; }
+.settings-hub .recovery-policy > div + div { border-left-color: var(--settings-line); }
+.settings-hub .recovery-policy strong { color: #30415e; }
+.settings-hub .recovery-policy small { color: #6d7c91; }
+
+/* Model directory and its editor. */
+.settings-hub .model-profile-directory { border-top-color: var(--settings-line); }
+.settings-hub .model-profile-row { border-color: var(--settings-line); background: #fff; }
+.settings-hub .model-profile-row:hover { background: #f6f9ff; }
+.settings-hub .model-profile-row.selected,
+.settings-hub .model-profile-row.selected:hover { border-color: #b7cef0; background: var(--settings-primary-soft); }
+.settings-hub .model-profile-select { color: #30415e; }
+.settings-hub .model-profile-select:hover strong { color: var(--settings-primary-strong); }
+.settings-hub .model-profile-select small { color: var(--settings-text-muted); }
+.settings-hub .profile-runtime-tag { border-left-color: #60a5fa; color: #315da8; background: transparent; }
+.settings-hub .profile-runtime-tag.codex { border-left-color: var(--settings-primary); color: #1e40af; }
+.settings-hub .profile-runtime-tag.draft { border-left-color: #c58b3e; color: #8a672c; }
+.settings-hub .profile-activate, .settings-hub .profile-edit { border-color: #c9d9ef; color: #315da8; background: #fff; }
+.settings-hub .profile-activate:hover:not(:disabled), .settings-hub .profile-edit:hover { border-color: #8eb3ea; color: var(--settings-primary-strong); background: var(--settings-primary-soft); }
+.settings-hub-content .profile-activate.active { color: #315da8; background: var(--settings-primary-muted); }
+.settings-hub .model-drawer-backdrop { background: #0f1f3866; }
+.settings-hub .model-drawer { box-shadow: -24px 0 60px #0f1f3829; }
+.settings-hub .model-drawer-head, .settings-hub .model-drawer-danger { border-color: var(--settings-line); }
+.settings-hub .drawer-close { border-color: #d5dfed; color: #607089; background: #f7f9fc; }
+.settings-hub .drawer-close:hover { color: var(--settings-primary-strong); border-color: #9bb8e8; background: var(--settings-primary-soft); }
+.settings-hub .model-drawer-meta, .settings-hub .codex-config-summary { border-color: #ccdcf2; color: #315da8; background: var(--settings-primary-soft); }
+.settings-hub .model-drawer-meta strong { color: #1f3d6b; }
+.settings-hub .ollama-model-catalog { border-color: #ccdcf2; background: var(--settings-surface); }
+.settings-hub .ollama-model-head strong, .settings-hub .ollama-model-row code { color: #304b73; }
+.settings-hub .ollama-model-head small, .settings-hub .ollama-model-row small,
+.settings-hub .ollama-model-row > span { color: var(--settings-text-muted); }
+.settings-hub .ollama-model-head > span { color: var(--settings-primary-strong); background: var(--settings-primary-muted); }
+.settings-hub .ollama-model-row { border-top-color: var(--settings-line); }
+
+/* Skills and MCP use blue for interaction; success/error feedback stays semantic. */
+.settings-hub .skills-overview > div, .settings-hub .mcp-overview > div { border-color: var(--settings-line); background: var(--settings-surface); }
+.settings-hub .skills-overview strong, .settings-hub .mcp-overview strong { color: #1f3d6b; }
+.settings-hub .skills-overview span, .settings-hub .mcp-overview span { color: var(--settings-text-muted); }
+.settings-hub .settings-list, .settings-hub .settings-list-tools { border-color: var(--settings-line); background: #f5f8fc; }
+.settings-hub .settings-list > button { border-bottom-color: var(--settings-line); }
+.settings-hub .settings-list > button:hover { background: #f0f5ff; }
+.settings-hub .settings-list > button.active { background: var(--settings-primary-soft); box-shadow: inset 3px 0 var(--settings-primary); }
+.settings-hub .settings-list .add-row { color: var(--settings-primary-strong); }
+.settings-hub .settings-list small, .settings-hub .settings-list em { color: var(--settings-text-muted); }
+.settings-hub .settings-search > span { color: #6d7f98; }
+.settings-hub .editor-title span, .settings-hub .skill-toggle-control small { color: var(--settings-text-muted); }
+.settings-hub .skill-toggle-control strong { color: #30415e; }
+.settings-hub .code-editor { color: #dbeafe; background: #0f172a; }
+.settings-hub .tool-table > div, .settings-hub .mcp-grid,
+.settings-hub .mcp-row { border-color: var(--settings-line); }
+.settings-hub .tool-table code, .settings-hub .mcp-row button { color: var(--settings-primary-strong); }
+.settings-hub .tool-table span, .settings-hub .mcp-row-info small,
+.settings-hub .mcp-row > span { color: var(--settings-text-muted); }
+.settings-hub .mcp-row-actions button { border-color: #cbdaf0; background: #fff; }
+.settings-hub .mcp-row button:hover { color: var(--settings-primary-strong); background: var(--settings-primary-soft); }
+.settings-hub .preset-card { border-color: #ccdaee; color: #304b73; background: var(--settings-surface); }
+.settings-hub .preset-card small { color: #66758a; }
+.settings-hub .preset-card em { color: #8793a5; }
+.settings-hub .preset-actions button { border-color: #bfd1eb; color: #315da8; }
+.settings-hub .preset-actions button:hover { border-color: #8eb3ea; background: var(--settings-primary-soft); }
+.settings-hub .preset-actions button:last-child { border-color: var(--settings-primary); color: #fff; background: var(--settings-primary); }
+.settings-hub .preset-actions button:last-child:hover { border-color: var(--settings-primary-strong); background: var(--settings-primary-strong); }
+
+/* Usage is product data, so its chart series follows the brand palette. */
+.settings-hub .usage-toolbar, .settings-hub .usage-period-list,
+.settings-hub .usage-model-list, .settings-hub .usage-period-row,
+.settings-hub .usage-model-row { border-color: var(--settings-line); }
+.settings-hub .usage-period-tabs button { color: #6f7d90; }
+.settings-hub .usage-period-tabs button:hover { color: var(--settings-primary-strong); background: #f3f7ff; }
+.settings-hub .usage-period-tabs button.active { color: #1e40af; border-bottom-color: var(--settings-primary); background: var(--settings-primary-soft); }
+.settings-hub .usage-kpis { background: var(--settings-surface); }
+.settings-hub .usage-kpis > div { border-color: var(--settings-line); }
+.settings-hub .usage-kpis span, .settings-hub .usage-kpis small,
+.settings-hub .usage-panel-head > span, .settings-hub .usage-model-meta,
+.settings-hub .usage-model-numbers span, .settings-hub .usage-footnote { color: var(--settings-text-muted); }
+.settings-hub .usage-kpis strong, .settings-hub .usage-period-value,
+.settings-hub .usage-model-numbers strong { color: #1f4f8f; }
+.settings-hub .usage-period-label strong, .settings-hub .usage-model-title strong { color: #30415e; }
+.settings-hub .usage-period-label small, .settings-hub .usage-model-title small { color: var(--settings-text-muted); }
+.settings-hub .usage-period-track { background: #e8eef7; }
+.settings-hub .usage-period-track span { background: #4f8fe8; }
+.settings-hub .usage-runtime-dot { background: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.settings-hub .usage-runtime-dot.codex { background: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
+
+/* Weixin setup surfaces are brand-neutral blue; online and delivery states stay green. */
+.settings-hub .weixin-page { color: var(--settings-text); }
+.settings-hub .weixin-head { border-bottom-color: var(--settings-line); }
+.settings-hub .weixin-head h2, .settings-hub .weixin-section-title h3,
+.settings-hub .weixin-overview strong, .settings-hub .weixin-task-copy > strong { color: var(--settings-text); }
+.settings-hub .weixin-head p:last-child, .settings-hub .weixin-section-title p,
+.settings-hub .weixin-overview span, .settings-hub .weixin-overview small,
+.settings-hub .weixin-task-copy > span, .settings-hub .weixin-task-copy > small { color: var(--settings-text-muted); }
+.settings-hub .weixin-global, .settings-hub .weixin-overview,
+.settings-hub .weixin-account, .settings-hub .weixin-commands { border-color: var(--settings-line); }
+.settings-hub .weixin-global { background: var(--settings-surface-raised); }
+.settings-hub .weixin-global.enabled { border-color: #c9dcfa; background: #f5f8ff; }
+.settings-hub .weixin-overview > div, .settings-hub .weixin-refresh,
+.settings-hub .weixin-account-head, .settings-hub .weixin-account-actions,
+.settings-hub .weixin-commands > div { border-color: var(--settings-line); }
+.settings-hub .weixin-refresh:hover:not(:disabled) { background: var(--settings-primary-soft); }
+.settings-hub .weixin-bind { background: var(--settings-surface); }
+.settings-hub .weixin-account-name input:hover { border-color: var(--settings-line); background: var(--settings-surface); }
+.settings-hub .weixin-task { background: var(--settings-surface); }
+.settings-hub .weixin-task.running, .settings-hub .weixin-task.queued,
+.settings-hub .weixin-task.paused { background: var(--settings-primary-soft); }
+.settings-hub .weixin-project-select { color: var(--settings-text-secondary); }
+.settings-hub .weixin-commands { background: #f6f9ff; }
+.settings-hub .weixin-commands strong { color: #30415e; }
+.settings-hub .weixin-commands span, .settings-hub .weixin-commands small { color: var(--settings-text-muted); }
+
+/* Account security is a compact settings card, not a detached green panel. */
+.settings-hub .account-panel { border-color: var(--settings-line); background: var(--settings-surface-raised); }
+.settings-hub .account-panel h2 { color: var(--settings-text); }
+.settings-hub .account-panel p:last-child { color: var(--settings-text-muted); }
+.settings-hub .password-form { border-color: var(--settings-line); background: #fff; }
+.settings-canvas::-webkit-scrollbar-thumb { background: #b8c7db; background-clip: content-box; }
+.settings-canvas::-webkit-scrollbar-thumb:hover { background: #8ba3c2; background-clip: content-box; }
