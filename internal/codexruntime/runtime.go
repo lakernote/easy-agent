@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/tracevalue"
 )
 
 const installDocsURL = "https://developers.openai.com/codex/cli"
@@ -185,6 +186,8 @@ type Usage struct {
 type Event struct {
 	Kind           string
 	Name           string
+	ProtocolMethod string
+	RawPayload     string
 	Status         string
 	Detail         string
 	Input          string
@@ -408,12 +411,28 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	timers := &eventTimers{itemStartedAt: make(map[string]time.Time)}
 	var latestUsage Usage
 	request := func(method string, id int, params any) (json.RawMessage, error) {
+		startedAt := time.Now()
+		input := marshalItemValue(params)
+		emitRPC := func(status, output string) {
+			if config.OnEvent == nil {
+				return
+			}
+			requestEnvelope := marshalItemValue(map[string]any{"method": method, "id": id, "params": params})
+			config.OnEvent(Event{
+				Kind: "codex_rpc", Name: method, ProtocolMethod: method, RawPayload: requestEnvelope,
+				Status: status, Detail: "EasyAgent -> Codex app-server", Input: input, Output: output,
+				ActivityID: fmt.Sprintf("rpc-%d", id), ActivityKind: "protocol", ActivitySource: "codex",
+				DisplayName: method, Duration: time.Since(startedAt),
+			})
+		}
 		if err := send(method, id, params); err != nil {
+			emitRPC("error", err.Error())
 			return nil, err
 		}
 		for {
 			message, err := read()
 			if err != nil {
+				emitRPC("error", err.Error())
 				return nil, err
 			}
 			if len(message.ID) > 0 && message.Method != "" {
@@ -430,8 +449,11 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 				continue
 			}
 			if len(message.Error) > 0 && string(message.Error) != "null" {
-				return nil, rpcError(message.Error)
+				err := rpcError(message.Error)
+				emitRPC("error", rpcErrorText(message.Error))
+				return nil, err
 			}
+			emitRPC("success", string(message.Result))
 			return message.Result, nil
 		}
 	}
@@ -658,7 +680,7 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 				timers.turnStartedAt = time.Time{}
 			}
 		}
-		config.OnEvent(Event{Kind: "codex_turn", Name: "turn", Status: status, Detail: detail, Duration: duration})
+		config.OnEvent(Event{Kind: "codex_turn", Name: "turn", ProtocolMethod: message.Method, RawPayload: marshalRPCMessage(message), Status: status, Detail: detail, Duration: duration})
 		return
 	}
 	if message.Method != "item/started" && message.Method != "item/completed" {
@@ -691,7 +713,7 @@ func consumeNotificationWithAnswer(message rpcMessage, config Config, answer *st
 		duration = reported
 	}
 	activityKind, activitySource, displayName := itemActivity(payload.Item)
-	config.OnEvent(Event{Kind: "codex_item", Name: name, Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), ActivityID: itemID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName, Duration: duration})
+	config.OnEvent(Event{Kind: "codex_item", Name: name, ProtocolMethod: message.Method, RawPayload: marshalRPCMessage(message), Status: status, Detail: itemDetail(payload.Item), Input: itemInput(payload.Item), Output: itemOutput(payload.Item), ActivityID: itemID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName, Duration: duration})
 }
 
 // progressEvent maps high-volume app-server notifications into bounded Trace
@@ -721,7 +743,7 @@ func progressEvent(message rpcMessage) (Event, bool) {
 	if message.Method == "turn/plan/updated" {
 		detail, displayName := planProgressSummary(payload)
 		return Event{
-			Kind: "codex_progress", Name: "plan", Status: "updated", Detail: detail,
+			Kind: "codex_progress", Name: "plan", ProtocolMethod: message.Method, RawPayload: marshalRPCMessage(message), Status: "updated", Detail: detail,
 			Output:     marshalItemValue(map[string]any{"explanation": payload["explanation"], "plan": payload["plan"]}),
 			ActivityID: firstString(payload, "turnId"), ActivityKind: "plan", ActivitySource: "codex", DisplayName: displayName,
 		}, true
@@ -753,7 +775,11 @@ func progressEvent(message rpcMessage) (Event, bool) {
 			}
 		}
 	}
-	return Event{Kind: "codex_progress", Name: name, Status: status, Detail: detail, Input: input, Output: output, ActivityID: activityID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName}, true
+	return Event{Kind: "codex_progress", Name: name, ProtocolMethod: message.Method, RawPayload: marshalRPCMessage(message), Status: status, Detail: detail, Input: input, Output: output, ActivityID: activityID, ActivityKind: activityKind, ActivitySource: activitySource, DisplayName: displayName}, true
+}
+
+func marshalRPCMessage(message rpcMessage) string {
+	return marshalItemValue(message)
 }
 
 func planProgressSummary(payload map[string]any) (string, string) {
@@ -950,17 +976,7 @@ func itemDuration(item map[string]any) time.Duration {
 }
 
 func marshalItemValue(value any) string {
-	var result string
-	if text, ok := value.(string); ok {
-		result = text
-	} else {
-		data, err := json.Marshal(value)
-		if err != nil {
-			return ""
-		}
-		result = string(data)
-	}
-	return truncateUTF8(result, maxTraceValueBytes)
+	return tracevalue.Marshal(value, maxTraceValueBytes)
 }
 
 func truncateUTF8(value string, limit int) string {

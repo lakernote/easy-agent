@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/store"
 )
 
 func (server *Server) streamSession(response http.ResponseWriter, request *http.Request) {
@@ -39,6 +41,7 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 
 	lastID, _ := strconv.ParseInt(strings.TrimSpace(request.Header.Get("Last-Event-ID")), 10, 64)
 	writeSSE(response, "session", 0, server.sessionView(value))
+	lastState := sessionStreamState(value)
 	if lastID == 0 && len(value.Events) > 0 {
 		lastID = value.Events[len(value.Events)-1].ID
 	}
@@ -48,7 +51,6 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 	heartbeat := time.NewTicker(time.Duration(runtimeSettings.SSEHeartbeatSeconds) * time.Second)
 	defer ticker.Stop()
 	defer heartbeat.Stop()
-	lastState := ""
 	for {
 		select {
 		case <-request.Context().Done():
@@ -78,7 +80,7 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 			if loadErr != nil {
 				return
 			}
-			state := fmt.Sprintf("%s|%s|%s|%d|%d|%d", current.Status, current.PartialOutput, current.RunProgress, current.MessageCount, current.EventCount, current.UpdatedAt.UnixNano())
+			state := sessionStreamState(current)
 			if state != lastState {
 				writeSSE(response, "session", 0, server.sessionView(current))
 				lastState = state
@@ -89,6 +91,10 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 			}
 		}
 	}
+}
+
+func sessionStreamState(value store.Session) string {
+	return fmt.Sprintf("%s|%s|%s|%d|%d|%d", value.Status, value.PartialOutput, value.RunProgress, value.MessageCount, value.EventCount, value.UpdatedAt.UnixNano())
 }
 
 func writeSSE(response http.ResponseWriter, event string, id int64, value any) {

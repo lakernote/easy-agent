@@ -2,13 +2,13 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/agent/openai"
 	"github.com/lakernote/easy-agent/internal/store"
+	"github.com/lakernote/easy-agent/internal/tracevalue"
 )
 
 func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, onTraceError func(error)) agent.Observer {
@@ -109,45 +109,11 @@ func userTurnCount(messages []store.Message) int {
 	return turns
 }
 
-// redactTraceAttachmentData 保留多模态请求结构和 MIME 类型，但不把图片/PDF
-// 的 Base64 原文塞进 Trace。这样页面仍可审计输入，同时不会生成数 MB 的事件。
+// redactTraceAttachmentData 保留可审计的请求结构，但移除附件 Base64 和常见
+// 凭据字段。Trace 会展示 Codex JSONL 原始包络，不能因此把 token/password
+// 等秘密长期写进 SQLite。
 func redactTraceAttachmentData(value string) string {
-	if !strings.Contains(value, ";base64,") {
-		return value
-	}
-	var payload any
-	if json.Unmarshal([]byte(value), &payload) != nil {
-		return value
-	}
-	var sanitize func(any) any
-	sanitize = func(item any) any {
-		switch typed := item.(type) {
-		case string:
-			if strings.HasPrefix(typed, "data:") {
-				if marker := strings.Index(typed, ";base64,"); marker > len("data:") {
-					return fmt.Sprintf("<%s attachment data omitted>", typed[len("data:"):marker])
-				}
-			}
-			return typed
-		case []any:
-			for index := range typed {
-				typed[index] = sanitize(typed[index])
-			}
-			return typed
-		case map[string]any:
-			for key := range typed {
-				typed[key] = sanitize(typed[key])
-			}
-			return typed
-		default:
-			return item
-		}
-	}
-	encoded, err := json.Marshal(sanitize(payload))
-	if err != nil {
-		return value
-	}
-	return string(encoded)
+	return tracevalue.Sanitize(value)
 }
 
 // modelRequestShape 只提取 Trace 所需的结构数据，不在运行时重新估算 Token。

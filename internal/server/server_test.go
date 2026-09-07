@@ -27,9 +27,9 @@ import (
 )
 
 func TestTraceOmitsAttachmentBase64(t *testing.T) {
-	input := `{"image_url":{"url":"data:image/png;base64,c2VjcmV0"},"text":"keep"}`
+	input := `{"image_url":{"url":"data:image/png;base64,c2VjcmV0"},"text":"keep","authorization":"Bearer private","github_token":"private-token","inputTokens":42}`
 	output := redactTraceAttachmentData(input)
-	if strings.Contains(output, "c2VjcmV0") || !strings.Contains(output, "image/png attachment data omitted") || !strings.Contains(output, `"text":"keep"`) {
+	if strings.Contains(output, "c2VjcmV0") || strings.Contains(output, "Bearer private") || strings.Contains(output, "private-token") || !strings.Contains(output, "image/png attachment data omitted") || !strings.Contains(output, `"text":"keep"`) || !strings.Contains(output, `"inputTokens":42`) {
 		t.Fatalf("Trace 附件脱敏错误: %s", output)
 	}
 }
@@ -579,6 +579,9 @@ func TestSessionStreamResumesTraceAfterLastEventID(t *testing.T) {
 	text := string(body)
 	if response.StatusCode != http.StatusOK || !strings.Contains(text, "event: session") {
 		t.Fatalf("SSE 初始快照异常: HTTP=%d body=%s", response.StatusCode, text)
+	}
+	if strings.Count(text, "event: session") != 1 {
+		t.Fatalf("状态未变化时不应在首次检查时重复发送会话快照: %s", text)
 	}
 	if strings.Count(text, "event: trace") != 1 || !strings.Contains(text, fmt.Sprintf("id: %d\n", events[1].ID)) || !strings.Contains(text, "second") {
 		t.Fatalf("SSE 应只续传 Last-Event-ID 之后的 Trace: %s", text)

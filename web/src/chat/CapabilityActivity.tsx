@@ -74,9 +74,26 @@ export function CodexActivity({ event }: { event: TraceEvent }) {
   const command = event.name === 'commandExecution' ? compactCommand(event.input) : ''
   const display = files.length > 0 ? files.map((item) => item.path).join(' · ') : command ? `Shell · ${command}` : event.displayName || (isMCP ? event.detail?.split('/').slice(1).join('/').trim() : codexToolLabel(event.name || ''))
   const state = event.status === 'error' ? '失败' : event.status === 'started' ? '进行中' : '完成'
-  return <div className={`conversation-activity ${isMCP ? 'mcp' : files.length > 0 ? 'files' : 'tool'} ${event.status}`} role="status" title={files.length > 0 ? files.map((item) => item.path).join('\n') : undefined}>
+  return <div className={`conversation-activity ${isMCP ? 'mcp' : files.length > 0 ? 'files' : 'tool'} ${event.status}`} title={files.length > 0 ? files.map((item) => item.path).join('\n') : undefined}>
     <span>{isMCP ? 'MCP' : files.length > 0 ? 'Files' : 'Tool'}</span><strong>{isMCP ? `${source} / ${display || '工具'}` : display || 'Codex 工具'}</strong><small>{files.length > 0 ? `${files.length} 个文件 · +${fileStats.additions} −${fileStats.deletions}` : state}{event.durationMs ? ` · ${formatDuration(event.durationMs)}` : ''}</small>
   </div>
+}
+
+export function CodexActivityGroup({ events, onOpenTrace }: { events: TraceEvent[]; onOpenTrace: () => void }) {
+  const failed = events.filter((event) => event.status === 'error').length
+  const running = events.filter((event) => event.status === 'started').length
+  const files = summarizeSessionFileChanges(events)
+  const mcpCalls = events.filter((event) => event.activityKind === 'mcp' || event.name === 'mcpToolCall').length
+  const summary = [
+    `${events.length} 项执行`,
+    mcpCalls > 0 ? `${mcpCalls} 次 MCP` : '',
+    files.count > 0 ? `${files.count} 个文件 · +${files.additions} −${files.deletions}` : '',
+  ].filter(Boolean).join(' · ')
+  return <details className={`conversation-activity-group ${failed ? 'error' : running ? 'running' : 'success'}`} open={failed > 0}>
+    <summary><span className="activity-group-mark" aria-hidden="true"><i /></span><div><strong>{failed ? '执行过程有失败' : running ? '正在执行' : '执行过程'}</strong><small>{summary}</small></div><em>{failed ? `${failed} 项失败` : running ? '进行中' : '已完成'}</em><span className="activity-group-chevron" aria-hidden="true" /></summary>
+    <div className="conversation-activity-list">{events.map((event) => <CodexActivity event={event} key={event.id} />)}</div>
+    <button type="button" className="activity-trace-link" onClick={onOpenTrace}>在 Trace 中查看请求、响应与 JSONL</button>
+  </details>
 }
 
 export function ExecutionProgress({ session }: { session: Session }) {

@@ -90,6 +90,8 @@ type Usage struct {
 type Event struct {
 	ID                  int64     `json:"id"`
 	Kind                string    `json:"kind"`
+	ProtocolMethod      string    `json:"protocolMethod,omitempty"`
+	RawPayload          string    `json:"rawPayload,omitempty"`
 	Turn                int       `json:"turn,omitempty"`
 	Step                int       `json:"step"`
 	Attempt             int       `json:"attempt,omitempty"`

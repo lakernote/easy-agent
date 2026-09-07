@@ -124,7 +124,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 				lastProgressAt = time.Now()
 				lastProgressName = event.Name
 			}
-			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: event.Input, Output: event.Output, ActivityID: event.ActivityID, ActivityKind: event.ActivityKind, ActivitySource: event.ActivitySource, DisplayName: event.DisplayName, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
+			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, ProtocolMethod: event.ProtocolMethod, RawPayload: redactTraceAttachmentData(event.RawPayload), Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: redactTraceAttachmentData(event.Input), Output: redactTraceAttachmentData(event.Output), ActivityID: event.ActivityID, ActivityKind: event.ActivityKind, ActivitySource: event.ActivitySource, DisplayName: event.DisplayName, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
 		},
 		OnServerRequest: func(request codexruntime.ServerRequest) (any, error) {
 			return server.awaitCodexRequest(ctx, session.ID, request)
@@ -149,7 +149,8 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	if result.Usage.Reported {
 		_ = server.store.AppendEvent(session.ID, store.Event{
 			Kind: "codex_usage", Turn: session.UserTurnCount, Status: "success", Name: settings.Model,
-			Detail: "thread/tokenUsage/updated · 本轮用量", InputTokens: result.Usage.InputTokens,
+			ProtocolMethod: "thread/tokenUsage/updated",
+			Detail:         "thread/tokenUsage/updated · 本轮用量", InputTokens: result.Usage.InputTokens,
 			OutputTokens: result.Usage.OutputTokens, CachedTokens: result.Usage.CachedInputTokens,
 			CacheWriteTokens: result.Usage.CacheWriteInputTokens, CacheReported: true,
 			TotalTokens: result.Usage.TotalTokens, ContextWindowTokens: result.Usage.ModelContextWindow,
@@ -179,7 +180,8 @@ func (server *Server) awaitCodexRequest(ctx context.Context, sessionID string, r
 		return nil, err
 	}
 	defer server.tasks.clearPending(sessionID)
-	_ = server.store.AppendEvent(sessionID, store.Event{Kind: "codex_request", Status: "waiting", Name: request.Method, Detail: "等待 UI 处理 app-server 反向请求", Input: string(request.Params), Protocol: "codex_app_server", CreatedAt: time.Now()})
+	rawPayload, _ := json.Marshal(map[string]any{"id": request.ID, "method": request.Method, "params": request.Params})
+	_ = server.store.AppendEvent(sessionID, store.Event{Kind: "codex_request", ProtocolMethod: request.Method, RawPayload: redactTraceAttachmentData(string(rawPayload)), Status: "waiting", Name: request.Method, Detail: "Codex app-server -> EasyAgent UI，等待用户处理反向请求", Input: redactTraceAttachmentData(string(request.Params)), Protocol: "codex_app_server", CreatedAt: time.Now()})
 	select {
 	case response := <-pending.Response:
 		if response.Err != nil {

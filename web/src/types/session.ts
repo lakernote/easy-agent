@@ -36,6 +36,8 @@ export type Message = {
 export type TraceEvent = {
   id: number
   kind: string
+  protocolMethod?: string
+  rawPayload?: string
   turn?: number
   step: number
   attempt?: number

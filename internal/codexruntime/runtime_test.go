@@ -47,12 +47,32 @@ done
 	}
 	workspace := t.TempDir()
 	var delta string
-	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, Timeout: time.Second, OnDelta: func(value string) { delta += value }}, "say hello")
+	var events []Event
+	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, Timeout: time.Second, Skills: []SkillRef{{Name: "weather", Path: "/tmp/weather/SKILL.md"}}, OnDelta: func(value string) { delta += value }, OnEvent: func(event Event) { events = append(events, event) }}, "say hello")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.ThreadID != "thread-test" || result.Answer != "hello" || delta != "hello" {
 		t.Fatalf("unexpected result: %+v, delta=%q", result, delta)
+	}
+	methods := map[string]Event{}
+	for _, event := range events {
+		if event.Kind == "codex_rpc" {
+			methods[event.ProtocolMethod] = event
+		}
+	}
+	for _, method := range []string{"initialize", "thread/start", "turn/start"} {
+		event, ok := methods[method]
+		if !ok || event.Status != "success" || event.Input == "" || event.Output == "" || !strings.Contains(event.RawPayload, `"method":"`+method+`"`) {
+			t.Fatalf("missing detailed JSON-RPC trace for %s: %+v", method, event)
+		}
+	}
+	turnRequest := methods["turn/start"]
+	if !strings.Contains(turnRequest.Input, `"text":"say hello"`) || !strings.Contains(turnRequest.Input, `"type":"skill"`) || !strings.Contains(turnRequest.Input, `"name":"weather"`) {
+		t.Fatalf("turn/start trace should contain the actual prompt and selected skill: %s", turnRequest.Input)
+	}
+	if strings.Contains(turnRequest.Input, `"tools"`) {
+		t.Fatalf("turn/start should leave built-in tool schemas to Codex app-server: %s", turnRequest.Input)
 	}
 	resumed, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, ThreadID: result.ThreadID, Timeout: time.Second}, "continue")
 	if err != nil {
@@ -166,6 +186,9 @@ func TestConsumeNotificationMapsDetailsAndDurations(t *testing.T) {
 	if events[0].Name != "webSearch" || events[0].Detail != "搜索：合肥明天天气" || events[0].Input != "合肥明天天气" {
 		t.Fatalf("unexpected web search event: %+v", events[0])
 	}
+	if events[0].ProtocolMethod != "item/started" || !strings.Contains(events[0].RawPayload, `"method":"item/started"`) {
+		t.Fatalf("JSONL envelope was not preserved: %+v", events[0])
+	}
 	if events[1].Status != "success" || events[1].Duration <= 0 {
 		t.Fatalf("expected completed event with duration: %+v", events[1])
 	}
@@ -225,6 +248,19 @@ func TestTruncateUTF8KeepsTraceBounded(t *testing.T) {
 	result := truncateUTF8(value, maxTraceValueBytes)
 	if len(result) > maxTraceValueBytes || !strings.HasSuffix(result, "… [truncated]") || !utf8.ValidString(result) {
 		t.Fatalf("unexpected truncated value: bytes=%d valid=%v", len(result), utf8.ValidString(result))
+	}
+}
+
+func TestMarshalItemValueRedactsJSONLBeforeTruncation(t *testing.T) {
+	result := marshalRPCMessage(rpcMessage{
+		Method: "turn/start",
+		Params: json.RawMessage(`{"authorization":"Bearer private-secret","padding":"` + strings.Repeat("x", maxTraceValueBytes*2) + `"}`),
+	})
+	if strings.Contains(result, "private-secret") || !strings.Contains(result, "redacted") {
+		t.Fatal("JSONL was truncated before redaction")
+	}
+	if len(result) > maxTraceValueBytes || !strings.HasSuffix(result, "… [truncated]") {
+		t.Fatalf("JSONL trace is not bounded: bytes=%d", len(result))
 	}
 }
 

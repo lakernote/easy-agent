@@ -39,6 +39,7 @@ body { overflow: hidden; background: #f7f7f5; }
 .chat-page { height: calc(100vh - 60px); background: #fff; }
 .conversation { padding-top: 28px; padding-bottom: 32px; background: #fff; }
 .conversation-content { padding-bottom: 18px; scrollbar-color: #c9ccc8 transparent; }
+.conversation-end-space { height: 24px; min-height: 24px; }
 .welcome { padding-top: clamp(56px, 12vh, 132px); }
 .welcome h1 { font-size: clamp(28px, 3.5vw, 38px); font-weight: 650; }
 .welcome > p:not(.eyebrow) { color: #6d746e; }
@@ -368,8 +369,12 @@ body { overflow: hidden; background: #f7f7f5; }
   .suggestions { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; overflow-x: visible; }
   .conversation { padding-bottom: 24px; }
   .conversation-content { padding-bottom: 10px; }
-  .conversation-activity { max-width: calc(100% - 43px); grid-template-columns: auto minmax(0, 1fr); }
+  .conversation-end-space { height: 16px; min-height: 16px; }
+  .conversation-activity-group { width: calc(100% - 43px); }
+  .conversation-activity { grid-template-columns: 40px minmax(0, 1fr); }
   .conversation-activity > small { grid-column: 2; white-space: normal; }
+  .trace-toolbar { top: 85px; grid-template-columns: 1fr; }
+  .trace-io.split { grid-template-columns: 1fr; }
   .execution-progress { width: 100%; max-width: 100%; grid-template-columns: 18px auto minmax(0, 1fr); border-radius: 12px; }
   .execution-progress > em { grid-column: 2 / -1; padding: 6px 0 0; border-top: 1px solid #e1e7e3; border-left: 0; }
   .composer-wrap { padding-top: 16px; }

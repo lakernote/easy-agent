@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react'
-import type { Bootstrap, Session } from './types'
+import type { Bootstrap, Session, TraceEvent } from './types'
 import { starterSuggestions } from './suggestions'
 import { Avatar, ContextBar, Markdown, MessageView } from './chat/MessageContent'
 import { Logo } from './ui'
 import { RunError } from './dialogs'
 import { ChatComposer } from './chat/ChatComposer'
 import { useChatComposer } from './chat/useChatComposer'
-import { CodexActivity, ExecutionProgress, codexConversationActivities } from './chat/CapabilityActivity'
+import { CodexActivityGroup, ExecutionProgress, codexConversationActivities } from './chat/CapabilityActivity'
 
-export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void }) {
+type ConversationItem = { kind: 'message'; createdAt: string; id: number; message: Session['messages'][number] } | { kind: 'activity'; createdAt: string; id: number; event: TraceEvent }
+type GroupedConversationItem = ConversationItem | { kind: 'activity-group'; createdAt: string; id: number; events: TraceEvent[] }
+
+export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenTrace }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenTrace: () => void }) {
   const endRef = useRef<HTMLDivElement>(null)
   const conversationRef = useRef<HTMLDivElement>(null)
   const loadingOlderRef = useRef(false)
@@ -17,10 +20,11 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const composer = useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities })
   const { isCodexRuntime, sending, send, startSuggestion } = composer
   const callsByID = new Map(session?.messages.flatMap((message) => message.toolCalls.map((call) => [call.id, call] as const)) || [])
-  const conversationItems = session ? [
+  const conversationItems: ConversationItem[] = session ? [
     ...session.messages.map((message) => ({ kind: 'message' as const, createdAt: message.createdAt, id: message.id, message })),
     ...(session.runtime === 'codex' ? codexConversationActivities(session.events).map((event) => ({ kind: 'activity' as const, createdAt: event.createdAt, id: event.id, event })) : []),
   ].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id - right.id) : []
+  const groupedConversationItems = groupConversationActivities(conversationItems)
 
   // 只有用户当前就在底部时才跟随新消息/流式输出；用户向上阅读历史时不抢夺滚动位置。
   useEffect(() => {
@@ -38,7 +42,13 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       stickToBottomRef.current = true
       return
     }
-    if (stickToBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    if (!stickToBottomRef.current) return
+    // 流式输出可能每几百毫秒更新一次。反复启动 smooth scroll 会让尚未结束的
+    // 动画互相打断，表现为整块对话上下闪动；实时更新只需在下一帧贴住底部。
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [session?.id, session?.messages.at(-1)?.id, session?.status, session?.partialOutput])
   useEffect(() => {
     const node = conversationRef.current
@@ -77,7 +87,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">自托管 Agent · 在服务器持续执行</p><h1>今天要交付什么？</h1><p>选择服务器项目，直接交代代码、测试、发布或故障排查任务；输入 <code>@</code> 可指定 Skill、Tool 或 MCP。</p><div className="suggestion-heading"><strong>常用研发工作流</strong><span>点击立即创建任务</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
-      {conversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : <CodexActivity key={`activity-${item.id}`} event={item.event} />)}
+      {groupedConversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : item.kind === 'activity-group' ? <CodexActivityGroup key={`activities-${item.id}`} events={item.events} onOpenTrace={onOpenTrace} /> : null)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
       {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以从顶部继续或取消。</span></div></div>}
       {session?.status === 'running' && <ExecutionProgress session={session} />}
@@ -87,9 +97,26 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
         if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)
       }} onOpenCapabilities={onOpenCapabilities} />}
       {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
-      <div ref={endRef} />
+      <div ref={endRef} className="conversation-end-space" aria-hidden="true" />
       </div>
     </div>
     <ChatComposer {...composer} />
   </section>
+}
+
+function groupConversationActivities(items: ConversationItem[]): GroupedConversationItem[] {
+  const grouped: GroupedConversationItem[] = []
+  for (const item of items) {
+    if (item.kind === 'activity') {
+      const previous = grouped.at(-1)
+      if (previous?.kind === 'activity-group') {
+        previous.events.push(item.event)
+      } else {
+        grouped.push({ kind: 'activity-group', createdAt: item.createdAt, id: item.id, events: [item.event] })
+      }
+      continue
+    }
+    grouped.push(item)
+  }
+  return grouped
 }
