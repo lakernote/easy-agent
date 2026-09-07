@@ -44,6 +44,27 @@ CREATE TABLE IF NOT EXISTS ea_project_directories (
   position INTEGER NOT NULL,
   PRIMARY KEY(project_id, path)
 );
+CREATE TABLE IF NOT EXISTS ea_automation_tasks (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  profile_id TEXT NOT NULL DEFAULT '',
+  trigger_type TEXT NOT NULL DEFAULT 'manual',
+  interval_minutes INTEGER NOT NULL DEFAULT 0,
+  repeat TEXT NOT NULL DEFAULT 'interval',
+  schedule_time TEXT NOT NULL DEFAULT '',
+  schedule_weekday INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT NOT NULL DEFAULT '',
+  last_run_at TEXT NOT NULL DEFAULT '',
+  last_status TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT '',
+  last_session_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ea_sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -135,7 +156,8 @@ CREATE TABLE IF NOT EXISTS ea_weixin_accounts (
   updated_at TEXT NOT NULL
 );
 	CREATE INDEX IF NOT EXISTS idx_ea_sessions_updated ON ea_sessions(updated_at DESC);
-	CREATE INDEX IF NOT EXISTS idx_ea_projects_default ON ea_projects(is_default DESC, name);
+CREATE INDEX IF NOT EXISTS idx_ea_projects_default ON ea_projects(is_default DESC, name);
+CREATE INDEX IF NOT EXISTS idx_ea_automation_due ON ea_automation_tasks(enabled, trigger_type, next_run_at);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session ON ea_messages(session_id, seq);
 	CREATE INDEX IF NOT EXISTS idx_ea_messages_session_id ON ea_messages(session_id, id);
 	CREATE INDEX IF NOT EXISTS idx_ea_attachments_message ON ea_attachments(message_id);
@@ -215,6 +237,24 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 	if weixinProjectColumn == 0 {
 		if _, err := store.db.Exec(`ALTER TABLE ea_weixin_accounts ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("迁移 ea_weixin_accounts.project_id: %w", err)
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "repeat", definition: "TEXT NOT NULL DEFAULT 'interval'"},
+		{name: "schedule_time", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "schedule_weekday", definition: "INTEGER NOT NULL DEFAULT 1"},
+	} {
+		var exists int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_automation_tasks') WHERE name=?`, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			if _, err := store.db.Exec(`ALTER TABLE ea_automation_tasks ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+				return fmt.Errorf("迁移 ea_automation_tasks.%s: %w", column.name, err)
+			}
 		}
 	}
 	var count int

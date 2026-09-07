@@ -91,6 +91,7 @@ func newServer(database *store.Store, assets fs.FS, environment *appenv.Environm
 	}
 	server.weixin = newWeixinManager(server, weixin.NewHTTPGateway(nil))
 	server.weixin.start()
+	server.startAutomationScheduler()
 	return server, nil
 }
 

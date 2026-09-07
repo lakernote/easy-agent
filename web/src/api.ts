@@ -1,4 +1,5 @@
 import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
+import type { AutomationTask } from './types/automation'
 
 export class APIError extends Error {
   status: number
@@ -35,6 +36,11 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) => request<{ authenticated: boolean; message: string }>('/api/v1/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
   bootstrap: () => request<Bootstrap>('/api/v1/bootstrap'),
   browseDirectories: (path = '') => request<DirectoryBrowserResponse>(`/api/v1/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  listAutomationTasks: () => request<AutomationTask[]>('/api/v1/automations'),
+  createAutomationTask: (input: AutomationTaskInput) => request<AutomationTask>('/api/v1/automations', { method: 'POST', body: JSON.stringify(input) }),
+  updateAutomationTask: (id: string, input: AutomationTaskInput) => request<AutomationTask>(`/api/v1/automations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+  deleteAutomationTask: (id: string) => request<void>(`/api/v1/automations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  runAutomationTask: (id: string) => request<{ task: AutomationTask; sessionId: string }>(`/api/v1/automations/${encodeURIComponent(id)}/run`, { method: 'POST' }),
   saveRuntimeSettings: (settings: Bootstrap['runtimeSettings']) => request<Bootstrap['runtimeSettings']>('/api/v1/runtime/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   weixin: () => request<WeixinState>('/api/v1/channels/weixin'),
   saveWeixinSettings: (enabled: boolean) => request<WeixinState>('/api/v1/channels/weixin', { method: 'PUT', body: JSON.stringify({ enabled }) }),
@@ -82,4 +88,17 @@ export const api = {
   checkMCPPreset: (id: string) => request<{ ok: boolean; installed: boolean; status: string; message: string }>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/check`, { method: 'POST' }),
   installMCPPreset: (id: string) => request<MCPInstallResult>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/install`, { method: 'POST' }),
   uninstallMCPPreset: (id: string) => request<void>(`/api/v1/mcp/presets/${encodeURIComponent(id)}/install`, { method: 'DELETE' }),
+}
+
+export type AutomationTaskInput = {
+  name: string
+  prompt: string
+  projectId: string
+  profileId: string
+  triggerType: 'manual' | 'interval'
+  intervalMinutes: number
+  repeat: 'interval' | 'daily' | 'weekdays' | 'weekly'
+  scheduleTime: string
+  scheduleWeekday: number
+  enabled: boolean
 }

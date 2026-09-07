@@ -33,6 +33,31 @@ type Project struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+// AutomationTask stores a reusable prompt and the execution context used by
+// manual or scheduled runs. Each run creates a normal Session so the existing
+// queue, trace, worktree and history behavior stays consistent.
+type AutomationTask struct {
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Prompt          string     `json:"prompt"`
+	ProjectID       string     `json:"projectId"`
+	Workspace       string     `json:"workspace"`
+	ProfileID       string     `json:"profileId,omitempty"`
+	TriggerType     string     `json:"triggerType"`
+	IntervalMinutes int        `json:"intervalMinutes,omitempty"`
+	Repeat          string     `json:"repeat,omitempty"`
+	ScheduleTime    string     `json:"scheduleTime,omitempty"`
+	ScheduleWeekday int        `json:"scheduleWeekday,omitempty"`
+	Enabled         bool       `json:"enabled"`
+	NextRunAt       *time.Time `json:"nextRunAt,omitempty"`
+	LastRunAt       *time.Time `json:"lastRunAt,omitempty"`
+	LastStatus      string     `json:"lastStatus,omitempty"`
+	LastError       string     `json:"lastError,omitempty"`
+	LastSessionID   string     `json:"lastSessionId,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
 type SkillOverride struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`

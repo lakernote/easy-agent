@@ -8,6 +8,7 @@ import { Sidebar } from './Sidebar'
 import { Chat } from './Chat'
 import { TracePanel } from './TracePanel'
 import { SettingsShell } from './SettingsShell'
+import { AutomationPage } from './AutomationPage'
 import { LoginPage } from './LoginPage'
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
@@ -159,7 +160,7 @@ export default function App() {
     <main className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
-        <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : '设置'}</div>
+        <div className="topbar-title">{page === 'chat' ? (session?.title || '新会话') : page === 'automations' ? '自动化任务' : '设置'}</div>
         <div className="topbar-actions">
           {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
           {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}
@@ -171,7 +172,8 @@ export default function App() {
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
       {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenTrace={() => setTraceOpen(true)} />}
-      {page !== 'chat' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
+      {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
+      {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
     </main>
     {traceOpen && session && <TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} />}
     {forkOpen && <ForkDialog busy={forking} onCancel={() => setForkOpen(false)} onConfirm={(mode) => void forkSession(mode)} />}
