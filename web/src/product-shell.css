@@ -624,3 +624,44 @@ body { background: #f7f9fd; }
 .session-project-sessions .session-type-icon.automation { border-color: #c9dcfa; color: #2563eb; background: #edf4ff; }
 .session-project-sessions .session-type-icon.automation.running { border-color: #b9d5f0; color: #3576a8; background: #edf5fb; }
 .automation-empty-mark { color: #2563eb; background: #eaf2ff; }
+
+/* Remaining brand accents found by the color audit. Semantic success/error states stay untouched. */
+.primary-nav button.active:hover { color: #1e40af; background: #e3edff; }
+.session-label button:hover { color: #1d4ed8; background: #e8f0ff; }
+.sidebar-foot a:focus-visible, .mobile-brand:focus-visible { outline-color: #60a5fa; }
+.ghost-button:hover { border-color: #9bb8e8; }
+.session-type-icon.automation { color: #2563eb; background: #edf4ff; }
+.settings-section-nav button:hover { color: #1d4ed8; background: #f1f6ff; }
+.settings-side-nav button:hover { color: #1d4ed8; background: #f1f6ff; }
+.settings-list { background: #f6f8fc; }
+.settings-list > button.active { background: #edf3ff; box-shadow: inset 3px 0 #2563eb; }
+.settings-list-empty button { color: #1d4ed8; border-color: #cddcf5; }
+.settings-search input:focus, .settings-list-tools select:focus, input:focus, textarea:focus, select:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.switch input:checked + span { background: #2563eb; }
+.runtime-section { border-color: #c9dcfa; }
+.runtime-picker label.selected { border-color: #7aa7e8; background: #eff6ff; }
+.runtime-picker input, .task-settings-grid input[type="checkbox"] { accent-color: #2563eb; }
+.runtime-status { background: #eff6ff; }
+.runtime-state.active { color: #1d4ed8; background: #eaf2ff; }
+.runtime-nav-item:hover { background: #f1f6ff; }
+.runtime-nav-item.selected { color: #1e40af; border-color: #b9d1f2; background: #eff6ff; box-shadow: 0 3px 10px #1d4ed814; }
+.runtime-nav-item.selected:hover { background: #e8f0ff; }
+.runtime-nav-item.selected .runtime-nav-dot { box-shadow: 0 0 0 4px #dbeafe; }
+.settings-count { color: #1d4ed8; background: #eaf2ff; }
+.task-settings-panel .section-heading .eyebrow { color: #2563eb; }
+.project-picker-list > button:hover { border-color: #9bb8e8; }
+.project-picker-list > button.selected { border-color: #7aa7e8; background: #eff6ff; }
+.project-field > input:focus, .project-field > select:focus, .project-name-input:focus-within, .project-source:focus-within { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.project-source-pick { color: #315da8; }
+.project-source .project-source-pick:hover:not(:disabled) { color: #1d4ed8; background: #eaf2ff; }
+.add-source { color: #315da8; border-color: #bfd2ee; background: #f5f8ff; }
+.add-source:hover { border-color: #8eb3ea; background: #edf4ff; }
+.folder-picker-path:focus-within { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.folder-picker-entry:hover { background: #f1f6ff; }
+.folder-picker-entry svg { stroke: #356eb5; }
+.folder-picker-entry.parent strong { color: #1d4ed8; }
+.composer:focus-within { border-color: #60a5fa; }
+.workspace-control > span, .composer-workspace:hover { color: #1d4ed8; }
+.composer-workspace:focus-visible { outline-color: #60a5fa; }
+.workspace-picker input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.automation-notice { border-color: #c9dcfa; color: #315da8; background: #eff6ff; }
