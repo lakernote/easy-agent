@@ -19,7 +19,7 @@ func TestListSessionsUsesCursorWindow(t *testing.T) {
 	defer database.Close()
 	base := time.Now().Add(-101 * time.Minute)
 	for index := 0; index < 101; index++ {
-		if _, err := database.CreateSession(fmt.Sprintf("session-%03d", index), "会话", "fixture", "", base.Add(time.Duration(index)*time.Minute)); err != nil {
+		if _, err := database.CreateSession(CreateSessionParams{ID: fmt.Sprintf("session-%03d", index), Title: "会话", Model: "fixture", CreatedAt: base.Add(time.Duration(index) * time.Minute)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -115,7 +115,7 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "第一轮", "fixture", "", now); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "第一轮", Model: "fixture", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessage("s1", Message{Role: "user", Content: "你好"}); err != nil {
@@ -142,7 +142,7 @@ func TestSessionWindowBoundsMessagesAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("s1", "窗口", "fixture", "", time.Now()); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "窗口", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessages("s1", []Message{
@@ -189,7 +189,7 @@ func TestRuntimeSessionLoadsOnlyMessagesAfterLatestCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("runtime", "运行时", "fixture", "", time.Now()); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "runtime", Title: "运行时", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessages("runtime", []Message{
@@ -225,7 +225,7 @@ func TestAppendMessagesCommitsToolStepTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("s1", "工具", "fixture", "", time.Now()); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "工具", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendMessages("s1", []Message{
@@ -250,7 +250,7 @@ func TestMessageAttachmentsStayInSQLite(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "附件", "fixture", "", now); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "附件", Model: "fixture", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	attachment := Attachment{ID: "a1", Name: "error.log", MIMEType: "text/plain", Kind: "text", Size: 12, Data: []byte("stack trace")}
@@ -276,7 +276,7 @@ func TestCompactionSplitTurnRoundTripsInSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Close()
-	if _, err := value.CreateSession("s1", "压缩", "fixture", "", time.Now()); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "压缩", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.AppendCompaction("s1", Compaction{Summary: "checkpoint", ThroughMessageID: 7, SplitTurn: true, SourceMessages: 3, CompactedMessages: 7}); err != nil {
@@ -298,7 +298,7 @@ func TestSessionQueueRunAndCancelStates(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("s1", "任务", "fixture", "", now); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "s1", Title: "任务", Model: "fixture", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.QueueSession("s1", "fixture", now); err != nil {
@@ -339,7 +339,7 @@ func TestRecoverRunningKeepsQueuedTasks(t *testing.T) {
 	defer value.Close()
 	now := time.Now()
 	for _, id := range []string{"queued", "running"} {
-		if _, err := value.CreateSession(id, id, "fixture", "", now); err != nil {
+		if _, err := value.CreateSession(CreateSessionParams{ID: id, Title: id, Model: "fixture", CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		if err := value.QueueSession(id, "fixture", now); err != nil {
@@ -372,7 +372,7 @@ func TestPauseAndResumeQueuedSession(t *testing.T) {
 	}
 	defer value.Close()
 	now := time.Now()
-	if _, err := value.CreateSession("paused", "任务", "fixture", "", now); err != nil {
+	if _, err := value.CreateSession(CreateSessionParams{ID: "paused", Title: "任务", Model: "fixture", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := value.QueueSession("paused", "fixture", now); err != nil {
@@ -431,7 +431,7 @@ func TestCountOtherSessionsUsingWorkspace(t *testing.T) {
 		if id == "other" {
 			workspace = "/tmp/another-project"
 		}
-		if _, err := value.CreateSession(id, id, "fixture", workspace, now); err != nil {
+		if _, err := value.CreateSession(CreateSessionParams{ID: id, Title: id, Model: "fixture", Workspace: workspace, CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}

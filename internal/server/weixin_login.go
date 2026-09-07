@@ -48,10 +48,15 @@ func (manager *weixinManager) beginLogin(ctx context.Context, label string) (*we
 	manager.mu.Lock()
 	manager.logins[login.ID] = login
 	manager.mu.Unlock()
-	manager.server.wait.Add(1)
+	if !manager.server.beginBackground() {
+		manager.mu.Lock()
+		delete(manager.logins, login.ID)
+		manager.mu.Unlock()
+		return nil, errors.New("服务正在停止")
+	}
 	go func(id string) {
-		defer manager.server.wait.Done()
-		manager.pollLogin(manager.server.context, id)
+		defer manager.server.completeBackground()
+		manager.pollLogin(manager.server.ctx, id)
 	}(login.ID)
 	copy := *login
 	return &copy, nil
@@ -186,13 +191,18 @@ func (manager *weixinManager) cleanupLoginLater(id string) {
 	if !exists {
 		return
 	}
-	manager.server.wait.Add(1)
+	if !manager.server.beginBackground() {
+		manager.mu.Lock()
+		delete(manager.logins, id)
+		manager.mu.Unlock()
+		return
+	}
 	go func() {
-		defer manager.server.wait.Done()
+		defer manager.server.completeBackground()
 		timer := time.NewTimer(10 * time.Minute)
 		defer timer.Stop()
 		select {
-		case <-manager.server.context.Done():
+		case <-manager.server.ctx.Done():
 		case <-timer.C:
 			manager.mu.Lock()
 			delete(manager.logins, id)

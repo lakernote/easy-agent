@@ -14,10 +14,12 @@ import (
 )
 
 type sessionWorkspace struct {
-	Execution string
-	Source    string
-	Branch    string
-	Notice    string
+	Execution      string
+	Source         string
+	Branch         string
+	Notice         string
+	repositoryRoot string
+	worktreeRoot   string
 }
 
 // prepareSessionWorkspace gives each new conversation a stable Git worktree.
@@ -101,7 +103,20 @@ func (server *Server) createGitWorktree(ctx context.Context, sessionID, base, or
 		server.discardFreshWorktree(root, target, branch)
 		return sessionWorkspace{}, errors.New("Git worktree 创建后目录不可用")
 	}
-	return sessionWorkspace{Execution: execution, Source: original, Branch: branch, Notice: "已为本会话创建独立 Git worktree"}, nil
+	return sessionWorkspace{
+		Execution: execution, Source: original, Branch: branch, Notice: "已为本会话创建独立 Git worktree",
+		repositoryRoot: root, worktreeRoot: target,
+	}, nil
+}
+
+// discardPreparedWorkspace is only used before a newly created session starts.
+// No Agent has observed this worktree yet, so force removal is safe and avoids
+// leaking a directory and branch when persistence or queue admission fails.
+func (server *Server) discardPreparedWorkspace(workspace sessionWorkspace) {
+	if workspace.Branch == "" || workspace.repositoryRoot == "" || workspace.worktreeRoot == "" {
+		return
+	}
+	server.discardFreshWorktree(workspace.repositoryRoot, workspace.worktreeRoot, workspace.Branch)
 }
 
 // cleanupSessionWorktree only removes a worktree when it has no file changes

@@ -211,7 +211,7 @@ func TestWeixinAPIBindsMultipleAccountsWithoutExposingSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := newTestServer(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	application.weixin.gateway = &fakeWeixinGateway{}
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
@@ -266,7 +266,7 @@ func TestSavingEnabledWeixinChannelDoesNotSuppressPendingResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := newTestServer(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	application.weixin.gateway = &fakeWeixinGateway{}
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
@@ -314,7 +314,7 @@ func TestWeixinAPIShowsCurrentTaskAndRetriesDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := newTestServer(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	application.weixin.gateway = &fakeWeixinGateway{}
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
@@ -324,7 +324,7 @@ func TestWeixinAPIShowsCurrentTaskAndRetriesDelivery(t *testing.T) {
 	if _, err := database.SaveWeixinSettings(store.WeixinSettings{Enabled: true, IgnoreBefore: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateSessionWithRuntime("session-current", "检查发布状态", store.RuntimeCodex, "gpt-5", t.TempDir(), now); err != nil {
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "session-current", Title: "检查发布状态", Runtime: store.RuntimeCodex, Model: "gpt-5", Workspace: t.TempDir(), CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.SaveWeixinAccount(store.WeixinAccount{ID: "bot-current", Label: "值班同学", UserID: "user-current", Token: "token-current", BaseURL: weixin.DefaultBaseURL, Enabled: true, IgnoreBefore: now, CreatedAt: now, UpdatedAt: now}); err != nil {

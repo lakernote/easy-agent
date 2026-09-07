@@ -1,18 +1,13 @@
-// module 类似 Maven 的 groupId + artifactId，也是项目内 import 的根路径。
 module github.com/lakernote/easy-agent
 
-// 编译本项目所需的最低 Go 工具链版本；不是业务依赖版本。
 go 1.26.7
 
-// 第一组是代码直接 import 的依赖，类似 pom.xml 中直接声明的 dependency。
 require (
-	github.com/BurntSushi/toml v1.5.0 // 读取和安全更新 Codex config.toml
+	github.com/BurntSushi/toml v1.5.0 // 读写 Codex 配置 config.toml
 	github.com/modelcontextprotocol/go-sdk v1.7.0 // MCP 官方 Go SDK，用于动态接入外部 Agent 工具
 	modernc.org/sqlite v1.45.0 // 纯 Go SQLite 驱动，不依赖系统 SQLite 或 CGO
 )
 
-// indirect 表示传递依赖，类似 Maven 依赖树中的 transitive dependency。
-// 该列表由 go mod tidy 维护，业务代码通常不直接 import，也不需要手工逐项升级。
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect

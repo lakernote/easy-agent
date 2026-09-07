@@ -27,12 +27,14 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 	if server.tasks.has(id) {
 		return errors.New("任务已在当前进程队列中")
 	}
-	taskContext, taskCancel := context.WithCancel(server.context)
+	if !server.beginBackground() {
+		return errors.New("服务正在停止")
+	}
+	taskContext, taskCancel := context.WithCancel(server.ctx)
 	taskToken := newID()
 	server.tasks.set(id, taskToken, taskCancel)
-	server.wait.Add(1)
 	go func() {
-		defer server.wait.Done()
+		defer server.completeBackground()
 		defer server.tasks.clear(id, taskToken)
 		defer taskCancel()
 		session, loadErr := server.store.LoadSessionWindow(id, 1, 1)
@@ -44,7 +46,7 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		if err := server.scheduler.acquire(taskContext, projectKey); err != nil {
 			// 服务停机时保留尚未开始的 queued 任务，下一次启动会恢复；用户
 			// 主动停止则 CancelSession 已经把状态改成 canceled。
-			if server.context.Err() == nil {
+			if server.ctx.Err() == nil {
 				_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
 			}
 			return
@@ -67,7 +69,7 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		model.TurnTimeoutSeconds = runtimeSettings.TurnTimeoutSeconds
 		turnContext, turnCancel := context.WithTimeout(taskContext, time.Duration(runtimeSettings.TurnTimeoutSeconds)*time.Second)
 		defer turnCancel()
-		if err := server.runAgentTurn(turnContext, id, model, &usage); err != nil {
+		if err := server.executeSessionTurn(turnContext, id, model, &usage); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				err = errors.New("整轮任务超过配置的时间上限")
 			}
@@ -97,10 +99,10 @@ func (server *Server) taskConflictKey(session store.Session) string {
 	return session.Workspace
 }
 
-func (server *Server) resumeQueuedSessions() {
+func (server *Server) resumeQueuedSessions() error {
 	queued, err := server.store.ListQueuedSessions()
 	if err != nil {
-		return
+		return err
 	}
 	for _, session := range queued {
 		model, err := server.store.GetModelSettingsByProfileID(session.ProfileID)
@@ -110,4 +112,9 @@ func (server *Server) resumeQueuedSessions() {
 		}
 		_ = server.startQueuedTurn(session.ID, model)
 	}
+	return nil
+}
+
+func isActiveSessionStatus(status string) bool {
+	return status == "queued" || status == "running" || status == "paused"
 }

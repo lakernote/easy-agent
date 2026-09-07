@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -26,8 +27,10 @@ type Server struct {
 	env    *appenv.Environment
 	mux    *http.ServeMux
 
-	context     context.Context
+	ctx         context.Context
 	cancel      context.CancelFunc
+	lifecycleMu sync.Mutex
+	stopping    bool
 	wait        sync.WaitGroup
 	scheduler   *taskScheduler
 	tasks       *taskManager
@@ -35,6 +38,7 @@ type Server struct {
 	weixin      *weixinManager
 	codexEnvMu  sync.RWMutex
 	codexEnv    map[string]string
+	codexEnvErr error
 	authMu      sync.Mutex
 	sessions    map[string]authSession
 	authEnabled bool
@@ -49,35 +53,58 @@ type authSession struct {
 	ExpiresAt time.Time
 }
 
-func New(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
-	return newServer(database, assets, environment, true, true)
+type serverOptions struct {
+	authEnabled            bool
+	externalCapabilitySync bool
 }
 
-// NewForTests keeps existing handler-focused tests independent from browser
-// cookie setup. Production always uses New and therefore always enables auth.
-func NewForTests(database *store.Store, assets fs.FS, environment *appenv.Environment) *Server {
-	return newServer(database, assets, environment, false, false)
+func New(database *store.Store, assets fs.FS, environment *appenv.Environment) (*Server, error) {
+	return newServer(database, assets, environment, serverOptions{authEnabled: true, externalCapabilitySync: true})
 }
 
-func newServer(database *store.Store, assets fs.FS, environment *appenv.Environment, authEnabled, externalCapabilitySync bool) *Server {
+func newServer(database *store.Store, assets fs.FS, environment *appenv.Environment, options serverOptions) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	codexEnv, _ := codexruntime.LoadManagedEnvironment()
-	runtimeSettings, _ := database.GetRuntimeSettings()
-	server := &Server{store: database, assets: assets, env: environment, mux: http.NewServeMux(), context: ctx, cancel: cancel, scheduler: newTaskScheduler(runtimeSettings.MaxConcurrentTasks), tasks: newTaskManager(), codexEnv: codexEnv, sessions: make(map[string]authSession), authEnabled: authEnabled, externalCapabilitySync: externalCapabilitySync}
+	codexEnv := map[string]string{}
+	var codexEnvErr error
+	if options.externalCapabilitySync {
+		codexEnv, codexEnvErr = codexruntime.LoadManagedEnvironment()
+		if codexEnv == nil {
+			codexEnv = map[string]string{}
+		}
+	}
+	runtimeSettings, err := database.GetRuntimeSettings()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("load runtime settings: %w", err)
+	}
+	server := &Server{
+		store: database, assets: assets, env: environment, mux: http.NewServeMux(),
+		ctx: ctx, cancel: cancel, scheduler: newTaskScheduler(runtimeSettings.MaxConcurrentTasks),
+		tasks: newTaskManager(), codexEnv: codexEnv, codexEnvErr: codexEnvErr, sessions: make(map[string]authSession),
+		authEnabled: options.authEnabled, externalCapabilitySync: options.externalCapabilitySync,
+	}
 	server.runtimes = newRuntimeRegistry(server)
 	server.routes()
-	server.resumeQueuedSessions()
+	if err := server.resumeQueuedSessions(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("resume queued sessions: %w", err)
+	}
 	server.weixin = newWeixinManager(server, weixin.NewHTTPGateway(nil))
 	server.weixin.start()
-	return server
+	return server, nil
 }
 
-func (server *Server) codexEnvironment() []string {
+func (server *Server) codexEnvironment() ([]string, error) {
 	return server.codexEnvironmentWith(nil)
 }
 
-func (server *Server) codexEnvironmentWith(extra map[string]string) []string {
+func (server *Server) codexEnvironmentWith(extra map[string]string) ([]string, error) {
 	server.codexEnvMu.RLock()
+	if server.codexEnvErr != nil {
+		err := server.codexEnvErr
+		server.codexEnvMu.RUnlock()
+		return nil, fmt.Errorf("加载 Codex API Key: %w", err)
+	}
 	values := make(map[string]string, len(server.codexEnv)+len(extra))
 	for key, value := range server.codexEnv {
 		values[key] = value
@@ -86,16 +113,20 @@ func (server *Server) codexEnvironmentWith(extra map[string]string) []string {
 	for key, value := range extra {
 		values[key] = value
 	}
-	return server.env.Environ(values)
+	return server.env.Environ(values), nil
 }
 
 func (server *Server) reloadCodexEnvironment() error {
 	values, err := codexruntime.LoadManagedEnvironment()
 	if err != nil {
+		server.codexEnvMu.Lock()
+		server.codexEnvErr = err
+		server.codexEnvMu.Unlock()
 		return err
 	}
 	server.codexEnvMu.Lock()
 	server.codexEnv = values
+	server.codexEnvErr = nil
 	server.codexEnvMu.Unlock()
 	return nil
 }
@@ -106,6 +137,11 @@ func (server *Server) Handler() http.Handler {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
 		response.Header().Set("Referrer-Policy", "no-referrer")
+		if server.isStopping() {
+			response.Header().Set("Connection", "close")
+			writeError(response, http.StatusServiceUnavailable, "服务正在停止")
+			return
+		}
 		if server.requiresAuthentication(request) && !server.isAuthenticated(request) {
 			response.Header().Set("Cache-Control", "no-store")
 			writeError(response, http.StatusUnauthorized, "需要登录")
@@ -170,8 +206,38 @@ func (server *Server) clearAuthSession(response http.ResponseWriter, request *ht
 	http.SetCookie(response, &http.Cookie{Name: authCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: request.TLS != nil})
 }
 
+func (server *Server) beginBackground() bool {
+	server.lifecycleMu.Lock()
+	defer server.lifecycleMu.Unlock()
+	if server.stopping {
+		return false
+	}
+	server.wait.Add(1)
+	return true
+}
+
+func (server *Server) completeBackground() {
+	server.wait.Done()
+}
+
+func (server *Server) isStopping() bool {
+	server.lifecycleMu.Lock()
+	defer server.lifecycleMu.Unlock()
+	return server.stopping
+}
+
+// BeginShutdown rejects new work and broadcasts cancellation without waiting.
+func (server *Server) BeginShutdown() {
+	server.lifecycleMu.Lock()
+	if !server.stopping {
+		server.stopping = true
+		server.cancel()
+	}
+	server.lifecycleMu.Unlock()
+}
+
 func (server *Server) Shutdown(ctx context.Context) error {
-	server.cancel()
+	server.BeginShutdown()
 	done := make(chan struct{})
 	go func() { server.wait.Wait(); close(done) }()
 	select {

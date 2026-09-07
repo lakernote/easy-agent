@@ -74,11 +74,3 @@ func (server *Server) sessionViews(values []store.Session) []sessionView {
 	}
 	return result
 }
-
-func publicSessions(values []store.Session) []sessionView {
-	result := make([]sessionView, 0, len(values))
-	for _, value := range values {
-		result = append(result, publicSession(value))
-	}
-	return result
-}

@@ -1,12 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/store"
@@ -45,6 +51,58 @@ func TestPrepareSessionWorkspaceFallsBackWhenRepositoryIsDirty(t *testing.T) {
 	resolvedRepository, _ := filepath.EvalSymlinks(repository)
 	if plan.Execution != resolvedRepository || plan.Branch != "" || !strings.Contains(plan.Notice, "未提交修改") {
 		t.Fatalf("脏工作区应明确降级为互斥: %+v", plan)
+	}
+}
+
+func TestCreateSessionDiscardsPreparedWorktreeWhenShutdownRejectsTask(t *testing.T) {
+	repository, git := newTestGitRepository(t)
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home"), ExtraPaths: []string{filepath.Dir(git)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.SaveModelSettings(store.ModelSettings{Provider: "test", Protocol: "chat_completions", BaseURL: "http://127.0.0.1:1/v1", Model: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := database.CreateProject("shutdown-project", "Shutdown", []string{repository}, true, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := newTestServer(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application.BeginShutdown()
+	payload, _ := json.Marshal(map[string]string{"message": "不应启动", "projectId": project.ID})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	// Directly call the route handler to reproduce shutdown beginning after the
+	// outer HTTP middleware admitted the request but before queue admission.
+	application.createSession(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "服务正在停止") {
+		t.Fatalf("停机竞态应拒绝任务: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+	sessions, _, err := database.ListSessionsBefore(10, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("被拒绝的新任务不应留下会话: %+v", sessions)
+	}
+	worktreeRoot := filepath.Join(environment.Runtime(), "worktrees")
+	if entries, err := os.ReadDir(worktreeRoot); err == nil && len(entries) != 0 {
+		t.Fatalf("被拒绝的新任务遗留 worktree: %+v", entries)
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	command := exec.Command(git, "-C", repository, "branch", "--list", "easyagent/*")
+	if output, err := command.Output(); err != nil || strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("被拒绝的新任务遗留分支: output=%q err=%v", output, err)
+	}
+	if err := application.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

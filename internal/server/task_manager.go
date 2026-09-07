@@ -44,12 +44,6 @@ func newTaskManager() *taskManager {
 	return &taskManager{tasks: make(map[string]taskHandle)}
 }
 
-// hasTask 保留在 Server 上作为测试和同包旧调用的窄兼容入口；新的任务状态
-// 操作都应直接通过 taskManager 完成。
-func (server *Server) hasTask(id string) bool {
-	return server.tasks.has(id)
-}
-
 func (manager *taskManager) has(id string) bool {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()

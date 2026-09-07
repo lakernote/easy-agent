@@ -260,7 +260,7 @@ func weixinDeliveryStatus(account store.WeixinAccount, sessionStatus string, del
 	if account.PendingMessageID <= account.DeliveredMessageID {
 		return "delivered"
 	}
-	if activeSessionStatus(sessionStatus) {
+	if isActiveSessionStatus(sessionStatus) {
 		return "processing"
 	}
 	if delivering {

@@ -24,7 +24,11 @@ func (server *Server) codexQueryWithParams(ctx context.Context, workspace, metho
 	if !status.Installed || !status.AppServerAvailable {
 		return nil, &codexUnavailableError{message: status.Message}
 	}
-	result, err := codexruntime.Call(ctx, codexruntime.Config{Path: status.Path, Workspace: workspace, Timeout: 20 * time.Second, Env: server.codexEnvironment()}, method, params)
+	environment, err := server.codexEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	result, err := codexruntime.Call(ctx, codexruntime.Config{Path: status.Path, Workspace: workspace, Timeout: 20 * time.Second, Env: environment}, method, params)
 	if err != nil {
 		return nil, err
 	}

@@ -12,10 +12,10 @@ func TestUsageAggregatesByPeriodAndModel(t *testing.T) {
 	}
 	defer database.Close()
 	now := time.Now().Truncate(time.Second)
-	if _, err := database.CreateSessionWithProfile("s1", "一", RuntimeEasyAgent, "p1", "qwen", "", now.Add(-2*time.Hour)); err != nil {
+	if _, err := database.CreateSession(CreateSessionParams{ID: "s1", Title: "一", Runtime: RuntimeEasyAgent, ProfileID: "p1", Model: "qwen", CreatedAt: now.Add(-2 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateSessionWithProfile("s2", "二", RuntimeCodex, "p2", "gpt-5", "", now.Add(-time.Hour)); err != nil {
+	if _, err := database.CreateSession(CreateSessionParams{ID: "s2", Title: "二", Runtime: RuntimeCodex, ProfileID: "p2", Model: "gpt-5", CreatedAt: now.Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range []struct {

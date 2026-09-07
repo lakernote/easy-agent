@@ -110,7 +110,7 @@ func TestModelProfileCannotBeDeletedWhileSessionUsesIt(t *testing.T) {
 	if err := database.SaveModelSettings(model); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateSessionWithProfile("session-1", "fixture", RuntimeEasyAgent, model.ProfileID, model.Model, t.TempDir(), time.Now()); err != nil {
+	if _, err := database.CreateSession(CreateSessionParams{ID: "session-1", Title: "fixture", Runtime: RuntimeEasyAgent, ProfileID: model.ProfileID, Model: model.Model, Workspace: t.TempDir(), CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.DeleteModelProfile(model.ProfileID); err == nil {

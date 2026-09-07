@@ -27,6 +27,11 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 		}
 		return
 	}
+	runtimeSettings, err := server.store.GetRuntimeSettings()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("Cache-Control", "no-cache, no-transform")
 	response.Header().Set("Connection", "keep-alive")
@@ -40,7 +45,6 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 	flusher.Flush()
 
 	ticker := time.NewTicker(350 * time.Millisecond)
-	runtimeSettings, _ := server.store.GetRuntimeSettings()
 	heartbeat := time.NewTicker(time.Duration(runtimeSettings.SSEHeartbeatSeconds) * time.Second)
 	defer ticker.Stop()
 	defer heartbeat.Stop()
@@ -48,6 +52,8 @@ func (server *Server) streamSession(response http.ResponseWriter, request *http.
 	for {
 		select {
 		case <-request.Context().Done():
+			return
+		case <-server.ctx.Done():
 			return
 		case <-heartbeat.C:
 			_, _ = fmt.Fprint(response, ": keep-alive\n\n")

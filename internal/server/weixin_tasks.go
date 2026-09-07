@@ -20,7 +20,7 @@ func (manager *weixinManager) handleCommand(account store.WeixinAccount, message
 		manager.send(account, message.FromUserID, message.ContextToken, "直接发送文字即可创建或继续任务。\n“新会话” 开始独立任务\n“状态” 查看当前进度\n“停止” 中断当前任务\n“项目列表” 查看可用项目\n“切换项目 项目名” 设置后续新会话的源文件夹\n\n也支持 /new、/status、/stop、/projects、/project 项目名。")
 		return true
 	case "new":
-		if session, err := manager.currentSession(account); err == nil && activeSessionStatus(session.Status) {
+		if session, err := manager.currentSession(account); err == nil && isActiveSessionStatus(session.Status) {
 			manager.send(account, message.FromUserID, message.ContextToken, "当前任务仍在执行。请先发送“停止”，任务结束后再开始新会话。")
 			return true
 		}
@@ -43,7 +43,7 @@ func (manager *weixinManager) handleCommand(account store.WeixinAccount, message
 		return true
 	case "stop":
 		session, err := manager.currentSession(account)
-		if err != nil || !activeSessionStatus(session.Status) {
+		if err != nil || !isActiveSessionStatus(session.Status) {
 			manager.send(account, message.FromUserID, message.ContextToken, "当前没有正在执行的任务。发送“新会话”可开始独立任务。")
 			return true
 		}
@@ -109,7 +109,7 @@ func (manager *weixinManager) handleCommand(account store.WeixinAccount, message
 }
 
 func (manager *weixinManager) submit(account store.WeixinAccount, message weixin.Message, text string, attachments []store.Attachment, messageID int64, createdAt time.Time) (string, error) {
-	if current, err := manager.currentSession(account); err == nil && activeSessionStatus(current.Status) {
+	if current, err := manager.currentSession(account); err == nil && isActiveSessionStatus(current.Status) {
 		return "", errors.New("上一条任务仍在执行，可发送“状态”查看或发送“停止”中断")
 	}
 	now := time.Now()
@@ -146,17 +146,27 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 			return "", err
 		}
 		sessionID = newID()
-		runtimeSettings, _ := manager.server.store.GetRuntimeSettings()
-		workspace := manager.server.prepareSessionWorkspace(manager.server.context, sessionID, runEnvironment.Workspace(), runtimeSettings)
-		if _, err := manager.server.store.CreateSessionWithProject(sessionID, makeTitle(text), model.Runtime, model.ProfileID, model.Model, project.ID, workspace.Execution, now); err != nil {
+		runtimeSettings, err := manager.server.store.GetRuntimeSettings()
+		if err != nil {
+			return "", err
+		}
+		workspace := manager.server.prepareSessionWorkspace(manager.server.ctx, sessionID, runEnvironment.Workspace(), runtimeSettings)
+		if _, err := manager.server.store.CreateSession(store.CreateSessionParams{
+			ID: sessionID, Title: makeTitle(text), Runtime: model.Runtime,
+			ProfileID: model.ProfileID, Model: model.Model, ProjectID: project.ID,
+			Workspace: workspace.Execution, CreatedAt: now,
+		}); err != nil {
+			manager.server.discardPreparedWorkspace(workspace)
 			return "", err
 		}
 		if err := manager.server.store.SetSessionWorkspace(sessionID, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
 			_ = manager.server.store.DeleteSession(sessionID)
+			manager.server.discardPreparedWorkspace(workspace)
 			return "", err
 		}
 		if err := manager.server.enqueueTurn(sessionID, text, attachments, model); err != nil {
 			_ = manager.server.store.DeleteSession(sessionID)
+			manager.server.discardPreparedWorkspace(workspace)
 			return "", err
 		}
 	}
@@ -189,9 +199,14 @@ func (manager *weixinManager) resumeDelivery(accountID string) {
 	}
 	manager.delivery[accountID] = struct{}{}
 	manager.mu.Unlock()
-	manager.server.wait.Add(1)
+	if !manager.server.beginBackground() {
+		manager.mu.Lock()
+		delete(manager.delivery, accountID)
+		manager.mu.Unlock()
+		return
+	}
 	go func() {
-		defer manager.server.wait.Done()
+		defer manager.server.completeBackground()
 		defer func() {
 			manager.mu.Lock()
 			delete(manager.delivery, accountID)
@@ -201,8 +216,8 @@ func (manager *weixinManager) resumeDelivery(accountID string) {
 		if err != nil || account.PendingMessageID == 0 || account.PendingMessageID <= account.DeliveredMessageID || account.CurrentSessionID == "" {
 			return
 		}
-		_ = manager.server.tasks.wait(manager.server.context, account.CurrentSessionID)
-		if manager.server.context.Err() != nil {
+		_ = manager.server.tasks.wait(manager.server.ctx, account.CurrentSessionID)
+		if manager.server.ctx.Err() != nil {
 			return
 		}
 		account, err = manager.server.store.GetWeixinAccount(accountID)
@@ -237,7 +252,7 @@ func (manager *weixinManager) currentSession(account store.WeixinAccount) (store
 }
 
 func (manager *weixinManager) send(account store.WeixinAccount, userID, contextToken, text string) {
-	ctx, cancel := context.WithTimeout(manager.server.context, 20*time.Second)
+	ctx, cancel := context.WithTimeout(manager.server.ctx, 20*time.Second)
 	defer cancel()
 	if err := manager.gateway.SendText(ctx, gatewayAccount(account), userID, contextToken, text); err != nil && ctx.Err() == nil {
 		log.Printf("微信远程：发送消息失败 account=%s: %v", account.ID, err)
@@ -248,13 +263,13 @@ func (manager *weixinManager) sendChunks(account store.WeixinAccount, userID, co
 	for _, chunk := range splitText(text, 3500) {
 		var err error
 		for attempt := 0; attempt < 3; attempt++ {
-			ctx, cancel := context.WithTimeout(manager.server.context, 20*time.Second)
+			ctx, cancel := context.WithTimeout(manager.server.ctx, 20*time.Second)
 			err = manager.gateway.SendText(ctx, gatewayAccount(account), userID, contextToken, chunk)
 			cancel()
 			if err == nil {
 				break
 			}
-			if manager.server.context.Err() != nil || !waitContext(manager.server.context, time.Duration(attempt+1)*time.Second) {
+			if manager.server.ctx.Err() != nil || !waitContext(manager.server.ctx, time.Duration(attempt+1)*time.Second) {
 				return err
 			}
 		}
@@ -319,8 +334,4 @@ func splitText(value string, limit int) []string {
 		runes = runes[end:]
 	}
 	return result
-}
-
-func activeSessionStatus(status string) bool {
-	return status == "queued" || status == "running" || status == "paused"
 }

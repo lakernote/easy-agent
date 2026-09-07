@@ -94,7 +94,11 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 	}
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
-	runtimeSettings, _ := server.store.GetRuntimeSettings()
+	runtimeSettings, err := server.store.GetRuntimeSettings()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(response, http.StatusOK, bootstrapPayload{
 		Sessions: server.sessionViews(sessions), Projects: projects, SessionsHasMore: sessionsHasMore, Model: publicModel(model), ModelProfiles: publicProfiles, ActiveModelProfileID: activeProfileID, Skills: catalog.All(),
 		BuiltinTools: toolInfo, MCPPresets: mcppresets.Catalog(), ModelRules: modelRules(),

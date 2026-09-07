@@ -91,13 +91,21 @@ func (manager *weixinManager) startPoller(id string) {
 		manager.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(manager.server.context)
+	ctx, cancel := context.WithCancel(manager.server.ctx)
 	token := newID()
 	manager.pollers[id] = weixinPoller{cancel: cancel, token: token}
 	manager.mu.Unlock()
-	manager.server.wait.Add(1)
+	if !manager.server.beginBackground() {
+		manager.mu.Lock()
+		if current, ok := manager.pollers[id]; ok && current.token == token {
+			delete(manager.pollers, id)
+		}
+		manager.mu.Unlock()
+		cancel()
+		return
+	}
 	go func() {
-		defer manager.server.wait.Done()
+		defer manager.server.completeBackground()
 		defer func() {
 			manager.mu.Lock()
 			if current, ok := manager.pollers[id]; ok && current.token == token {

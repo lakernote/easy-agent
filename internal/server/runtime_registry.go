@@ -12,7 +12,7 @@ import (
 // Runtime 只负责执行一轮，HTTP、任务状态和持久化仍由 Server 管理。
 type runtimeTurnRequest struct {
 	Context     context.Context
-	ID          string
+	SessionID   string
 	Session     store.Session
 	Settings    store.ModelSettings
 	Environment *appenv.Environment
@@ -20,7 +20,6 @@ type runtimeTurnRequest struct {
 }
 
 type runtimeExecutor interface {
-	Name() string
 	Run(request runtimeTurnRequest) error
 }
 
@@ -48,15 +47,11 @@ func (registry *runtimeRegistry) resolve(name string) (runtimeExecutor, error) {
 
 type easyAgentExecutor struct{ server *Server }
 
-func (executor easyAgentExecutor) Name() string { return store.RuntimeEasyAgent }
-
 func (executor easyAgentExecutor) Run(request runtimeTurnRequest) error {
-	return executor.server.runEasyAgentTurn(request.Context, request.ID, request.Session, request.Settings, request.Environment, request.Usage)
+	return executor.server.runEasyAgentTurn(request.Context, request.SessionID, request.Session, request.Settings, request.Environment, request.Usage)
 }
 
 type codexExecutor struct{ server *Server }
-
-func (executor codexExecutor) Name() string { return store.RuntimeCodex }
 
 func (executor codexExecutor) Run(request runtimeTurnRequest) error {
 	return executor.server.runCodexTurn(request.Context, request.Session, request.Settings, request.Environment.Workspace(), request.Environment.Directories(), request.Usage)

@@ -51,6 +51,10 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		return err
 	}
 	selectedSkillsForTurn := selectedCodexSkills(session.Messages, skillRefs)
+	environment, err := server.codexEnvironmentWith(capabilityEnv)
+	if err != nil {
+		return err
+	}
 	codexAttachments := make([]codexruntime.Attachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		if attachment.Kind == "audio" {
@@ -79,7 +83,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout:     time.Duration(turnTimeoutSeconds) * time.Second,
-		Env:         server.codexEnvironmentWith(capabilityEnv),
+		Env:         environment,
 		Skills:      selectedSkillsForTurn,
 		Attachments: codexAttachments,
 		OnDelta:     func(delta string) { server.tasks.appendPartial(session.ID, delta) },

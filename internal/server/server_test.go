@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -39,7 +40,7 @@ func TestTraceObserverPublishesLiveUsageAndSeparatesLoaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.CreateSession("live-usage", "实时用量", "fixture", t.TempDir(), time.Now()); err != nil {
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "live-usage", Title: "实时用量", Model: "fixture", Workspace: t.TempDir(), CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.QueueSession("live-usage", "fixture", time.Now()); err != nil {
@@ -109,7 +110,10 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := New(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application, err := newServer(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment, serverOptions{authEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -161,6 +165,166 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	oldLogin.Body.Close()
 	if oldLogin.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("旧密码应失效: %d", oldLogin.StatusCode)
+	}
+}
+
+func TestCreateSessionRejectsInvalidModelBeforePersisting(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", strings.NewReader(`{"message":"不应创建会话"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "当前模型配置不可用") {
+		t.Fatalf("未配置模型应返回明确的 400，实际 HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+	sessions, _, err := database.ListSessionsBefore(10, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("校验失败不应留下会话记录: %+v", sessions)
+	}
+}
+
+func TestNewServerRejectsInvalidRuntimeSettings(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "easyagent.db")
+	database, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	overwriteSetting(t, databasePath, "runtime_settings", "{")
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := newServer(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment, serverOptions{})
+	if application != nil || err == nil || !strings.Contains(err.Error(), "load runtime settings") {
+		t.Fatalf("损坏的运行设置应阻止服务启动: application=%v err=%v", application, err)
+	}
+}
+
+func TestNewServerDefersInvalidCodexSecretsErrorUntilCodexUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "easyagent-secrets.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "easyagent-home")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := newServer(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment, serverOptions{externalCapabilitySync: true})
+	if err != nil {
+		t.Fatalf("可选 Codex 密钥损坏不应阻止服务启动: %v", err)
+	}
+	defer application.Shutdown(context.Background())
+	if _, err := application.codexEnvironment(); err == nil || !strings.Contains(err.Error(), "Codex API Key") {
+		t.Fatalf("真正使用 Codex 时应返回延迟保存的配置错误: %v", err)
+	}
+}
+
+func TestRuntimeSettingsReadErrorsAreReturnedByAPIs(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "easyagent.db")
+	database, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "stream-settings", Title: "SSE", Model: "fixture", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+	overwriteSetting(t, databasePath, "runtime_settings", "{")
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/stream-settings/stream", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "解析运行设置") {
+		t.Fatalf("SSE 应返回运行设置错误而不是 panic: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+
+	payload := `{"message":"检查项目","workspace":"` + filepath.ToSlash(t.TempDir()) + `"}`
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/sessions", strings.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "解析运行设置") {
+		t.Fatalf("创建会话应返回运行设置错误而不是关闭 worktree 隔离: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/bootstrap", nil)
+	response = httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "解析运行设置") {
+		t.Fatalf("Bootstrap 不应返回零值运行设置: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestUpdateSessionKeepsProjectAndWorkspaceConsistent(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Now()
+	sourceDirectory := t.TempDir()
+	otherDirectory := t.TempDir()
+	sourceProject, err := database.CreateProject("source-project", "源项目", []string{sourceDirectory}, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProject, err := database.CreateProject("other-project", "其他项目", []string{otherDirectory}, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedProject, err := database.CreateProject("shared-project", "共享源目录项目", []string{sourceDirectory, otherDirectory}, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "move-session", Title: "移动会话", Runtime: store.RuntimeEasyAgent, Model: "fixture", ProjectID: sourceProject.ID, Workspace: sourceDirectory, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+
+	updateProject := func(projectID string) *httptest.ResponseRecorder {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]string{"title": "移动会话", "projectId": projectID})
+		request := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/move-session", bytes.NewReader(payload))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		application.Handler().ServeHTTP(response, request)
+		return response
+	}
+
+	if response := updateProject(otherProject.ID); response.Code != http.StatusConflict {
+		t.Fatalf("不能把会话移动到不包含原源目录的项目: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := updateProject(sharedProject.ID); response.Code != http.StatusOK {
+		t.Fatalf("包含原源目录的项目应允许接收会话: HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := database.QueueSession("move-session", "fixture", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if response := updateProject(sourceProject.ID); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "不能更换项目") {
+		t.Fatalf("排队任务不能更换项目: HTTP=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -306,7 +470,7 @@ func TestGetSessionUsesBoundedHistoryWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.CreateSession("window", "窗口", "fixture", "", time.Now()); err != nil {
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "window", Title: "窗口", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	messages := make([]store.Message, 0, 201)
@@ -384,7 +548,7 @@ func TestSessionStreamResumesTraceAfterLastEventID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.CreateSession("stream", "SSE", "fixture", "", time.Now()); err != nil {
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "stream", Title: "SSE", Model: "fixture", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.AppendEvent("stream", store.Event{Kind: "trace", Detail: "first"}); err != nil {
@@ -418,6 +582,69 @@ func TestSessionStreamResumesTraceAfterLastEventID(t *testing.T) {
 	}
 	if strings.Count(text, "event: trace") != 1 || !strings.Contains(text, fmt.Sprintf("id: %d\n", events[1].ID)) || !strings.Contains(text, "second") {
 		t.Fatalf("SSE 应只续传 Last-Event-ID 之后的 Trace: %s", text)
+	}
+}
+
+func TestSessionStreamStopsWhenServerShutsDown(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	if _, err := database.CreateSession(store.CreateSessionParams{ID: "queued-stream", Title: "SSE", Model: "fixture", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueueSession("queued-stream", "fixture", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(application.Handler())
+	defer httpServer.Close()
+	response, err := http.Get(httpServer.URL + "/api/v1/sessions/queued-stream/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+
+	streamDone := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(response.Body)
+		streamDone <- readErr
+	}()
+	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := application.Shutdown(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-streamDone:
+		if err != nil {
+			t.Fatalf("读取 SSE 响应失败: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("服务停机后 SSE 连接没有退出")
+	}
+}
+
+func TestServerRejectsNewWorkAfterShutdownBegins(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	application.BeginShutdown()
+	if err := application.startQueuedTurn("late-task", store.ModelSettings{}); err == nil || !strings.Contains(err.Error(), "服务正在停止") {
+		t.Fatalf("停机后不应接受新任务: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("停机后 HTTP 请求应返回 503，实际为 %d", response.Code)
+	}
+	if err := application.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -477,7 +704,7 @@ func TestShellKeepsRawPathForAgentAndTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := NewForTests(database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
+	application := newTestServer(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -654,7 +881,7 @@ func TestMultiTurnSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := NewForTests(database, assets, environment)
+	application := newTestServer(t, database, assets, environment)
 	defer application.Shutdown(context.Background())
 	httpServer := httptest.NewServer(application.Handler())
 	defer httpServer.Close()
@@ -811,7 +1038,7 @@ func TestRunningSessionCanBeCanceled(t *testing.T) {
 	}
 	close(release)
 	deadline := time.Now().Add(2 * time.Second)
-	for application.hasTask(session.ID) && time.Now().Before(deadline) {
+	for application.tasks.has(session.ID) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	stored, _ := database.LoadSession(session.ID)
@@ -1164,5 +1391,29 @@ func newTestApplication(t *testing.T, database *store.Store, assets fstest.MapFS
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewForTests(database, assets, environment)
+	return newTestServer(t, database, assets, environment)
+}
+
+func newTestServer(t *testing.T, database *store.Store, assets fstest.MapFS, environment *appenv.Environment) *Server {
+	t.Helper()
+	application, err := newServer(database, assets, environment, serverOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application
+}
+
+func overwriteSetting(t *testing.T, databasePath, key, value string) {
+	t.Helper()
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO ea_settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, key, value); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

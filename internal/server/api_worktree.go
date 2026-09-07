@@ -48,5 +48,5 @@ func (server *Server) cleanupWorktree(response http.ResponseWriter, request *htt
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	server.writeSession(response, request, id, http.StatusOK)
+	server.writeSessionResponse(response, request, id, http.StatusOK)
 }

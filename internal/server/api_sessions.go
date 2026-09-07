@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -57,26 +58,37 @@ func (server *Server) updateSession(response http.ResponseWriter, request *http.
 	projectID := current.ProjectID
 	if input.ProjectID != nil {
 		projectID = strings.TrimSpace(*input.ProjectID)
-		if projectID != "" {
-			if _, err := server.store.GetProject(projectID); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					writeError(response, http.StatusBadRequest, "所选项目不存在")
-				} else {
-					writeError(response, http.StatusInternalServerError, err.Error())
-				}
+		if projectID != current.ProjectID {
+			if isActiveSessionStatus(current.Status) {
+				writeError(response, http.StatusConflict, "任务正在处理或暂停时不能更换项目")
 				return
+			}
+			if projectID != "" {
+				project, err := server.store.GetProject(projectID)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						writeError(response, http.StatusBadRequest, "所选项目不存在")
+					} else {
+						writeError(response, http.StatusInternalServerError, err.Error())
+					}
+					return
+				}
+				if !projectContainsSessionSource(project, current) {
+					writeError(response, http.StatusConflict, "目标项目不包含会话原来的源文件夹")
+					return
+				}
 			}
 		}
 	}
 	if title == current.Title && projectID == current.ProjectID {
-		server.writeSession(response, request, id, http.StatusOK)
+		server.writeSessionResponse(response, request, id, http.StatusOK)
 		return
 	}
 	if err := server.store.UpdateSessionMetadata(id, title, projectID); err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	server.writeSession(response, request, id, http.StatusOK)
+	server.writeSessionResponse(response, request, id, http.StatusOK)
 }
 
 func containsControl(value string) bool {
@@ -115,27 +127,46 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 	}
 	model, err := server.store.GetModelSettingsByProfileID(input.ProfileID)
 	if err != nil {
-		writeError(response, http.StatusInternalServerError, err.Error())
+		writeError(response, http.StatusBadRequest, err.Error())
 		return
 	}
 	id := newID()
-	runtimeSettings, _ := server.store.GetRuntimeSettings()
+	runtimeSettings, err := server.store.GetRuntimeSettings()
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := validateModel(model.WithDefaults()); err != nil {
+		writeError(response, http.StatusBadRequest, "当前模型配置不可用："+err.Error())
+		return
+	}
 	workspace := server.prepareSessionWorkspace(request.Context(), id, runEnvironment.Workspace(), runtimeSettings)
-	if _, err := server.store.CreateSessionWithProject(id, attachmentTitle(input.Message, attachments), model.Runtime, model.ProfileID, model.Model, projectID, workspace.Execution, time.Now()); err != nil {
+	if _, err := server.store.CreateSession(store.CreateSessionParams{
+		ID: id, Title: attachmentTitle(input.Message, attachments), Runtime: model.Runtime,
+		ProfileID: model.ProfileID, Model: model.Model, ProjectID: projectID,
+		Workspace: workspace.Execution, CreatedAt: time.Now(),
+	}); err != nil {
+		server.discardPreparedWorkspace(workspace)
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := server.store.SetSessionWorkspace(id, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
 		_ = server.store.DeleteSession(id)
+		server.discardPreparedWorkspace(workspace)
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := server.enqueueTurn(id, input.Message, attachments, model); err != nil {
 		_ = server.store.DeleteSession(id)
+		server.discardPreparedWorkspace(workspace)
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	value.RunProgress = server.tasks.progress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
@@ -203,18 +234,43 @@ func (server *Server) continueSession(response http.ResponseWriter, request *htt
 	}
 	model, err := server.store.GetModelSettingsByProfileID(loaded.ProfileID)
 	if err != nil {
-		writeError(response, http.StatusInternalServerError, err.Error())
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateModel(model.WithDefaults()); err != nil {
+		writeError(response, http.StatusBadRequest, "当前模型配置不可用："+err.Error())
 		return
 	}
 	if err := server.enqueueTurn(id, input.Message, attachments, model); err != nil {
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	value, _ := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	value.RunProgress = server.tasks.progress(id)
 	model = enrichOllamaContextWindow(request.Context(), model)
 	decorateContext(&value, model)
 	writeJSON(response, http.StatusAccepted, server.sessionView(value))
+}
+
+func projectContainsSessionSource(project store.Project, session store.Session) bool {
+	source := strings.TrimSpace(session.SourceWorkspace)
+	if source == "" {
+		source = strings.TrimSpace(session.Workspace)
+	}
+	if source == "" {
+		return false
+	}
+	source = filepath.Clean(source)
+	for _, directory := range project.Directories {
+		if filepath.Clean(directory) == source {
+			return true
+		}
+	}
+	return false
 }
 
 func (server *Server) deleteSession(response http.ResponseWriter, request *http.Request) {
@@ -291,7 +347,7 @@ func (server *Server) pauseSession(response http.ResponseWriter, request *http.R
 	settleContext, settleCancel := context.WithTimeout(request.Context(), 2*time.Second)
 	_ = server.tasks.wait(settleContext, id)
 	settleCancel()
-	server.writeSession(response, request, id, http.StatusOK)
+	server.writeSessionResponse(response, request, id, http.StatusOK)
 }
 
 func (server *Server) resumeSession(response http.ResponseWriter, request *http.Request) {
@@ -328,10 +384,10 @@ func (server *Server) resumeSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusConflict, err.Error())
 		return
 	}
-	server.writeSession(response, request, id, http.StatusAccepted)
+	server.writeSessionResponse(response, request, id, http.StatusAccepted)
 }
 
-func (server *Server) writeSession(response http.ResponseWriter, request *http.Request, id string, status int) {
+func (server *Server) writeSessionResponse(response http.ResponseWriter, request *http.Request, id string, status int) {
 	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())

@@ -84,7 +84,11 @@ func (server *Server) forkSession(response http.ResponseWriter, request *http.Re
 	if createdWorktree {
 		titlePrefix = "独立分支 · "
 	}
-	if _, err := server.store.CreateSessionWithProject(id, titlePrefix+source.Title, source.Runtime, source.ProfileID, source.Model, source.ProjectID, workspace.Execution, time.Now()); err != nil {
+	if _, err := server.store.CreateSession(store.CreateSessionParams{
+		ID: id, Title: titlePrefix + source.Title, Runtime: source.Runtime,
+		ProfileID: source.ProfileID, Model: source.Model, ProjectID: source.ProjectID,
+		Workspace: workspace.Execution, CreatedAt: time.Now(),
+	}); err != nil {
 		rollbackWorkspace()
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return

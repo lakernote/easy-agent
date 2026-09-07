@@ -7,27 +7,27 @@ import (
 
 const sessionSelectColumns = `id,title,project_id,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at`
 
-func (store *Store) CreateSession(id, title, model, workspace string, now time.Time) (Session, error) {
-	return store.CreateSessionWithProfile(id, title, RuntimeEasyAgent, "", model, workspace, now)
+type CreateSessionParams struct {
+	ID        string
+	Title     string
+	Runtime   string
+	ProfileID string
+	Model     string
+	ProjectID string
+	Workspace string
+	CreatedAt time.Time
 }
 
-func (store *Store) CreateSessionWithRuntime(id, title, runtime, model, workspace string, now time.Time) (Session, error) {
-	return store.CreateSessionWithProfile(id, title, runtime, "", model, workspace, now)
-}
-
-func (store *Store) CreateSessionWithProfile(id, title, runtime, profileID, model, workspace string, now time.Time) (Session, error) {
-	return store.CreateSessionWithProject(id, title, runtime, profileID, model, "", workspace, now)
-}
-
-func (store *Store) CreateSessionWithProject(id, title, runtime, profileID, model, projectID, workspace string, now time.Time) (Session, error) {
-	if runtime != RuntimeCodex {
-		runtime = RuntimeEasyAgent
+func (store *Store) CreateSession(params CreateSessionParams) (Session, error) {
+	if params.Runtime != RuntimeCodex {
+		params.Runtime = RuntimeEasyAgent
 	}
-	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,project_id,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,created_at,updated_at) VALUES(?,?,?,'idle','',?,?,?,?,?,'','','','',?,?)`, id, title, projectID, runtime, profileID, model, workspace, workspace, formatTime(now), formatTime(now))
+	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,project_id,status,error,runtime,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,created_at,updated_at) VALUES(?,?,?,'idle','',?,?,?,?,?,'','','','',?,?)`,
+		params.ID, params.Title, params.ProjectID, params.Runtime, params.ProfileID, params.Model, params.Workspace, params.Workspace, formatTime(params.CreatedAt), formatTime(params.CreatedAt))
 	if err != nil {
 		return Session{}, err
 	}
-	return store.LoadSession(id)
+	return store.LoadSession(params.ID)
 }
 
 // ListSessionsBefore 按更新时间和 ID 游标读取更早的会话，供侧栏无限滚动使用。

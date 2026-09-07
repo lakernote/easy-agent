@@ -12,7 +12,7 @@ func TestSessionRuntimeIsPinnedAtCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	created, err := database.CreateSessionWithRuntime("codex-session", "Codex", RuntimeCodex, "gpt-5.6-sol", t.TempDir(), time.Now())
+	created, err := database.CreateSession(CreateSessionParams{ID: "codex-session", Title: "Codex", Runtime: RuntimeCodex, Model: "gpt-5.6-sol", Workspace: t.TempDir(), CreatedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}

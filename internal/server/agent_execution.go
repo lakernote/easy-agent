@@ -10,7 +10,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
-func (server *Server) runAgentTurn(ctx context.Context, id string, settings store.ModelSettings, usage *store.Usage) error {
+func (server *Server) executeSessionTurn(ctx context.Context, id string, settings store.ModelSettings, usage *store.Usage) error {
 	session, err := server.store.RuntimeSession(id)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func (server *Server) runAgentTurn(ctx context.Context, id string, settings stor
 		return err
 	}
 	return executor.Run(runtimeTurnRequest{
-		Context: ctx, ID: id, Session: session, Settings: settings,
+		Context: ctx, SessionID: id, Session: session, Settings: settings,
 		Environment: runEnvironment, Usage: usage,
 	})
 }

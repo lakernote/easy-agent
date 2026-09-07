@@ -22,7 +22,7 @@ func TestProjectsPersistDirectoriesAndSessionAssignment(t *testing.T) {
 	if !project.Default || len(project.Directories) != 2 || project.Directories[1] != second {
 		t.Fatalf("项目源文件夹没有按顺序保存: %+v", project)
 	}
-	session, err := database.CreateSessionWithProject("session-1", "检查项目", RuntimeEasyAgent, "", "qwen", project.ID, first, now)
+	session, err := database.CreateSession(CreateSessionParams{ID: "session-1", Title: "检查项目", Runtime: RuntimeEasyAgent, Model: "qwen", ProjectID: project.ID, Workspace: first, CreatedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
