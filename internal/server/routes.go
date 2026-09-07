@@ -12,6 +12,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/v1/automations", server.listAutomationTasks)
 	server.mux.HandleFunc("POST /api/v1/automations", server.createAutomationTask)
 	server.mux.HandleFunc("PUT /api/v1/automations/{id}", server.updateAutomationTask)
+	server.mux.HandleFunc("PATCH /api/v1/automations/{id}/enabled", server.setAutomationTaskEnabled)
 	server.mux.HandleFunc("DELETE /api/v1/automations/{id}", server.deleteAutomationTask)
 	server.mux.HandleFunc("POST /api/v1/automations/{id}/run", server.runAutomationTask)
 	server.mux.HandleFunc("GET /api/v1/filesystem/directories", server.browseDirectories)

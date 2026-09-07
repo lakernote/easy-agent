@@ -15,13 +15,15 @@ import (
 )
 
 type automationTaskRequest struct {
-	Name            string `json:"name"`
-	Prompt          string `json:"prompt"`
-	ProjectID       string `json:"projectId"`
-	ProfileID       string `json:"profileId,omitempty"`
-	ScheduleEnabled bool   `json:"scheduleEnabled"`
-	Cron            string `json:"cron,omitempty"`
-	Enabled         bool   `json:"enabled"`
+	Name      string `json:"name"`
+	Prompt    string `json:"prompt"`
+	ProjectID string `json:"projectId"`
+	ProfileID string `json:"profileId,omitempty"`
+	Cron      string `json:"cron,omitempty"`
+}
+
+type automationTaskEnabledRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 type automationTaskRunResponse struct {
@@ -30,6 +32,10 @@ type automationTaskRunResponse struct {
 }
 
 func (server *Server) listAutomationTasks(response http.ResponseWriter, request *http.Request) {
+	if err := server.store.ReconcileAutomationTasks(time.Now()); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	values, err := server.store.ListAutomationTasks()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
@@ -43,7 +49,7 @@ func (server *Server) createAutomationTask(response http.ResponseWriter, request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	value, err := server.normalizeAutomationTask(input, time.Now())
+	value, err := server.normalizeAutomationTask(input, time.Now(), true)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
@@ -74,7 +80,7 @@ func (server *Server) updateAutomationTask(response http.ResponseWriter, request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	value, err := server.normalizeAutomationTask(input, time.Now())
+	value, err := server.normalizeAutomationTask(input, time.Now(), current.Enabled)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
@@ -86,6 +92,9 @@ func (server *Server) updateAutomationTask(response http.ResponseWriter, request
 	value.LastStatus = current.LastStatus
 	value.LastError = current.LastError
 	value.LastSessionID = current.LastSessionID
+	if !current.Enabled {
+		value.NextRunAt = nil
+	}
 	updated, err := server.store.UpdateAutomationTask(value)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -108,6 +117,41 @@ func (server *Server) deleteAutomationTask(response http.ResponseWriter, request
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func (server *Server) setAutomationTaskEnabled(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	current, err := server.store.GetAutomationTask(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(response, http.StatusNotFound, "定时任务不存在")
+		} else {
+			writeError(response, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	var input automationTaskEnabledRequest
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	current.Enabled = input.Enabled
+	current.UpdatedAt = time.Now()
+	if current.Enabled && current.ScheduleEnabled {
+		next, nextErr := nextAutomationRun(current.UpdatedAt, current.Cron)
+		if nextErr != nil {
+			writeError(response, http.StatusBadRequest, nextErr.Error())
+			return
+		}
+		current.NextRunAt = &next
+	} else {
+		current.NextRunAt = nil
+	}
+	updated, err := server.store.UpdateAutomationTask(current)
+	if err != nil {
+		writeError(response, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, updated)
 }
 
 func (server *Server) runAutomationTask(response http.ResponseWriter, request *http.Request) {
@@ -137,7 +181,7 @@ func (server *Server) runAutomationTask(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusAccepted, automationTaskRunResponse{Task: updated, SessionID: sessionID})
 }
 
-func (server *Server) normalizeAutomationTask(input automationTaskRequest, now time.Time) (store.AutomationTask, error) {
+func (server *Server) normalizeAutomationTask(input automationTaskRequest, now time.Time, enabled bool) (store.AutomationTask, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" || utf8.RuneCountInString(name) > 80 || containsControl(name) {
 		return store.AutomationTask{}, errors.New("任务名称必须为 1 到 80 个有效字符")
@@ -147,13 +191,14 @@ func (server *Server) normalizeAutomationTask(input automationTaskRequest, now t
 		return store.AutomationTask{}, errors.New("Prompt 必须为 1 到 50000 个有效字符")
 	}
 	cronExpression := strings.TrimSpace(input.Cron)
-	if input.ScheduleEnabled {
+	scheduleEnabled := cronExpression != ""
+	if scheduleEnabled {
 		if _, err := parseAutomationCron(cronExpression); err != nil {
 			return store.AutomationTask{}, err
 		}
 	}
 	triggerType := "manual"
-	if input.ScheduleEnabled {
+	if scheduleEnabled {
 		triggerType = "interval"
 	}
 	projectID := strings.TrimSpace(input.ProjectID)
@@ -189,14 +234,14 @@ func (server *Server) normalizeAutomationTask(input automationTaskRequest, now t
 		}
 	}
 	nextRunAt := (*time.Time)(nil)
-	if input.Enabled && input.ScheduleEnabled {
+	if enabled && scheduleEnabled {
 		next, err := nextAutomationRun(now, cronExpression)
 		if err != nil {
 			return store.AutomationTask{}, err
 		}
 		nextRunAt = &next
 	}
-	return store.AutomationTask{Name: name, Prompt: prompt, ProjectID: projectID, Workspace: workspace, ProfileID: strings.TrimSpace(input.ProfileID), TriggerType: triggerType, ScheduleEnabled: input.ScheduleEnabled, Cron: cronExpression, Enabled: input.Enabled, NextRunAt: nextRunAt}, nil
+	return store.AutomationTask{Name: name, Prompt: prompt, ProjectID: projectID, Workspace: workspace, ProfileID: strings.TrimSpace(input.ProfileID), TriggerType: triggerType, ScheduleEnabled: scheduleEnabled, Cron: cronExpression, Enabled: enabled, NextRunAt: nextRunAt}, nil
 }
 
 func (server *Server) triggerAutomationTask(ctx context.Context, task store.AutomationTask) (string, error) {
@@ -221,7 +266,6 @@ func (server *Server) triggerAutomationTask(ctx context.Context, task store.Auto
 		_ = server.store.RecordAutomationTaskResult(task.ID, "failed", err.Error(), "", time.Now())
 		return "", err
 	}
-	_ = server.store.RecordAutomationTaskResult(task.ID, "queued", "", sessionID, time.Now())
 	return sessionID, nil
 }
 
@@ -249,6 +293,14 @@ func (server *Server) startAutomationSession(ctx context.Context, task store.Aut
 		return "", err
 	}
 	if err := server.store.SetSessionWorkspace(id, workspace.Execution, workspace.Source, workspace.Branch, workspace.Notice); err != nil {
+		_ = server.store.DeleteSession(id)
+		server.discardPreparedWorkspace(workspace)
+		return "", err
+	}
+	// Link the task before starting the goroutine. Otherwise a very fast
+	// session can become running before the task row knows its session id, and
+	// the later queued write would overwrite the real status.
+	if err := server.store.RecordAutomationTaskResult(task.ID, "queued", "", id, time.Now()); err != nil {
 		_ = server.store.DeleteSession(id)
 		server.discardPreparedWorkspace(workspace)
 		return "", err

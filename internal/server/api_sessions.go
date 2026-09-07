@@ -317,6 +317,7 @@ func (server *Server) cancelSession(response http.ResponseWriter, request *http.
 		return
 	}
 	server.tasks.cancel(id)
+	server.recordAutomationSessionResult(id, "canceled", "任务已停止")
 	value, err := server.store.LoadSessionWindow(id, apiMessageWindow, apiEventWindow)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())

@@ -39,6 +39,7 @@ export const api = {
   listAutomationTasks: () => request<AutomationTask[]>('/api/v1/automations'),
   createAutomationTask: (input: AutomationTaskInput) => request<AutomationTask>('/api/v1/automations', { method: 'POST', body: JSON.stringify(input) }),
   updateAutomationTask: (id: string, input: AutomationTaskInput) => request<AutomationTask>(`/api/v1/automations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+  setAutomationTaskEnabled: (id: string, enabled: boolean) => request<AutomationTask>(`/api/v1/automations/${encodeURIComponent(id)}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
   deleteAutomationTask: (id: string) => request<void>(`/api/v1/automations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   runAutomationTask: (id: string) => request<{ task: AutomationTask; sessionId: string }>(`/api/v1/automations/${encodeURIComponent(id)}/run`, { method: 'POST' }),
   saveRuntimeSettings: (settings: Bootstrap['runtimeSettings']) => request<Bootstrap['runtimeSettings']>('/api/v1/runtime/settings', { method: 'PUT', body: JSON.stringify(settings) }),
@@ -95,7 +96,5 @@ export type AutomationTaskInput = {
   prompt: string
   projectId: string
   profileId: string
-  scheduleEnabled: boolean
   cron: string
-  enabled: boolean
 }

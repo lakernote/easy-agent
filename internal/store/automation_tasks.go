@@ -82,6 +82,39 @@ func (store *Store) RecordAutomationTaskResult(id, status, errorMessage, session
 	return err
 }
 
+// RecordAutomationSessionResult keeps the task list in sync with the ordinary
+// session created for a scheduled task. The session id is the ownership link;
+// a later, unrelated session must never overwrite the task status.
+func (store *Store) RecordAutomationSessionResult(sessionID, status, errorMessage string, updatedAt time.Time) error {
+	_, err := store.db.Exec(`UPDATE ea_automation_tasks SET last_status=?,last_error=?,updated_at=? WHERE last_session_id=?`, status, errorMessage, formatTime(updatedAt), sessionID)
+	return err
+}
+
+// ReconcileAutomationTasks repairs task rows left behind by an older server or
+// an interrupted process. Active task states are only trusted while their
+// linked session still exists; the session remains the source of truth for the
+// actual execution state.
+func (store *Store) ReconcileAutomationTasks(now time.Time) error {
+	_, err := store.db.Exec(`UPDATE ea_automation_tasks
+		SET last_status=CASE
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='queued' THEN 'queued'
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='running' THEN 'running'
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='idle' THEN 'completed'
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='failed' THEN 'failed'
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='canceled' THEN 'canceled'
+			ELSE 'failed'
+		END,
+		last_error=CASE
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id)='failed' THEN COALESCE((SELECT error FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id),'任务执行失败')
+			WHEN (SELECT status FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id) IS NULL THEN '关联会话不存在，任务未完成'
+			ELSE ''
+		END,
+		last_session_id=CASE WHEN EXISTS (SELECT 1 FROM ea_sessions WHERE id=ea_automation_tasks.last_session_id) THEN last_session_id ELSE '' END,
+		updated_at=?
+		WHERE last_status IN ('queued','running') AND last_session_id<>''`, formatTime(now))
+	return err
+}
+
 func (store *Store) DeleteAutomationTask(id string) error {
 	result, err := store.db.Exec(`DELETE FROM ea_automation_tasks WHERE id=?`, id)
 	if err != nil {

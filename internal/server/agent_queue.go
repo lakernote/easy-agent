@@ -40,6 +40,7 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		session, loadErr := server.store.LoadSessionWindow(id, 1, 1)
 		if loadErr != nil {
 			_ = server.store.FailSession(id, loadErr, store.Usage{}, time.Now())
+			server.recordAutomationSessionResult(id, "failed", loadErr.Error())
 			return
 		}
 		projectKey := server.taskConflictKey(session)
@@ -48,6 +49,7 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 			// 主动停止则 CancelSession 已经把状态改成 canceled。
 			if server.ctx.Err() == nil {
 				_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
+				server.recordAutomationSessionResult(id, "failed", err.Error())
 			}
 			return
 		}
@@ -55,13 +57,16 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 		if err := server.store.MarkRunning(id, time.Now()); err != nil {
 			// 用户可能在任务刚获得执行槽时点击了停止，此时 canceled 状态应保留。
 			_ = server.store.FailSession(id, err, store.Usage{}, time.Now())
+			server.recordAutomationSessionResult(id, "failed", err.Error())
 			return
 		}
+		server.recordAutomationSessionResult(id, "running", "")
 		server.tasks.setProgress(id, "正在准备运行时")
 		usage := store.Usage{}
 		runtimeSettings, settingsErr := server.store.GetRuntimeSettings()
 		if settingsErr != nil {
 			_ = server.store.FailSession(id, settingsErr, usage, time.Now())
+			server.recordAutomationSessionResult(id, "failed", settingsErr.Error())
 			return
 		}
 		// 整轮上限属于两个 Runtime 共用的调度层。Codex 仍会把同一个上限传给
@@ -74,9 +79,16 @@ func (server *Server) startQueuedTurn(id string, model store.ModelSettings) erro
 				err = errors.New("整轮任务超过配置的时间上限")
 			}
 			_ = server.store.FailSession(id, err, usage, time.Now())
+			server.recordAutomationSessionResult(id, "failed", err.Error())
+			return
 		}
+		server.recordAutomationSessionResult(id, "completed", "")
 	}()
 	return nil
+}
+
+func (server *Server) recordAutomationSessionResult(sessionID, status, errorMessage string) {
+	_ = server.store.RecordAutomationSessionResult(sessionID, status, errorMessage, time.Now())
 }
 
 // taskConflictKey keeps worktrees parallel when the project only exposes the
