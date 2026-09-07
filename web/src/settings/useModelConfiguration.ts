@@ -21,7 +21,6 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const [modelEditorSnapshot, setModelEditorSnapshot] = useState<ModelSettings | null>(null)
   const [codexConfig, setCodexConfig] = useState<CodexProviderConfig>({ ...data.codexConfig })
   const [savingCodexConfig, setSavingCodexConfig] = useState(false)
-  const [installingCodex, setInstallingCodex] = useState(false)
 
   useEffect(() => setModel({ ...data.model }), [data.model])
   useEffect(() => setCodexConfig({ ...data.codexConfig }), [data.codexConfig])
@@ -132,15 +131,6 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     catch (reason) { onError((reason as Error).message) }
   }
 
-  const installCodex = async () => {
-    if (installingCodex) return
-    if (!window.confirm('将在运行 EasyAgent 的服务器当前用户目录安装官方 Codex CLI。继续吗？')) return
-    setInstallingCodex(true); onError('')
-    try { await api.installCodex(); await onRefresh() }
-    catch (reason) { onError((reason as Error).message) }
-    finally { setInstallingCodex(false) }
-  }
-
   const saveCodexConfig = async (input: CodexProviderConfig & { apiKey?: string; clearApiKey?: boolean }) => {
     if (savingCodexConfig) return
     setSavingCodexConfig(true); setModelNotice(null); onError('')
@@ -149,5 +139,5 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     finally { setSavingCodexConfig(false) }
   }
 
-  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig, savingCodexConfig, installingCodex, currentProfileSaved, saveModel, enableRuntime, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, installCodex, saveCodexConfig }
+  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig, savingCodexConfig, currentProfileSaved, saveModel, enableRuntime, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, saveCodexConfig }
 }

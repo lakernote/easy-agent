@@ -74,13 +74,13 @@ kill "$(cat easyagent.pid)" # 停止服务
 | EasyAgent | 使用 Ollama、OpenAI、Groq 等 OpenAI-compatible 模型和 EasyAgent 工具循环 | 在页面配置模型 |
 | Codex | 使用 Codex thread、原生工具、Skill 和沙箱处理代码任务 | 服务器安装 Codex CLI |
 
-安装 Codex CLI：
+请在运行 EasyAgent 的服务器终端中手动安装 Codex CLI：
 
 ```bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-`app-server` 是 Codex CLI 自带的子命令，不需要单独安装。EasyAgent 默认以完全访问模式运行 Codex，两个 Runtime 共用任务队列、项目目录、worktree、Skills 和 MCP。
+安装命令会下载并执行 OpenAI 官方安装脚本，请在执行前核对[官方安装说明](https://developers.openai.com/codex/cli)。EasyAgent 只检测 Codex CLI，不会下载安装或执行该脚本。`app-server` 是 Codex CLI 自带的子命令，不需要单独安装。EasyAgent 默认以完全访问模式运行 Codex，两个 Runtime 共用任务队列、项目目录、worktree、Skills 和 MCP。
 
 无论选择哪个 Runtime，都使用相同的项目和任务系统：
 

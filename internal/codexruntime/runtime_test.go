@@ -27,6 +27,9 @@ func TestDetectFindsCodexOnEnvironmentPath(t *testing.T) {
 	if !status.Installed || status.Path != path || status.Version != "codex-test" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
+	if status.InstallCommand != installCommand || status.InstallURL != installDocsURL {
+		t.Fatalf("manual install instructions missing: %+v", status)
+	}
 }
 
 func TestRunMessageUsesAppServerThreadAndStreamsAnswer(t *testing.T) {

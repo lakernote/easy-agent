@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { writeClipboardText } from '../clipboard'
 import type { Bootstrap, CodexProviderConfig, MCPConfig, ModelSettings } from '../types'
 
 export type Notice = { ready: boolean; title: string; message: string }
@@ -55,16 +56,15 @@ export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: 
 
 type CodexStatusProps = {
   data: Bootstrap
-  installing: boolean
-  onInstall: () => void
   onDetect: () => void
 }
 
-export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStatusProps) {
+export function CodexStatus({ data, onDetect }: CodexStatusProps) {
   const [inspection, setInspection] = useState<{ account?: unknown; models?: unknown; threads?: unknown } | null>(null)
   const [thread, setThread] = useState<unknown>(null)
   const [readingThread, setReadingThread] = useState('')
   const [inspecting, setInspecting] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const ready = data.codex.installed && data.codex.appServerAvailable
   const title = ready
     ? `Codex CLI + app-server 已就绪${data.codex.version ? ` · ${data.codex.version}` : ''}`
@@ -84,6 +84,15 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
     try { setThread(await api.codexThread(id)) }
     finally { setReadingThread('') }
   }
+  const copyInstallCommand = async () => {
+    try {
+      await writeClipboardText(data.codex.installCommand)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+    window.setTimeout(() => setCopyState('idle'), 1600)
+  }
   const threads = codexThreadSummaries(inspection?.threads)
 
   return (
@@ -93,12 +102,11 @@ export function CodexStatus({ data, installing, onInstall, onDetect }: CodexStat
         <small>{detail}</small>
       </div>
       <div className="runtime-status-actions">
-        {!data.codex.installed && <button className="primary-button" type="button" disabled={installing} onClick={onInstall}>{installing ? '安装中…' : '在服务器安装 Codex CLI'}</button>}
-        {!data.codex.installed && <a className="ghost-button" href={data.codex.installUrl} target="_blank" rel="noreferrer">安装说明</a>}
+        {!ready && <a className="ghost-button" href={data.codex.installUrl} target="_blank" rel="noreferrer">OpenAI 官方安装说明</a>}
         <button className="ghost-button" type="button" onClick={onDetect}>重新检测</button>
         {ready && <button className="ghost-button" type="button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? '读取中…' : '读取账号 / 模型 / Threads'}</button>}
       </div>
-      {!data.codex.installed && <code className="runtime-install-command">{data.codex.installCommand}</code>}
+      {!ready && <div className="runtime-manual-install"><div><strong>{data.codex.installed ? '请在服务器终端手动更新 Codex CLI' : '请在服务器终端手动安装 Codex CLI'}</strong><small>EasyAgent 只展示官方命令，不会下载或执行安装脚本。请先核对官方说明，再使用运行 EasyAgent 的同一用户执行；完成后点击“重新检测”，系统会校验 CLI 版本和 app-server 子命令。</small></div><div className="runtime-install-command"><code>{data.codex.installCommand}</code><button className="ghost-button" type="button" onClick={() => void copyInstallCommand()}>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制命令'}</button></div></div>}
       {inspection && <div className="codex-inspection"><div><span>账号信息</span><pre>{JSON.stringify(inspection.account, null, 2)}</pre></div><div><span>模型目录</span><pre>{JSON.stringify(inspection.models, null, 2)}</pre></div><div className="codex-thread-inspection"><span>最近 Threads</span>{threads.length === 0 ? <small>没有可读取的 Codex thread</small> : <div>{threads.map((item) => <button type="button" key={item.id} disabled={!!readingThread} onClick={() => void readThread(item.id)}><strong>{item.name || item.preview || item.id}</strong><small>{item.status?.type || 'stored'} · {item.id}</small>{readingThread === item.id && <em>读取中…</em>}</button>)}</div>}</div>{thread !== null && <div className="codex-thread-detail"><span>Thread 详情（只读）</span><pre>{JSON.stringify(thread, null, 2)}</pre></div>}</div>}
     </div>
   )

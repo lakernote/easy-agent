@@ -27,9 +27,9 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
   const {
     model, setModel, testingModel, savingModel, modelNotice, deletingProfile,
     modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig,
-    savingCodexConfig, installingCodex, currentProfileSaved, saveModel, enableRuntime, testModel,
+    savingCodexConfig, currentProfileSaved, saveModel, enableRuntime, testModel,
     selectRuntime, openProfileEditor, closeModelEditor, removeProfile, activateProfile,
-    activateOllamaModel, detectCodex, installCodex, saveCodexConfig,
+    activateOllamaModel, detectCodex, saveCodexConfig,
   } = useModelConfiguration({ data, onRefresh, onError })
 
   const presetConfig = (preset: Bootstrap['mcpPresets'][number]): MCPConfig => ({ id: preset.id, name: preset.name, description: preset.description, enabled: false, transport: preset.transport as MCPConfig['transport'], command: preset.command, args: preset.args || [], endpoint: preset.endpoint, authType: preset.authType, headers: preset.headers || {}, environment: {} })
@@ -124,7 +124,7 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
       <div className="runtime-main">
         {settingsSection === 'runtime' && <>
         <div className="runtime-main-head"><div><p className="eyebrow">{runtimeChanged ? '待切换运行时' : '当前运行时'}</p><h2>{codex ? 'Codex Runtime' : 'EasyAgent Runtime'}</h2><p>{runtimeChanged ? `启用后，下一次新会话将使用 ${codex ? 'Codex app-server' : 'EasyAgent Go'}；已有会话不变。` : codex ? 'Codex app-server 负责 Agent 循环、thread、工具、Skill、沙箱、审批和实时事件。' : 'EasyAgent Go 负责 Agent 循环、工具调用、MCP、Skill 和上下文压缩。'}</p></div><div className="runtime-main-head-actions"><span className={`runtime-state ${runtimeChanged ? 'pending' : 'active'}`}>{activeRuntimeLabel}</span>{runtimeChanged && <button className="primary-button runtime-enable-button" disabled={savingModel} onClick={() => void enableRuntime()}>{savingModel ? '启用中…' : `启用 ${codex ? 'Codex' : 'EasyAgent'} Runtime`}</button>}</div></div>
-        {codex && <CodexStatus data={data} installing={installingCodex} onInstall={installCodex} onDetect={detectCodex} />}
+        {codex && <CodexStatus data={data} onDetect={detectCodex} />}
         <div className="runtime-summary"><div><p className="eyebrow">新会话默认</p><strong>{data.model.profileName || '未命名模型配置'}</strong><span>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'} · {data.model.model || (data.model.runtime === 'codex' ? '使用 ~/.codex/config.toml' : '未填写模型')}</span></div><div><p className="eyebrow">配置数量</p><strong>{data.modelProfiles.length} 套</strong><span>可在模型配置中分别保存并切换</span></div><button className="ghost-button" type="button" onClick={() => setSettingsSection('models')}>管理模型配置 <span aria-hidden="true">→</span></button></div>
         </>}
         {settingsSection === 'tasks' && <RuntimeOperationsSettings data={data} onRefresh={onRefresh} onError={onError} />}

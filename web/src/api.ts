@@ -67,7 +67,6 @@ export const api = {
   codexThread: (id: string) => request<unknown>(`/api/v1/codex/threads/${encodeURIComponent(id)}?includeTurns=true`),
   codexConfig: () => request<CodexProviderConfig>('/api/v1/codex/config'),
   saveCodexConfig: (config: CodexProviderConfigInput) => request<CodexProviderConfig>('/api/v1/codex/config', { method: 'PUT', body: JSON.stringify(config) }),
-  installCodex: () => request<{ ok: boolean; status: Bootstrap['codex']; message: string }>('/api/v1/codex/install', { method: 'POST', body: JSON.stringify({}) }),
   saveSkill: (skill: Skill) => request<Skill>(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', body: JSON.stringify(skill) }),
   resetSkill: (name: string) => request<void>(`/api/v1/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   saveMCP: (mcp: MCPConfig) => request<MCPConfig>(`/api/v1/mcp/${encodeURIComponent(mcp.id)}`, { method: 'PUT', body: JSON.stringify(mcp) }),

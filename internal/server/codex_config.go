@@ -1,10 +1,7 @@
 package server
 
 import (
-	"context"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/lakernote/easy-agent/internal/codexruntime"
 )
@@ -33,29 +30,4 @@ func (server *Server) saveCodexConfig(response http.ResponseWriter, request *htt
 		return
 	}
 	writeJSON(response, http.StatusOK, config)
-}
-
-func (server *Server) installCodex(response http.ResponseWriter, request *http.Request) {
-	status := server.detectCodex(request.Context())
-	if status.Installed && status.AppServerAvailable {
-		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "status": status, "message": "Codex CLI 与 app-server 已经就绪"})
-		return
-	}
-	installContext, cancel := context.WithTimeout(request.Context(), 3*time.Minute)
-	defer cancel()
-	output, err := codexruntime.Install(installContext, server.env)
-	if err != nil {
-		message := strings.TrimSpace(output)
-		if message != "" {
-			message = ": " + message
-		}
-		writeError(response, http.StatusBadGateway, "Codex CLI 安装失败"+message)
-		return
-	}
-	status = server.detectCodex(installContext)
-	if !status.Installed || !status.AppServerAvailable {
-		writeError(response, http.StatusBadGateway, "安装脚本已执行，但重新检测未找到可用的 Codex app-server")
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"ok": true, "status": status, "message": "Codex CLI 与 app-server 安装完成"})
 }

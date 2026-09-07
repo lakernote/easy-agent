@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Session, TraceEvent } from './types'
 import { formatDuration, formatTokens, historyModeLabel } from './format'
+import { writeClipboardText } from './clipboard'
 import { Payload } from './chat/Payload'
 import { Metric } from './chat/Metrics'
 
@@ -116,26 +117,6 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     window.setTimeout(() => setState('idle'), 1600)
   }
   return <button type="button" onClick={() => void copy()} aria-label={label}>{state === 'copied' ? '已复制' : state === 'failed' ? '复制失败' : '复制'}</button>
-}
-
-async function writeClipboardText(value: string) {
-  if (window.isSecureContext && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.readOnly = true
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    if (!document.execCommand('copy')) throw new Error('copy command was rejected')
-  } finally {
-    textarea.remove()
-  }
 }
 
 function traceEventTitle(event: TraceEvent) {

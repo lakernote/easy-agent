@@ -168,6 +168,23 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	}
 }
 
+func TestCodexInstallEndpointIsNotExposed(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application := newTestApplication(t, database, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}})
+	defer application.Shutdown(context.Background())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/codex/install", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed && response.Code != http.StatusNotFound {
+		t.Fatalf("Codex 安装接口不应暴露，实际 HTTP=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCreateSessionRejectsInvalidModelBeforePersisting(t *testing.T) {
 	database, err := store.Open(filepath.Join(t.TempDir(), "easyagent.db"))
 	if err != nil {
