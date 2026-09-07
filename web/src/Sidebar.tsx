@@ -3,7 +3,7 @@ import { api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, type Page } from './sessionState'
 import { formatTime, statusLabel } from './format'
-import { ChevronIcon, FolderIcon, Icon, Logo, MoreIcon } from './ui'
+import { ChevronIcon, Icon, Logo, MoreIcon, ProjectIcon } from './ui'
 import { ConfirmDialog, ProjectDialog, RenameSessionDialog } from './dialogs'
 
 type Project = Bootstrap['projects'][number]
@@ -162,7 +162,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
         const collapsed = collapsedProjects.has(groupID)
         const label = group.project?.name || '历史会话'
         const contentID = `project-sessions-${groupID}`
-        return <section className={`session-project ${collapsed ? 'collapsed' : ''}`} key={groupID}><div className="session-project-head" title={group.project?.directories.join('\n') || '未归入项目'}><button className="session-project-toggle" type="button" aria-expanded={!collapsed} aria-controls={contentID} aria-label={`${collapsed ? '展开' : '收起'}项目 ${label}`} onClick={() => toggleProject(groupID)}><span className="session-project-chevron"><ChevronIcon /></span><FolderIcon /><strong>{label}</strong><small>{group.sessions.length}</small></button>{group.project && <button className="session-project-edit" type="button" aria-label={`编辑项目 ${group.project.name}`} title="编辑项目" onClick={() => openProject(group.project)}><MoreIcon /></button>}</div>{!collapsed && <div id={contentID} className="session-project-sessions" role="group" aria-label={`${label} 中的会话`}>{group.sessions.map(renderSession)}</div>}</section>
+        return <section className={`session-project ${collapsed ? 'collapsed' : ''}`} key={groupID}><div className="session-project-head" title={group.project?.directories.join('\n') || '未归入项目'}><button className="session-project-toggle" type="button" aria-expanded={!collapsed} aria-controls={contentID} aria-label={`${collapsed ? '展开' : '收起'}项目 ${label}`} onClick={() => toggleProject(groupID)}><span className="session-project-chevron"><ChevronIcon /></span><ProjectIcon /><strong>{label}</strong><small>{group.sessions.length}</small></button>{group.project && <button className="session-project-edit" type="button" aria-label={`编辑项目 ${group.project.name}`} title="编辑项目" onClick={() => openProject(group.project)}><MoreIcon /></button>}</div>{!collapsed && <div id={contentID} className="session-project-sessions" role="group" aria-label={`${label} 中的会话`}>{group.sessions.map(renderSession)}</div>}</section>
       })}
     </div>
     <button className={`sidebar-settings ${page !== 'chat' && page !== 'automations' ? 'active' : ''}`} type="button" aria-label="设置" aria-current={page !== 'chat' && page !== 'automations' ? 'page' : undefined} onClick={() => onPage('settings')}><Icon name="settings" /><span>设置</span></button>

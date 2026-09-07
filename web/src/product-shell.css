@@ -246,6 +246,8 @@ body { overflow: hidden; background: #f7f7f5; }
 .session-project-toggle:hover { background: #eef1ee; }
 .session-project-toggle:focus-visible, .session-project-edit:focus-visible { outline: 2px solid #6f9d80; outline-offset: -2px; }
 .session-project-head svg { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-project-head .project-icon { width: 18px; height: 18px; padding: 3px; box-sizing: content-box; border-radius: 7px; color: #3d8159; background: #e8f3ea; stroke-width: 1.45; }
+.session-project-toggle:hover .project-icon { color: #2e704b; background: #dceee0; }
 .session-project-head strong { overflow: hidden; color: #59645d; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .session-project-head small { display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 9px; color: #879088; background: #eaedea; font-family: var(--mono); font-size: 8px; font-weight: 500; }
 .session-project-chevron { display: grid; width: 12px; height: 12px; flex: 0 0 12px; place-items: center; transition: transform 180ms ease; }
