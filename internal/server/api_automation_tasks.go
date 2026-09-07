@@ -19,11 +19,8 @@ type automationTaskRequest struct {
 	Prompt          string `json:"prompt"`
 	ProjectID       string `json:"projectId"`
 	ProfileID       string `json:"profileId,omitempty"`
-	TriggerType     string `json:"triggerType"`
-	IntervalMinutes int    `json:"intervalMinutes,omitempty"`
-	Repeat          string `json:"repeat,omitempty"`
-	ScheduleTime    string `json:"scheduleTime,omitempty"`
-	ScheduleWeekday int    `json:"scheduleWeekday,omitempty"`
+	ScheduleEnabled bool   `json:"scheduleEnabled"`
+	Cron            string `json:"cron,omitempty"`
 	Enabled         bool   `json:"enabled"`
 }
 
@@ -31,8 +28,6 @@ type automationTaskRunResponse struct {
 	Task      store.AutomationTask `json:"task"`
 	SessionID string               `json:"sessionId"`
 }
-
-var supportedAutomationIntervals = map[int]struct{}{60: {}, 360: {}, 1440: {}, 10080: {}}
 
 func (server *Server) listAutomationTasks(response http.ResponseWriter, request *http.Request) {
 	values, err := server.store.ListAutomationTasks()
@@ -151,27 +146,15 @@ func (server *Server) normalizeAutomationTask(input automationTaskRequest, now t
 	if prompt == "" || utf8.RuneCountInString(prompt) > 50000 || containsControl(prompt) {
 		return store.AutomationTask{}, errors.New("Prompt 必须为 1 到 50000 个有效字符")
 	}
-	triggerType := strings.TrimSpace(input.TriggerType)
-	if triggerType == "" {
-		triggerType = "manual"
-	}
-	if triggerType != "manual" && triggerType != "interval" {
-		return store.AutomationTask{}, errors.New("暂不支持这种触发方式")
-	}
-	if triggerType == "interval" {
-		if input.Repeat == "" || input.Repeat == "interval" {
-			input.Repeat = "interval"
-			if _, ok := supportedAutomationIntervals[input.IntervalMinutes]; !ok {
-				return store.AutomationTask{}, errors.New("请选择有效的定时间隔")
-			}
+	cronExpression := strings.TrimSpace(input.Cron)
+	if input.ScheduleEnabled {
+		if _, err := parseAutomationCron(cronExpression); err != nil {
+			return store.AutomationTask{}, err
 		}
-	} else {
-		input.IntervalMinutes = 0
-		input.Repeat = "interval"
 	}
-	repeat, scheduleTime, scheduleWeekday, err := normalizeAutomationSchedule(strings.TrimSpace(input.Repeat), strings.TrimSpace(input.ScheduleTime), input.ScheduleWeekday)
-	if err != nil {
-		return store.AutomationTask{}, err
+	triggerType := "manual"
+	if input.ScheduleEnabled {
+		triggerType = "interval"
 	}
 	projectID := strings.TrimSpace(input.ProjectID)
 	project, err := server.store.GetProject(projectID)
@@ -206,25 +189,21 @@ func (server *Server) normalizeAutomationTask(input automationTaskRequest, now t
 		}
 	}
 	nextRunAt := (*time.Time)(nil)
-	if input.Enabled && triggerType == "interval" {
-		next, err := nextAutomationRun(now, repeat, input.IntervalMinutes, scheduleWeekday, scheduleTime)
+	if input.Enabled && input.ScheduleEnabled {
+		next, err := nextAutomationRun(now, cronExpression)
 		if err != nil {
 			return store.AutomationTask{}, err
 		}
 		nextRunAt = &next
 	}
-	return store.AutomationTask{Name: name, Prompt: prompt, ProjectID: projectID, Workspace: workspace, ProfileID: strings.TrimSpace(input.ProfileID), TriggerType: triggerType, IntervalMinutes: input.IntervalMinutes, Repeat: repeat, ScheduleTime: scheduleTime, ScheduleWeekday: scheduleWeekday, Enabled: input.Enabled, NextRunAt: nextRunAt}, nil
+	return store.AutomationTask{Name: name, Prompt: prompt, ProjectID: projectID, Workspace: workspace, ProfileID: strings.TrimSpace(input.ProfileID), TriggerType: triggerType, ScheduleEnabled: input.ScheduleEnabled, Cron: cronExpression, Enabled: input.Enabled, NextRunAt: nextRunAt}, nil
 }
 
 func (server *Server) triggerAutomationTask(ctx context.Context, task store.AutomationTask) (string, error) {
 	now := time.Now()
 	var nextRunAt *time.Time
-	if task.Enabled && task.TriggerType == "interval" {
-		repeat, scheduleTime, scheduleWeekday, err := normalizeAutomationSchedule(task.Repeat, task.ScheduleTime, task.ScheduleWeekday)
-		if err != nil {
-			return "", err
-		}
-		next, err := nextAutomationRun(now, repeat, task.IntervalMinutes, scheduleWeekday, scheduleTime)
+	if task.Enabled && task.ScheduleEnabled {
+		next, err := nextAutomationRun(now, task.Cron)
 		if err != nil {
 			return "", err
 		}

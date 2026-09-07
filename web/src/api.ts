@@ -95,10 +95,7 @@ export type AutomationTaskInput = {
   prompt: string
   projectId: string
   profileId: string
-  triggerType: 'manual' | 'interval'
-  intervalMinutes: number
-  repeat: 'interval' | 'daily' | 'weekdays' | 'weekly'
-  scheduleTime: string
-  scheduleWeekday: number
+  scheduleEnabled: boolean
+  cron: string
   enabled: boolean
 }

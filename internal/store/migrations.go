@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS ea_automation_tasks (
   repeat TEXT NOT NULL DEFAULT 'interval',
   schedule_time TEXT NOT NULL DEFAULT '',
   schedule_weekday INTEGER NOT NULL DEFAULT 1,
+  schedule_enabled INTEGER NOT NULL DEFAULT 0,
+  cron TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   next_run_at TEXT NOT NULL DEFAULT '',
   last_run_at TEXT NOT NULL DEFAULT '',
@@ -246,6 +248,8 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 		{name: "repeat", definition: "TEXT NOT NULL DEFAULT 'interval'"},
 		{name: "schedule_time", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "schedule_weekday", definition: "INTEGER NOT NULL DEFAULT 1"},
+		{name: "schedule_enabled", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "cron", definition: "TEXT NOT NULL DEFAULT ''"},
 	} {
 		var exists int
 		if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_automation_tasks') WHERE name=?`, column.name).Scan(&exists); err != nil {

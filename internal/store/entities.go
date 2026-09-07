@@ -44,10 +44,12 @@ type AutomationTask struct {
 	Workspace       string     `json:"workspace"`
 	ProfileID       string     `json:"profileId,omitempty"`
 	TriggerType     string     `json:"triggerType"`
-	IntervalMinutes int        `json:"intervalMinutes,omitempty"`
-	Repeat          string     `json:"repeat,omitempty"`
-	ScheduleTime    string     `json:"scheduleTime,omitempty"`
-	ScheduleWeekday int        `json:"scheduleWeekday,omitempty"`
+	ScheduleEnabled bool       `json:"scheduleEnabled"`
+	Cron            string     `json:"cron,omitempty"`
+	IntervalMinutes int        `json:"-"`
+	Repeat          string     `json:"-"`
+	ScheduleTime    string     `json:"-"`
+	ScheduleWeekday int        `json:"-"`
 	Enabled         bool       `json:"enabled"`
 	NextRunAt       *time.Time `json:"nextRunAt,omitempty"`
 	LastRunAt       *time.Time `json:"lastRunAt,omitempty"`

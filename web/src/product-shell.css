@@ -512,3 +512,21 @@ body { overflow: hidden; background: #f7f7f5; }
 /* Keep trigger selection consistent with the rest of the product; no inset accent strip. */
 .automation-trigger-picker { grid-template-columns: repeat(2, 1fr); }
 .automation-trigger-picker button.selected { box-shadow: none; }
+
+.automation-schedule { gap: 0; }
+.automation-schedule-toggle { display: flex; min-height: 58px; align-items: center; gap: 10px; padding: 0 13px; border-top: 1px solid #e8ece8; cursor: pointer; }
+.automation-schedule-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #3d835b; }
+.automation-schedule-toggle span { display: grid; gap: 3px; }
+.automation-schedule-toggle strong { color: #405047; font-size: 10px; }
+.automation-schedule-toggle small { color: #929d95; font-size: 9px; }
+.automation-cron-editor { display: grid; gap: 12px; padding: 0 13px 13px; }
+.automation-cron-editor > label { display: grid; gap: 7px; }
+.automation-cron-editor > label > span { color: #526157; font-size: 10px; font-weight: 650; }
+.automation-cron-editor input { width: 100%; height: 42px; box-sizing: border-box; padding: 0 11px; border: 1px solid #70a082; border-radius: 8px; outline: 0; color: #34423a; background: #fff; font-family: var(--mono); font-size: 12px; box-shadow: 0 0 0 3px #e4f0e7; }
+.automation-cron-editor label small { color: #929c94; font-size: 9px; line-height: 1.45; }
+.automation-cron-editor code { color: #52705d; font-family: var(--mono); }
+.automation-cron-presets { display: flex; flex-wrap: wrap; gap: 7px; }
+.automation-cron-presets button { min-height: 34px; padding: 0 10px; border: 1px solid #d9e3dc; border-radius: 7px; color: #587062; background: #f8fbf8; cursor: pointer; font-size: 9px; }
+.automation-cron-presets button:hover, .automation-cron-presets button.selected { border-color: #78a889; color: #2f6848; background: #edf7ef; }
+.automation-cron-preview { padding: 9px 10px; border-radius: 7px; color: #718077; background: #f5f8f5; font-size: 9px; }
+.automation-cron-preview strong { color: #3f614c; font-weight: 650; }
