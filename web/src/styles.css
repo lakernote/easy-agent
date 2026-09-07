@@ -333,7 +333,7 @@ html, body, #root { height: 100%; }
 .session-row.active,
 .session-row.active:hover { background: #edf4ef; box-shadow: none; }
 .session-row.active .status { box-shadow: 0 0 0 3px #d9ebe0; }
-.session-row.active .session-type-icon { box-shadow: 0 0 0 3px #d9ebe0; }
+.session-row.active .session-type-icon { box-shadow: none; }
 .session-row.active .session-copy strong { color: #245f41; }
 
 /* 内容滚动条轻量化；首页场景条仍可触摸横滑，但不把滚动条当成页面装饰。 */

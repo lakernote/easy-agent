@@ -257,12 +257,19 @@ body { overflow: hidden; background: #f7f7f5; }
 .session-project-edit svg { width: 17px; }
 .session-project-sessions { margin: 0 0 4px 17px; padding-left: 9px; border-left: 1px solid #dfe4e0; }
 .session-project-sessions .session-row { min-height: 52px; margin: 1px 0; border-radius: 8px; }
-.session-project-sessions .session-open { min-height: 52px; grid-template-columns: 6px minmax(0, 1fr); gap: 8px; padding: 8px 4px 8px 8px; }
+.session-project-sessions .session-open { min-height: 56px; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 8px 4px 8px 8px; }
 .session-project-sessions .status { width: 5px; height: 5px; margin-top: 5px; }
+.session-project-sessions .status { justify-self: center; }
+.session-project-sessions .session-type-icon { width: 22px; height: 22px; margin-top: 0; border: 1px solid #d5e8da; border-radius: 7px; color: #2f8157; background: #edf7ef; }
+.session-project-sessions .session-type-icon svg { width: 14px; height: 14px; }
+.session-project-sessions .session-type-icon.running { border-color: #cfe2ef; color: #4b82a7; background: #edf5fa; }
+.session-project-sessions .session-type-icon.queued { border-color: #f0ddb9; color: #b9791e; background: #fff7e9; }
+.session-project-sessions .session-type-icon.failed { border-color: #efd1cb; color: #b45045; background: #fff3f0; }
 .session-project-sessions .status.idle { background: #9ca69f; }
 .session-project-sessions .session-row.active .status.idle { background: #2b9b68; }
 .session-project-sessions .session-copy strong { color: #303832; font-size: 10.5px; font-weight: 580; }
 .session-project-sessions .session-copy small { margin-top: 4px; color: #8a958e; }
+.session-project-sessions .session-copy { padding-top: 1px; }
 .session-project-sessions .session-delete { width: 34px; height: 40px; flex-basis: 34px; margin-right: 1px; opacity: 0; transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease; }
 .session-project-sessions .session-row:hover .session-delete, .session-project-sessions .session-row:focus-within .session-delete { opacity: 1; }
 .session-project.collapsed { margin-bottom: 2px; }
