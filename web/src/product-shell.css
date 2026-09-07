@@ -602,3 +602,25 @@ body { background: #f7f9fd; }
 .settings-section-nav button.active span { color: #2563eb; }
 .settings-section-nav button:focus-visible { box-shadow: inset 0 -2px #93b4ed; }
 .settings-section-nav button.active:focus-visible { box-shadow: inset 0 -2px #2563eb; }
+
+/* Login is the first brand impression, so it follows the same blue system as the app. */
+.login-page { background: radial-gradient(circle at 50% 0%, #eaf2ff 0, #f8faff 46%, #f1f5fb 100%); }
+.login-panel { border-color: #d6e1f0; box-shadow: 0 22px 70px #1d4ed81a; }
+.login-brand strong { color: #1f2f4a; }
+.login-brand small { color: #8290a4; }
+.login-kicker { color: #2563eb; }
+.login-copy h1 { color: #172033; }
+.login-copy p:last-child { color: #667085; }
+.login-form label, .password-form label { color: #52627a; }
+.login-form input, .password-form input { border-color: #d4dfed; color: #1f2937; background: #fbfdff; }
+.login-form input:focus, .password-form input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe; }
+.login-submit { background: #2563eb; }
+.login-submit:hover:not(:disabled) { background: #1d4ed8; }
+.login-hint { border-top-color: #e5ecf5; color: #8793a6; }
+.login-hint code { color: #315da8; }
+.login-logo { filter: drop-shadow(0 8px 14px #1d4ed824); }
+.session-project-head .project-icon { color: #2563eb; background: #eaf2ff; }
+.session-project-toggle:hover .project-icon { color: #1d4ed8; background: #dbeafe; }
+.session-project-sessions .session-type-icon.automation { border-color: #c9dcfa; color: #2563eb; background: #edf4ff; }
+.session-project-sessions .session-type-icon.automation.running { border-color: #b9d5f0; color: #3576a8; background: #edf5fb; }
+.automation-empty-mark { color: #2563eb; background: #eaf2ff; }
