@@ -178,7 +178,7 @@ EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语�
 
 `web_research` 是直接可见的高层 Research Tool，在一次受控执行中返回实际读取的 sources、发布时间、抓取时间、可点击 citation 和本次调用内稳定的 source ID；`S1`、`S2` 只是来源编号，不是质量排名。模型必须根据 sources 回答并使用 `[S1]` 等 ID 引用，缺失字段不能补猜。低层搜索和网页读取不再作为模型工具暴露。Tool 内部可以根据结构化数据协议选择天气、GitHub、行情适配器，这属于单个工具的确定性实现，不是 Runner 扫描用户文本后替模型调用不同 Tool。
 
-联网研究内部采用 `structured adapters → search provider pool → safe fetch → relevance extraction → evidence packet`。默认使用 DuckDuckGo/Bing 零配置发现，可通过 `EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY` 接入生产搜索服务；`EASYAGENT_READER_URL` 可为 PDF 和动态页面提供 reader 降级。候选按跨 provider 共识、问题相关性和优先域名排序，抓取失败时继续读取后续候选；证据状态按可注册域名区分“跨站多源”和“同站多页面”。抓取器在连接前解析并校验全部目标 IP，拒绝私网、环回、链路本地和 DNS rebinding；最终工具结果按研究深度限制证据字符预算，避免压垮本地模型上下文。
+联网研究内部采用 `structured adapters → API search providers → HTML search fallback → domain sitemap fallback → safe fetch/reader → relevance extraction → evidence packet`。配置 `TAVILY_API_KEY`、`EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY` 后优先使用稳定 API provider；只有候选不足时才降级到 DuckDuckGo/Bing HTML。`EASYAGENT_READER_URL` 可为 PDF 和动态页面提供 reader 降级。`domains` 是抓取前后都校验的硬白名单，`source_scope=official` 会在未指定域名时保守筛选实体官网和官方代码仓库；搜索引擎全部失效且已知域名时，标准 `sitemap.xml` 仍能恢复站内文档发现。候选按跨 provider 共识、问题相关性、来源形态和网站域名多样性排序，抓取失败时继续读取后续候选；短英文实体使用精确拼写与消歧查询，英文相关段落匹配包含轻量词形归一化，版本化文档和正文近重复页面会合并。证据状态按可注册域名区分“跨网站域名”和“同站多页面”，但不同域名不自动代表事实已独立确认。抓取器在连接前解析并校验全部目标 IP，拒绝私网、环回、链路本地和 DNS rebinding；最终工具结果按研究深度限制证据字符预算，避免压垮本地模型上下文。
 
 Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `search_mcp_tools` 后才连接服务并按任务语义注册最多 5 个远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
 

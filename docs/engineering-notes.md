@@ -90,7 +90,7 @@ entry {
 
 `web_research` 已在一次工具调用内完成来源读取，因此 Runner 不需要依赖模型自行完成第二个网页工具调用；工具返回的 `sources` 和 source ID 直接作为回答依据。
 
-默认并发使用 DuckDuckGo 与 Bing HTML 作为零配置后端，并识别验证码/挑战页；生产环境可配置 `EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY`，provider 失败会保留诊断并由其他 provider 降级。可选 `EASYAGENT_READER_URL` 用于 PDF 或静态抓取无法提取正文的页面，`EASYAGENT_READER_API_KEY` 只通过请求头发送，不进入 Tool 结果。
+默认使用 DuckDuckGo 与 Bing HTML 作为零配置后端并识别验证码/挑战页；生产环境可配置 `TAVILY_API_KEY`、`EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY`。配置型 API provider 优先，候选不足才调用 HTML 降级，provider 失败会保留诊断。`domains` 是抓取前后校验的硬白名单；官方资料请求通过显式 `source_scope=official` 保守筛选，不由 Runner 猜测用户意图。HTML provider 都失效且已有域名约束时，Runtime 尝试标准站点地图和官网入口；这条静态降级仍遵守 SSRF 与域名边界。可选 `EASYAGENT_READER_URL` 用于 PDF 或静态抓取无法提取正文的页面，`EASYAGENT_READER_API_KEY` 只通过请求头发送，不进入 Tool 结果。
 
 ### 2.5 把日期、星期和精确时间混为一谈
 

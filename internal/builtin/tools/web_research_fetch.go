@@ -90,6 +90,10 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 	contentType := response.Header.Get("Content-Type")
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 	source.ContentType = mediaType
+	if (mediaType == "" || mediaType == "text/html" || mediaType == "application/xhtml+xml") && isSearchChallenge(body) {
+		source.Error = "来源返回了人机验证页，已尝试后续候选"
+		return source
+	}
 
 	switch {
 	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
@@ -483,7 +487,7 @@ func researchTerms(query string) []string {
 		}
 		value := string(token)
 		if len(token) >= 2 {
-			terms = append(terms, value)
+			terms = append(terms, englishResearchTermVariants(value)...)
 		}
 		if hasHanRune(token) {
 			for index := 0; index+1 < len(token) && len(terms) < 64; index++ {
@@ -501,6 +505,29 @@ func researchTerms(query string) []string {
 	}
 	flush()
 	return uniqueStrings(terms)
+}
+
+func englishResearchTermVariants(value string) []string {
+	result := []string{value}
+	if hasHanRune([]rune(value)) {
+		return result
+	}
+	// Lightweight variants are enough for passage ranking and avoid pulling a
+	// language stemmer into the runtime. Keep stems reasonably long so short
+	// query words do not create broad accidental matches.
+	for _, suffix := range []string{"ations", "ation", "ments", "ment", "ing", "ies", "es", "s"} {
+		if strings.HasSuffix(value, suffix) && len(value)-len(suffix) >= 5 {
+			stem := strings.TrimSuffix(value, suffix)
+			if suffix == "ations" || suffix == "ation" {
+				stem += "a"
+			} else if suffix == "ies" {
+				stem += "y"
+			}
+			result = append(result, stem)
+			break
+		}
+	}
+	return result
 }
 
 func hasHanRune(values []rune) bool {

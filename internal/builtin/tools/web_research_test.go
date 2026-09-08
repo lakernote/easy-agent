@@ -99,7 +99,7 @@ func TestDuckDuckGoFreshnessUsesProviderCodes(t *testing.T) {
 }
 
 func TestResearchQueriesAndRankingActuallyPreferDomains(t *testing.T) {
-	queries := planResearchQueries("Kafka 原理", "normal", []string{"kafka.apache.org"})
+	queries := planResearchQueries("Kafka 原理", "normal", "any", []string{"kafka.apache.org"})
 	if len(queries) < 2 || queries[0] != "site:kafka.apache.org Kafka 原理" {
 		t.Fatalf("优先域名查询顺序错误: %#v", queries)
 	}
@@ -107,8 +107,156 @@ func TestResearchQueriesAndRankingActuallyPreferDomains(t *testing.T) {
 		{Title: "Kafka overview", URL: "https://example.com/kafka", Score: 100},
 		{Title: "Kafka design", URL: "https://kafka.apache.org/documentation/", Score: 10},
 	}, "Kafka 原理", []string{"kafka.apache.org"})
-	if len(ranked) != 2 || researchDomain(ranked[0].URL) != "kafka.apache.org" {
-		t.Fatalf("优先域名没有进入排名: %+v", ranked)
+	if len(ranked) != 1 || researchDomain(ranked[0].URL) != "kafka.apache.org" {
+		t.Fatalf("域名硬白名单没有生效: %+v", ranked)
+	}
+}
+
+func TestResearchCandidatesPreferDomainDiversityBeforeRepeats(t *testing.T) {
+	values := diversifyResearchCandidates([]researchSearchResult{
+		{URL: "https://docs.example.com/one", Rank: 1},
+		{URL: "https://www.example.com/two", Rank: 2},
+		{URL: "https://second.test/three", Rank: 3},
+		{URL: "https://third.test/four", Rank: 4},
+	})
+	if len(values) != 4 || researchDomain(values[0].URL) != "docs.example.com" ||
+		researchDomain(values[1].URL) != "second.test" || researchDomain(values[2].URL) != "third.test" ||
+		researchDomain(values[3].URL) != "www.example.com" {
+		t.Fatalf("候选没有优先覆盖不同网站域名: %+v", values)
+	}
+}
+
+func TestDomainFallbackCandidatesStayInsideHardAllowlist(t *testing.T) {
+	values := domainFallbackCandidates([]string{"kafka.apache.org"})
+	if len(values) != 3 || values[1].URL != "https://kafka.apache.org/documentation/" {
+		t.Fatalf("官网文档降级候选错误: %+v", values)
+	}
+	for _, value := range values {
+		if !researchDomainAllowed(researchDomain(value.URL), []string{"kafka.apache.org"}) ||
+			!containsString(value.Providers, "domain_fallback") {
+			t.Fatalf("官网降级候选越出白名单或缺少 provider 标记: %+v", value)
+		}
+	}
+}
+
+func TestParseResearchSitemapFiltersDomainsAndPrefersCurrentDocs(t *testing.T) {
+	values, err := parseResearchSitemap([]byte(`<?xml version="1.0"?><urlset>
+		<url><loc>https://kafka.apache.org/11/implementation/distribution/</loc></url>
+		<url><loc>https://kafka.apache.org/43/implementation/distribution/</loc></url>
+		<url><loc>https://outside.example/kafka</loc></url>
+	</urlset>`), []string{"kafka.apache.org"})
+	if err != nil || len(values) != 2 {
+		t.Fatalf("sitemap 解析或白名单过滤错误: values=%+v err=%v", values, err)
+	}
+	ranked := rankResearchCandidates(values, "Kafka replication distribution", []string{"kafka.apache.org"})
+	if len(ranked) != 2 || !strings.Contains(ranked[0].URL, "/43/") {
+		t.Fatalf("sitemap 没有优先当前文档版本: %+v", ranked)
+	}
+}
+
+func TestResearchQueriesPreserveExactEntitySpelling(t *testing.T) {
+	queries := planResearchQueries("Laker 是谁", "normal", "any", nil)
+	if len(queries) < 4 || queries[0] != `"Laker" 是谁` || queries[1] != `"Laker" meaning` ||
+		queries[2] != `"Laker" biography` || queries[3] != "Laker 是谁" {
+		t.Fatalf("短实体没有优先生成精确匹配查询: %#v", queries)
+	}
+	domainQueries := planResearchQueries("OpenAI Codex updates", "normal", "official", []string{"openai.com"})
+	if len(domainQueries) < 3 || domainQueries[0] != "site:openai.com OpenAI Codex updates" ||
+		domainQueries[1] != `site:openai.com "OpenAI" "Codex" updates` {
+		t.Fatalf("站点限定查询没有保留精确实体拼写: %#v", domainQueries)
+	}
+}
+
+func TestResearchSourcesDeduplicateNearIdenticalVersionedPages(t *testing.T) {
+	common := "Apache Kafka documentation explains partition replication leader follower consumer group offsets broker controller producer records topic storage protocol configuration operations security monitoring"
+	sources, duplicates := deduplicateResearchSourcesWithStats([]researchSource{
+		{Kind: "web_page", URL: "https://kafka.apache.org/43/operations/basic-kafka-operations.html", Content: common + " version 4.3"},
+		{Kind: "web_page", URL: "https://kafka.apache.org/42/operations/basic-kafka-operations.html", Content: common + " version 4.2"},
+		{Kind: "web_page", URL: "https://kafka.apache.org/documentation/", Content: common + " transactions exactly once streams connect quotas design internals"},
+	})
+	if len(sources) != 2 || duplicates != 1 {
+		t.Fatalf("版本化近重复正文去重错误: sources=%+v duplicates=%d", sources, duplicates)
+	}
+}
+
+func TestResearchSourcesDeduplicateVersionedDocumentPaths(t *testing.T) {
+	sources, duplicates := deduplicateResearchSourcesWithStats([]researchSource{
+		{Kind: "web_page", URL: "https://kafka.apache.org/11/operations/basic-kafka-operations/", Content: "Very old and substantially different Kafka operations documentation."},
+		{Kind: "web_page", URL: "https://kafka.apache.org/43/operations/basic-kafka-operations/", Content: "Current Kafka operations documentation with enough useful details."},
+		{Kind: "web_page", URL: "https://example.com/2026/news/story", Content: "A dated news article must not be mistaken for versioned documentation."},
+		{Kind: "web_page", URL: "https://example.com/2025/news/story", Content: "Another dated news article must remain independently available."},
+	})
+	if len(sources) != 3 || duplicates != 1 || sources[0].URL != "https://kafka.apache.org/43/operations/basic-kafka-operations/" {
+		t.Fatalf("版本路径去重错误: sources=%+v duplicates=%d", sources, duplicates)
+	}
+}
+
+func TestResearchChallengeDetectionCoversConnectionVerification(t *testing.T) {
+	if !isSearchChallenge([]byte("Verifying your connection for security before proceeding")) {
+		t.Fatal("常见人机验证页未被识别")
+	}
+}
+
+func TestResearchTermsIncludeUsefulEnglishWordForms(t *testing.T) {
+	terms := researchTerms("partition replication consumers")
+	for _, expected := range []string{"partition", "replication", "replica", "consumers", "consumer"} {
+		if !containsString(terms, expected) {
+			t.Fatalf("缺少英文相关词形 %q: %#v", expected, terms)
+		}
+	}
+}
+
+func TestOfficialScopeKeepsLikelyEntityDomainsAndOfficialRepositories(t *testing.T) {
+	values := []researchSearchResult{
+		{Title: "Apache Kafka", URL: "https://kafka.apache.org/documentation/"},
+		{Title: "Kafka source", URL: "https://github.com/apache/kafka/blob/trunk/README.md"},
+		{Title: "Kafka guide", URL: "https://docs.confluent.io/kafka/design/consumer-design.html"},
+	}
+	ranked := rankResearchCandidates(values, "Apache Kafka official documentation", nil)
+	filtered := filterResearchCandidates(ranked, researchArguments{Query: "Apache Kafka official documentation", SourceScope: "official"})
+	if len(filtered) != 2 || researchDomain(filtered[0].URL) != "kafka.apache.org" || researchDomain(filtered[1].URL) != "github.com" {
+		t.Fatalf("官方来源保守筛选错误: %+v", filtered)
+	}
+}
+
+func TestConfiguredSearchProviderAvoidsHTMLFallbackWhenItHasEnoughCandidates(t *testing.T) {
+	primaryCalls, fallbackCalls := 0, 0
+	results := []researchSearchResult{
+		{Title: "one", URL: "https://one.example/doc"},
+		{Title: "two", URL: "https://two.example/doc"},
+		{Title: "three", URL: "https://three.example/doc"},
+		{Title: "four", URL: "https://four.example/doc"},
+	}
+	engine := &researchEngine{providers: []researchSearchProvider{
+		stubSearchProvider{name: "tavily", results: results, calls: &primaryCalls},
+		stubSearchProvider{name: "duckduckgo_html", results: results, calls: &fallbackCalls},
+	}}
+	ranked, _, err := engine.search(context.Background(), researchArguments{Query: "test", Depth: "quick", SourceScope: "any", Freshness: "any", MaxSources: 2})
+	if err != nil || len(ranked) < 4 || primaryCalls == 0 || fallbackCalls != 0 {
+		t.Fatalf("配置型 provider 分层错误: primary=%d fallback=%d results=%d err=%v", primaryCalls, fallbackCalls, len(ranked), err)
+	}
+}
+
+func TestTavilyProviderUsesStrictDomainsAndFreshness(t *testing.T) {
+	client := researchJSONClient(func(request *http.Request) (int, string) {
+		if request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("Tavily 请求方法或认证错误: %s %q", request.Method, request.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["time_range"] != "week" || body["include_domains_mode"] != "filter" || body["search_depth"] != "advanced" {
+			t.Fatalf("Tavily 参数错误: %#v", body)
+		}
+		return http.StatusOK, `{"results":[{"title":"Official update","url":"https://openai.com/news/","content":"release notes","score":0.9}]}`
+	})
+	provider := &tavilySearchProvider{client: client, key: "test-key", endpoint: "https://tavily.test/search"}
+	results, err := provider.Search(context.Background(), researchSearchRequest{
+		Query: "OpenAI Codex updates", Depth: "deep", Freshness: "week", Limit: 5, Domains: []string{"openai.com"},
+	})
+	if err != nil || len(results) != 1 || results[0].Providers[0] != "tavily" || results[0].Score <= 0 {
+		t.Fatalf("Tavily 结果错误: results=%+v err=%v", results, err)
 	}
 }
 
@@ -142,7 +290,7 @@ func TestFetchCandidatesBackfillsFailedTopResults(t *testing.T) {
 	}
 	fetcher := &stubResearchFetcher{sources: sources}
 	engine := &researchEngine{fetcher: fetcher}
-	usable, failed := engine.fetchCandidates(context.Background(), candidates, "问题", 2, 4_000)
+	usable, failed := engine.fetchCandidates(context.Background(), candidates, "问题", 2, 4_000, nil)
 	if len(usable) != 2 || len(failed) != 4 {
 		t.Fatalf("候选补位错误: usable=%d failed=%d calls=%v", len(usable), len(failed), fetcher.calls)
 	}
@@ -296,7 +444,8 @@ func TestWeatherAdapterUsesStructuredProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	if geoQuery != "合肥" || forecastDays != "2" || len(sources) != 1 || sources[0].Kind != "weather_forecast" ||
-		!strings.Contains(sources[0].Content, "2026-09-09") || !strings.Contains(sources[0].Content, "precipitation_probability_percent") {
+		!strings.Contains(sources[0].Content, "2026-09-09") || !strings.Contains(sources[0].Content, "precipitation_probability_percent") ||
+		!strings.Contains(sources[0].Content, "travel_advice") || !strings.Contains(sources[0].Content, "外出携带雨具") {
 		t.Fatalf("天气结构化来源错误: %+v", sources)
 	}
 }
@@ -357,7 +506,7 @@ func TestGitHubAdapterFallsBackToOfficialWebPagesWhenAPIRateLimited(t *testing.T
 		case "/search":
 			return http.StatusOK, `<html><body><a href="/other/unrelated">other</a><a href="/lakernote/easy-postman">lakernote/<em>easy-postman</em></a></body></html>`
 		case "/lakernote/easy-postman":
-			return http.StatusOK, `<html><head><meta name="octolytics-dimension-repository_nwo" content="lakernote/easy-postman"><meta property="og:description" content="API client - lakernote/easy-postman"></head><body><span id="repo-stars-counter-star" title="713">713</span><span id="repo-network-counter" title="60">60</span><span itemprop="programmingLanguage">Java</span></body></html>`
+			return http.StatusOK, `<html><head><meta name="octolytics-dimension-repository_nwo" content="lakernote/easy-postman"><meta property="og:description" content="API client - lakernote/easy-postman"></head><body><span id="repo-stars-counter-star" title="713">713</span><span id="repo-network-counter" title="60">60</span><span id="issues-repo-tab-count" title="3">3</span><span itemprop="programmingLanguage">Java</span><script>{"createdAt":"2024-01-02T03:04:05Z"}</script></body></html>`
 		default:
 			return http.StatusNotFound, `{"error":"unexpected test request"}`
 		}
@@ -371,7 +520,9 @@ func TestGitHubAdapterFallsBackToOfficialWebPagesWhenAPIRateLimited(t *testing.T
 	}
 	if apiSearchCalls != 1 || len(sources) != 1 || sources[0].Provider != "github_web" ||
 		!strings.Contains(sources[0].Content, `"stars": 713`) ||
-		!strings.Contains(sources[0].Content, `"forks": 60`) {
+		!strings.Contains(sources[0].Content, `"forks": 60`) ||
+		!strings.Contains(sources[0].Content, `"open_issues": 3`) ||
+		!strings.Contains(sources[0].Content, `"updated_at"`) {
 		t.Fatalf("GitHub 官方网页降级错误: apiSearchCalls=%d sources=%+v", apiSearchCalls, sources)
 	}
 }
@@ -382,7 +533,7 @@ func TestFinanceAdapterResolvesCompanyAndReturnsTimestampedQuote(t *testing.T) {
 		case "/search":
 			return http.StatusOK, "{\"quotes\":[{\"symbol\":\"CSCO\",\"shortname\":\"Cisco Systems\",\"longname\":\"Cisco Systems, Inc.\",\"exchange\":\"NMS\",\"quoteType\":\"EQUITY\"}]}"
 		case "/chart/CSCO":
-			return http.StatusOK, "{\"chart\":{\"result\":[{\"meta\":{\"symbol\":\"CSCO\",\"currency\":\"USD\",\"exchangeName\":\"NMS\",\"instrumentType\":\"EQUITY\",\"exchangeTimezoneName\":\"America/New_York\",\"regularMarketPrice\":70.5,\"previousClose\":69.5,\"regularMarketTime\":1788796800}}],\"error\":null}}"
+			return http.StatusOK, "{\"chart\":{\"result\":[{\"meta\":{\"symbol\":\"CSCO\",\"currency\":\"USD\",\"exchangeName\":\"NMS\",\"fullExchangeName\":\"NasdaqGS\",\"instrumentType\":\"EQUITY\",\"exchangeTimezoneName\":\"America/New_York\",\"regularMarketPrice\":70.5,\"previousClose\":69.5,\"regularMarketTime\":1788796800}}],\"error\":null}}"
 		default:
 			return http.StatusNotFound, "{}"
 		}
@@ -397,7 +548,9 @@ func TestFinanceAdapterResolvesCompanyAndReturnsTimestampedQuote(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Kind != "market_quote" ||
 		!strings.Contains(sources[0].Content, "\"symbol\": \"CSCO\"") ||
-		!strings.Contains(sources[0].Content, "\"market_time_utc\"") {
+		!strings.Contains(sources[0].Content, "\"market_time_utc\"") ||
+		!strings.Contains(sources[0].Content, "\"market_time_exchange_local\"") ||
+		!strings.Contains(sources[0].Content, "\"exchange_name\": \"NasdaqGS\"") {
 		t.Fatalf("股票结构化来源错误: %+v", sources)
 	}
 }
@@ -453,27 +606,54 @@ func TestParseResearchArgumentsRejectsInvalidDomain(t *testing.T) {
 	}
 }
 
+func TestDomainsAreEnforcedAfterRedirectedFetch(t *testing.T) {
+	allowed, filtered := filterResearchSourcesByDomains([]researchSource{
+		{URL: "https://platform.openai.com/docs"},
+		{URL: "https://third-party.example/openai"},
+	}, []string{"openai.com"})
+	if len(allowed) != 1 || filtered != 1 || researchDomain(allowed[0].URL) != "platform.openai.com" {
+		t.Fatalf("抓取后的域名白名单错误: allowed=%+v filtered=%d", allowed, filtered)
+	}
+	fetcher := &stubResearchFetcher{sources: map[string]researchSource{
+		"https://openai.com/redirect": {URL: "https://third-party.example/page", Content: "redirected"},
+		"https://openai.com/docs":     {URL: "https://openai.com/docs", Content: "official"},
+	}}
+	engine := &researchEngine{fetcher: fetcher}
+	usable, failed := engine.fetchCandidates(context.Background(), []researchSearchResult{
+		{URL: "https://openai.com/redirect"}, {URL: "https://openai.com/docs"},
+	}, "OpenAI", 1, 2_000, []string{"openai.com"})
+	if len(usable) != 1 || len(failed) != 1 || usable[0].URL != "https://openai.com/docs" {
+		t.Fatalf("重定向越域后没有继续补位: usable=%+v failed=%+v", usable, failed)
+	}
+}
+
 func TestWebResearchLiveScenarios(t *testing.T) {
 	if os.Getenv("EASYAGENT_LIVE_RESEARCH") != "1" {
 		t.Skip("set EASYAGENT_LIVE_RESEARCH=1 to run external research checks")
 	}
 	tests := []struct {
-		name     string
-		query    string
-		depth    string
-		wantKind string
+		name        string
+		query       string
+		depth       string
+		freshness   string
+		sourceScope string
+		domains     []string
+		wantKind    string
 	}{
-		{name: "weather", query: "合肥 今天 天气 温度 降雨概率 出行建议", depth: "normal", wantKind: "weather_forecast"},
-		{name: "github", query: "EasyPostman 的 GitHub star 多少", depth: "quick", wantKind: "github_repository"},
-		{name: "finance", query: "思科的股票价格", depth: "quick", wantKind: "market_quote"},
-		{name: "entity", query: "Laker 是谁", depth: "quick"},
-		{name: "technical", query: "Kafka 的核心原理", depth: "quick"},
+		{name: "weather", query: "合肥 今天 天气 温度 降雨概率 出行建议", depth: "normal", freshness: "day", wantKind: "weather_forecast"},
+		{name: "github", query: "EasyPostman 的 GitHub star 多少", depth: "quick", freshness: "day", wantKind: "github_repository"},
+		{name: "finance", query: "思科的股票价格", depth: "quick", freshness: "day", wantKind: "market_quote"},
+		{name: "entity", query: "Laker 是谁", depth: "quick", freshness: "any"},
+		{name: "technical", query: "Apache Kafka partition replication consumer group offset collaboration official documentation", depth: "normal", freshness: "any", sourceScope: "official", domains: []string{"kafka.apache.org"}},
 	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			raw, _ := json.Marshal(researchArguments{Query: test.query, Depth: test.depth, Freshness: "day", MaxSources: 3})
+			raw, _ := json.Marshal(researchArguments{
+				Query: test.query, Depth: test.depth, Freshness: test.freshness, MaxSources: 3,
+				SourceScope: test.sourceScope, Domains: test.domains,
+			})
 			output, err := runWebResearch(context.Background(), raw)
 			if err != nil {
 				t.Fatalf("live research failed: %v", err)
@@ -487,6 +667,20 @@ func TestWebResearchLiveScenarios(t *testing.T) {
 			}
 			if report.SourceCount == 0 {
 				t.Fatalf("没有可用来源: %s", output)
+			}
+			labels := make([]string, 0, len(report.Sources))
+			for _, source := range report.Sources {
+				labels = append(labels, source.Kind+":"+source.Domain+":"+source.Title)
+			}
+			t.Logf("sources=%s", strings.Join(labels, " | "))
+			if test.name == "technical" {
+				combined := ""
+				for _, source := range report.Sources {
+					combined += "\n" + strings.ToLower(source.Content)
+				}
+				if !strings.Contains(combined, "replica") || !strings.Contains(combined, "offset") {
+					t.Fatalf("Kafka 官方证据没有同时覆盖 replica 与 offset: %s", output)
+				}
 			}
 			if test.wantKind != "" {
 				found := false

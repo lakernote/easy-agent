@@ -26,6 +26,7 @@ var (
 	camelBoundary      = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 	githubPathSegment  = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 	githubStarsJSON    = regexp.MustCompile(`"stargazerCount"\s*:\s*([0-9]+)`)
+	githubCreatedJSON  = regexp.MustCompile(`"createdAt"\s*:\s*"([^"]+)"`)
 )
 
 var weatherIntentMarkers = []string{
@@ -110,6 +111,9 @@ type githubRepositorySnapshot struct {
 	License *struct {
 		SPDXID string `json:"spdx_id"`
 	} `json:"license"`
+	forksKnown      bool
+	openIssuesKnown bool
+	createdAtKnown  bool
 }
 
 func (adapter *weatherResearchAdapter) Name() string { return "open_meteo" }
@@ -197,7 +201,7 @@ func (adapter *weatherResearchAdapter) Research(ctx context.Context, query strin
 			"humidity_percent": forecast.Current.Humidity, "wind_kmh": forecast.Current.Wind,
 		},
 		"daily_forecast": buildWeatherForecast(forecast.Daily),
-		"note":           "天气预报会变化；回答时保留数据时间和时区。",
+		"note":           "天气预报会变化；回答时保留数据时间和时区。travel_advice 仅依据每日天气代码、降水概率和最高/最低温生成，不包含小时级时段判断。",
 	}
 	encoded, _ := json.MarshalIndent(content, "", "  ")
 	return []researchSource{{
@@ -229,6 +233,11 @@ func buildWeatherForecast(daily weatherDaily) []map[string]any {
 		if index < len(daily.PrecipitationProbMax) {
 			day["precipitation_probability_percent"] = daily.PrecipitationProbMax[index]
 		}
+		precipitation := -1
+		if index < len(daily.PrecipitationProbMax) {
+			precipitation = daily.PrecipitationProbMax[index]
+		}
+		day["travel_advice"] = weatherTravelAdvice(daily.WeatherCode[index], daily.TemperatureMax[index], daily.TemperatureMin[index], precipitation)
 		if index < len(daily.Sunrise) {
 			day["sunrise"] = daily.Sunrise[index]
 		}
@@ -238,6 +247,37 @@ func buildWeatherForecast(daily weatherDaily) []map[string]any {
 		result = append(result, day)
 	}
 	return result
+}
+
+func weatherTravelAdvice(code int, maximum, minimum float64, precipitation int) string {
+	advice := make([]string, 0, 3)
+	switch code {
+	case 95, 96, 99:
+		advice = append(advice, "有雷暴，避免空旷处和高风险户外活动")
+	case 71, 73, 75, 77, 85, 86:
+		advice = append(advice, "可能有雪，注意路面湿滑")
+	case 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82:
+		advice = append(advice, "预报有降水，外出携带雨具")
+	default:
+		switch {
+		case precipitation >= 60:
+			advice = append(advice, "降水概率较高，外出携带雨具")
+		case precipitation >= 30:
+			advice = append(advice, "有一定降水可能，建议备雨具")
+		case precipitation >= 0:
+			advice = append(advice, "降水概率较低，按常规出行")
+		}
+	}
+	if maximum >= 35 {
+		advice = append(advice, "最高温较高，注意防晒补水")
+	}
+	if minimum <= 5 {
+		advice = append(advice, "最低温较低，注意保暖")
+	}
+	if len(advice) == 0 {
+		advice = append(advice, "按常规出行")
+	}
+	return strings.Join(uniqueStrings(advice), "；") + "；出发前复核临近预报"
 }
 
 func weatherLocation(query string) string {
@@ -479,7 +519,7 @@ func githubRepositorySource(repo githubRepositorySnapshot, provider string) rese
 		"full_name": repo.FullName, "description": repo.Description,
 		"stars": repo.StargazersCount, "data_path": provider,
 	}
-	if provider != "github_api_search" {
+	if provider != "github_web" || repo.forksKnown {
 		content["forks"] = repo.ForksCount
 	}
 	if provider == "github_api" {
@@ -492,6 +532,31 @@ func githubRepositorySource(repo githubRepositorySnapshot, provider string) rese
 		content["created_at"] = repo.CreatedAt
 		content["updated_at"] = repo.UpdatedAt
 		content["pushed_at"] = repo.PushedAt
+	} else if provider == "github_api_search" {
+		content["forks"] = repo.ForksCount
+		content["open_issues"] = repo.OpenIssuesCount
+		content["default_branch"] = repo.DefaultBranch
+		content["archived"] = repo.Archived
+		content["fork"] = repo.Fork
+		content["visibility"] = repo.Visibility
+		content["created_at"] = repo.CreatedAt
+		content["updated_at"] = repo.UpdatedAt
+		content["pushed_at"] = repo.PushedAt
+		content["unavailable_fields"] = []string{"subscribers"}
+	} else if provider == "github_web" {
+		unavailable := make([]string, 0, 3)
+		if repo.openIssuesKnown {
+			content["open_issues"] = repo.OpenIssuesCount
+		} else {
+			unavailable = append(unavailable, "open_issues")
+		}
+		if repo.createdAtKnown {
+			content["created_at"] = repo.CreatedAt
+		} else {
+			unavailable = append(unavailable, "created_at")
+		}
+		unavailable = append(unavailable, "updated_at", "pushed_at")
+		content["unavailable_fields"] = unavailable
 	}
 	if repo.Language != "" {
 		content["language"] = repo.Language
@@ -617,6 +682,8 @@ func parseGitHubRepositoryPage(body []byte, expectedFullName string) (githubRepo
 	}
 	repo := githubRepositorySnapshot{}
 	starsKnown := false
+	forksKnown := false
+	issuesKnown := false
 	walkHTML(document, func(node *xhtml.Node) bool {
 		if node.Type != xhtml.ElementNode {
 			return true
@@ -638,6 +705,12 @@ func parseGitHubRepositoryPage(body []byte, expectedFullName string) (githubRepo
 		case "repo-network-counter":
 			if count, ok := parseGitHubCounter(htmlAttribute(node, "title")); ok {
 				repo.ForksCount = count
+				forksKnown = true
+			}
+		case "issues-repo-tab-count":
+			if count, ok := parseGitHubCounter(htmlAttribute(node, "title")); ok {
+				repo.OpenIssuesCount = count
+				issuesKnown = true
 			}
 		}
 		if htmlAttribute(node, "itemprop") == "programmingLanguage" {
@@ -662,6 +735,14 @@ func parseGitHubRepositoryPage(body []byte, expectedFullName string) (githubRepo
 			starsKnown = true
 		}
 	}
+	if match := githubCreatedJSON.FindSubmatch(body); len(match) == 2 {
+		if createdAt, err := time.Parse(time.RFC3339Nano, string(match[1])); err == nil {
+			repo.CreatedAt = createdAt
+			repo.createdAtKnown = true
+		}
+	}
+	repo.forksKnown = forksKnown
+	repo.openIssuesKnown = issuesKnown
 	if !starsKnown {
 		return githubRepositorySnapshot{}, errors.New("GitHub 页面缺少 star 计数")
 	}
@@ -774,6 +855,7 @@ func (adapter *financeResearchAdapter) Research(ctx context.Context, query strin
 					Symbol             string  `json:"symbol"`
 					Currency           string  `json:"currency"`
 					ExchangeName       string  `json:"exchangeName"`
+					FullExchangeName   string  `json:"fullExchangeName"`
 					InstrumentType     string  `json:"instrumentType"`
 					Timezone           string  `json:"exchangeTimezoneName"`
 					RegularMarketPrice float64 `json:"regularMarketPrice"`
@@ -809,6 +891,13 @@ func (adapter *financeResearchAdapter) Research(ctx context.Context, query strin
 		"change": change, "change_percent": changePercent,
 		"market_time_utc": marketTime.Format(time.RFC3339),
 		"note":            "Yahoo Finance 聚合行情可能延迟；交易决策应再用交易所或券商数据核验。",
+	}
+	if meta.FullExchangeName != "" {
+		content["exchange_name"] = meta.FullExchangeName
+	}
+	if location, err := time.LoadLocation(meta.Timezone); err == nil && meta.Timezone != "" {
+		content["market_time_exchange_local"] = marketTime.In(location).Format(time.RFC3339)
+		content["market_time_note"] = "market_time_utc 为 UTC；market_time_exchange_local 为 exchange_timezone 对应的当地时间。时区名称不是交易所名称，交易场所只根据 exchange/exchange_name 表述。"
 	}
 	encoded, _ := json.MarshalIndent(content, "", "  ")
 	pageURL := strings.TrimRight(adapter.quoteBase, "/") + "/" + url.PathEscape(meta.Symbol)
