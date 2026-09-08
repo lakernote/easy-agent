@@ -17,6 +17,7 @@ func TestResearchSettingsAPIPersistsAndRedactsSecrets(t *testing.T) {
 	for _, name := range []string{
 		"EASYAGENT_TAVILY_API_KEY", "TAVILY_API_KEY", "EASYAGENT_SEARXNG_URL",
 		"EASYAGENT_BRAVE_SEARCH_API_KEY", "BRAVE_SEARCH_API_KEY", "EASYAGENT_READER_URL",
+		"EASYAGENT_FIRECRAWL_URL", "EASYAGENT_FIRECRAWL_API_KEY", "FIRECRAWL_API_KEY",
 		"EASYAGENT_READER_API_KEY", "GITHUB_TOKEN", "GH_TOKEN",
 	} {
 		t.Setenv(name, "")
@@ -30,10 +31,12 @@ func TestResearchSettingsAPIPersistsAndRedactsSecrets(t *testing.T) {
 	defer application.Shutdown(context.Background())
 
 	const secret = "secret-that-must-never-reach-the-browser"
+	const firecrawlSecret = "firecrawl-secret-that-must-never-reach-the-browser"
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/research/settings", strings.NewReader(`{
 		"providers":[
 			{"id":"tavily","secret":"`+secret+`"},
-			{"id":"searxng","endpoint":"https://search.example.com"}
+			{"id":"searxng","endpoint":"https://search.example.com"},
+			{"id":"firecrawl","endpoint":"https://firecrawl.example.com/v2","secret":"`+firecrawlSecret+`"}
 		]
 	}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -42,20 +45,22 @@ func TestResearchSettingsAPIPersistsAndRedactsSecrets(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("保存 Research 配置失败: HTTP=%d body=%s", response.Code, response.Body.String())
 	}
-	if strings.Contains(response.Body.String(), secret) {
+	if strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), firecrawlSecret) {
 		t.Fatal("保存响应泄露了 Research 密钥")
 	}
 	var view researchSettingsView
 	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	var tavily, searxng researchProviderView
+	var tavily, searxng, firecrawl researchProviderView
 	for _, provider := range view.Providers {
 		switch provider.ID {
 		case "tavily":
 			tavily = provider
 		case "searxng":
 			searxng = provider
+		case "firecrawl":
+			firecrawl = provider
 		}
 	}
 	if !tavily.SecretConfigured || !tavily.SecretAvailable || tavily.SecretSource != "saved" || !tavily.Ready {
@@ -64,12 +69,19 @@ func TestResearchSettingsAPIPersistsAndRedactsSecrets(t *testing.T) {
 	if searxng.Endpoint != "https://search.example.com" || searxng.EndpointSource != "saved" || !searxng.Ready {
 		t.Fatalf("SearXNG 页面配置状态不完整: %+v", searxng)
 	}
+	if firecrawl.Endpoint != "https://firecrawl.example.com/v2" || firecrawl.EndpointSource != "saved" ||
+		!firecrawl.SecretConfigured || !firecrawl.SecretAvailable || firecrawl.SecretSource != "saved" || !firecrawl.Ready {
+		t.Fatalf("Firecrawl 页面配置状态不完整: %+v", firecrawl)
+	}
 	stored, err := database.GetResearchSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Providers["tavily"].Secret != secret {
 		t.Fatal("密钥没有持久化到服务端设置")
+	}
+	if stored.Providers["firecrawl"].Secret != firecrawlSecret {
+		t.Fatal("Firecrawl 密钥没有持久化到服务端设置")
 	}
 
 	bootstrapRequest := httptest.NewRequest(http.MethodGet, "/api/v1/bootstrap", nil)
@@ -78,7 +90,7 @@ func TestResearchSettingsAPIPersistsAndRedactsSecrets(t *testing.T) {
 	if bootstrapResponse.Code != http.StatusOK {
 		t.Fatalf("读取 Bootstrap 失败: HTTP=%d body=%s", bootstrapResponse.Code, bootstrapResponse.Body.String())
 	}
-	if strings.Contains(bootstrapResponse.Body.String(), secret) {
+	if strings.Contains(bootstrapResponse.Body.String(), secret) || strings.Contains(bootstrapResponse.Body.String(), firecrawlSecret) {
 		t.Fatal("Bootstrap 响应泄露了 Research 密钥")
 	}
 }

@@ -98,7 +98,7 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
 Skills 和大型工具组按需加载，减少无关上下文。网页研究会先发现候选，再读取原始来源后回答。
 
-`web_research` 是模型唯一可见的联网入口。模型根据语义填写数据类型、查询对象、时间范围和研究深度；Runtime 再执行结构化数据读取、多源搜索、安全抓取和引用整理。Tavily、SearXNG、Brave Search、Reader 与 GitHub Token 可在 **设置 → 工具与 MCP → Web Research** 配置并执行真实连接测试，保存后下一轮立即生效；也可以继续使用环境变量部署。
+`web_research` 是模型唯一可见的联网入口。模型根据语义填写数据类型、查询对象、时间范围和研究深度；复杂问题还可给出 2–4 条互补检索式。Runtime 负责限制查询预算，并执行结构化数据读取、多源搜索、安全抓取、去重和引用整理。Tavily、SearXNG、Brave Search、Firecrawl、Reader 与 GitHub Token 可在 **设置 → 工具与 MCP → Web Research** 配置并执行真实连接测试，保存后下一轮立即生效；也可以继续使用环境变量部署。
 
 ### GitHub、GitLab 与 Git 凭据
 

@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +36,11 @@ type braveSearchProvider struct {
 	client *http.Client
 	key    string
 }
+type firecrawlSearchProvider struct {
+	client   *http.Client
+	key      string
+	endpoint string
+}
 type tavilySearchProvider struct {
 	client   *http.Client
 	key      string
@@ -49,7 +53,7 @@ func defaultResearchSearchProviders() []researchSearchProvider {
 
 func researchSearchProviders(config ResearchConfig) []researchSearchProvider {
 	client := &http.Client{Timeout: 12 * time.Second}
-	providers := make([]researchSearchProvider, 0, 5)
+	providers := make([]researchSearchProvider, 0, 6)
 	tavilyKey := strings.TrimSpace(config.Provider(ResearchProviderTavily).Secret)
 	if tavilyKey != "" {
 		providers = append(providers, &tavilySearchProvider{client: client, key: tavilyKey, endpoint: "https://api.tavily.com/search"})
@@ -62,6 +66,12 @@ func researchSearchProviders(config ResearchConfig) []researchSearchProvider {
 	key := strings.TrimSpace(config.Provider(ResearchProviderBrave).Secret)
 	if key != "" {
 		providers = append(providers, &braveSearchProvider{client: client, key: key})
+	}
+	firecrawl := config.Provider(ResearchProviderFirecrawl)
+	if key := strings.TrimSpace(firecrawl.Secret); key != "" {
+		providers = append(providers, &firecrawlSearchProvider{
+			client: client, key: key, endpoint: firecrawlAPIEndpoint(firecrawl.Endpoint, "search"),
+		})
 	}
 	// 两个零配置 HTML provider 只作为降级路径。配置型 API provider 能给出
 	// 足够候选时不会调用它们，避免额外延迟、验证码和页面结构漂移。
@@ -76,11 +86,12 @@ func (provider *duckDuckGoSearchProvider) Name() string { return "duckduckgo_htm
 func (provider *bingSearchProvider) Name() string       { return "bing_html" }
 func (provider *searXNGSearchProvider) Name() string    { return "searxng" }
 func (provider *braveSearchProvider) Name() string      { return "brave_search" }
+func (provider *firecrawlSearchProvider) Name() string  { return "firecrawl" }
 func (provider *tavilySearchProvider) Name() string     { return "tavily" }
 
 func (engine *researchEngine) search(ctx context.Context, arguments researchArguments) ([]researchSearchResult, []researchAttempt, error) {
 	limit := min(max(arguments.MaxSources*4, 16), 40)
-	queries := planResearchQueries(arguments.Query, arguments.Depth, arguments.SourceScope, arguments.Domains)
+	queries := plannedResearchQueries(arguments)
 	primaryProviders, fallbackProviders := splitResearchSearchProviders(engine.providers)
 	all := directURLCandidates(arguments.Query)
 	attempts := make([]researchAttempt, 0, len(queries)*len(engine.providers))
@@ -166,7 +177,7 @@ func discoverDomainSitemapCandidates(ctx context.Context, domains []string) ([]r
 						var body []byte
 						body, err = readBounded(httpResponse.Body, maxResearchSearchBytes)
 						if err == nil {
-							results, err = parseResearchSitemap(body, domains)
+							results, err = parseResearchSitemap(body, domains, endpoint)
 						}
 					}
 				}
@@ -198,7 +209,7 @@ func discoverDomainSitemapCandidates(ctx context.Context, domains []string) ([]r
 	return results, attempts, failures
 }
 
-func parseResearchSitemap(body []byte, domains []string) ([]researchSearchResult, error) {
+func parseResearchSitemap(body []byte, domains []string, discoveredBy string) ([]researchSearchResult, error) {
 	var sitemap researchSitemap
 	if err := xml.Unmarshal(body, &sitemap); err != nil {
 		return nil, fmt.Errorf("sitemap XML 无效: %w", err)
@@ -211,6 +222,7 @@ func parseResearchSitemap(body []byte, domains []string) ([]researchSearchResult
 		}
 		result = append(result, researchSearchResult{
 			Title: target, URL: target, Score: researchVersionPathScore(target), Providers: []string{"domain_sitemap"},
+			Queries: []string{discoveredBy},
 		})
 		if len(result) >= 5_000 {
 			break
@@ -327,6 +339,7 @@ func runResearchSearchProviders(ctx context.Context, queries []string, providers
 		queryWeight := 1.0 / float64(item.queryID+1)
 		for index := range item.results {
 			item.results[index].Score += queryWeight * 100 / float64(index+1)
+			item.results[index].Queries = uniqueResearchQueries(append(item.results[index].Queries, item.attempt.Query))
 			all = append(all, item.results[index])
 		}
 	}
@@ -359,7 +372,68 @@ func planResearchQueries(query, depth, sourceScope string, domains []string) []s
 	if depth == "deep" {
 		result = append(result, query+" official documentation", query+" primary source")
 	}
-	return uniqueStrings(result)
+	return limitResearchQueries(uniqueResearchQueries(result), researchQueryBudget(depth))
+}
+
+// plannedResearchQueries lets the model express the semantic decomposition it
+// is already best positioned to make, while retaining deterministic fallbacks
+// for small models and malformed/omitted optional fields. Runtime owns the
+// hard query budget so a model cannot accidentally fan one call out without
+// bound across every configured provider.
+func plannedResearchQueries(arguments researchArguments) []string {
+	if len(arguments.Subqueries) == 0 {
+		return planResearchQueries(arguments.Query, arguments.Depth, arguments.SourceScope, arguments.Domains)
+	}
+	result := make([]string, 0, len(arguments.Subqueries)*(max(len(arguments.Domains), 1))+4)
+	if len(arguments.Domains) > 0 {
+		for _, subquery := range arguments.Subqueries {
+			for _, domain := range arguments.Domains {
+				result = append(result, "site:"+domain+" "+subquery)
+			}
+		}
+	} else {
+		result = append(result, arguments.Subqueries...)
+	}
+	// Preserve the original user question and official/source-specific fallbacks
+	// after model-planned queries. They are consumed only while budget remains.
+	result = append(result, planResearchQueries(arguments.Query, arguments.Depth, arguments.SourceScope, arguments.Domains)...)
+	return limitResearchQueries(uniqueResearchQueries(result), researchQueryBudget(arguments.Depth))
+}
+
+func researchQueryBudget(depth string) int {
+	switch depth {
+	case "quick":
+		return 2
+	case "deep":
+		return 8
+	default:
+		return 5
+	}
+}
+
+func limitResearchQueries(values []string, limit int) []string {
+	if limit > 0 && len(values) > limit {
+		return values[:limit]
+	}
+	return values
+}
+
+func uniqueResearchQueries(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = compactWhitespace(value)
+		key := strings.ToLower(value)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 var precisionResearchWord = regexp.MustCompile(`[A-Za-z][A-Za-z0-9._-]{2,39}`)
@@ -420,7 +494,7 @@ func directURLCandidates(query string) []researchSearchResult {
 	for _, value := range values {
 		value = strings.TrimRight(value, ".,;:!?，。；：！？")
 		if target := canonicalResearchURL(value); target != "" {
-			result = append(result, researchSearchResult{Title: target, URL: target, Score: 10_000, Providers: []string{"direct_url"}})
+			result = append(result, researchSearchResult{Title: target, URL: target, Score: 10_000, Providers: []string{"direct_url"}, Queries: []string{query}})
 		}
 	}
 	return result
@@ -448,11 +522,13 @@ func rankResearchCandidates(values []researchSearchResult, query string, domains
 		existing, ok := byURL[key]
 		if !ok {
 			value.Providers = uniqueStrings(value.Providers)
+			value.Queries = uniqueResearchQueries(value.Queries)
 			byURL[key] = value
 			continue
 		}
 		existing.Score += value.Score + 35
 		existing.Providers = uniqueStrings(append(existing.Providers, value.Providers...))
+		existing.Queries = uniqueResearchQueries(append(existing.Queries, value.Queries...))
 		if len(value.Title) > len(existing.Title) {
 			existing.Title = value.Title
 		}
@@ -586,17 +662,23 @@ func researchVersionPathScore(rawURL string) float64 {
 		return 0
 	}
 	version := parts[0]
-	if len(version) == 2 {
-		major := int(version[0] - '0')
-		minor := int(version[1] - '0')
-		return float64(major) + float64(minor)/10
+	major, minor, patch := 0, 0, 0
+	switch {
+	case len(version) == 1:
+		major = int(version[0] - '0')
+	case len(version) == 2:
+		major, minor = int(version[0]-'0'), int(version[1]-'0')
+	case len(version) == 3:
+		major, minor, patch = int(version[0]-'0'), int(version[1]-'0'), int(version[2]-'0')
+	case len(version) == 4 && version[0] == '0':
+		// Older Kafka documentation encodes 0.11.0 as /0110/ while
+		// current releases use compact paths such as /43/ for 4.3.
+		minor = int(version[1]-'0')*10 + int(version[2]-'0')
+		patch = int(version[3] - '0')
+	default:
+		return 0
 	}
-	if version[0] == '0' && len(version) >= 3 {
-		trimmed := strings.TrimLeft(version, "0")
-		value, _ := strconv.Atoi(trimmed)
-		return float64(value) / 10
-	}
-	return 0
+	return float64(major) + float64(minor)/100 + float64(patch)/10_000
 }
 
 func titleQueryScore(title, query string) float64 {
@@ -930,6 +1012,74 @@ func (provider *braveSearchProvider) Search(ctx context.Context, input researchS
 	return results, nil
 }
 
+func (provider *firecrawlSearchProvider) Search(ctx context.Context, input researchSearchRequest) ([]researchSearchResult, error) {
+	payload := map[string]any{
+		"query":             input.Query,
+		"limit":             min(max(input.Limit, 1), 20),
+		"sources":           []string{"web"},
+		"ignoreInvalidURLs": true,
+	}
+	if len(input.Domains) > 0 {
+		payload["includeDomains"] = input.Domains
+	}
+	if freshness := map[string]string{"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}[input.Freshness]; freshness != "" {
+		payload["tbs"] = freshness
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+provider.key)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "EasyAgent/1.0")
+	response, err := provider.client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer response.Body.Close()
+	encoded, err := readBounded(response.Body, maxResearchSearchBytes)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, &researchHTTPError{StatusCode: response.StatusCode, RetryAfter: response.Header.Get("Retry-After"), Detail: compactWhitespace(string(encoded))}
+	}
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Web []struct {
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Description string `json:"description"`
+			} `json:"web"`
+		} `json:"data"`
+		Warning string `json:"warning"`
+	}
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil, fmt.Errorf("Firecrawl 返回无效 JSON: %w", err)
+	}
+	if !result.Success {
+		return nil, fmt.Errorf("Firecrawl 搜索失败: %s", firstNonEmpty(result.Warning, "响应未标记成功"))
+	}
+	values := make([]researchSearchResult, 0, len(result.Data.Web))
+	for _, value := range result.Data.Web {
+		target := canonicalResearchURL(value.URL)
+		if target == "" {
+			continue
+		}
+		values = append(values, researchSearchResult{
+			Title: compactWhitespace(value.Title), URL: target,
+			Snippet: compactWhitespace(value.Description), Providers: []string{provider.Name()},
+		})
+	}
+	return values, nil
+}
+
 func searchTarget(value string) string {
 	value = stdhtml.UnescapeString(strings.TrimSpace(value))
 	if strings.HasPrefix(value, "//") {
@@ -952,8 +1102,21 @@ func setResearchSearchHeaders(request *http.Request) {
 }
 
 func isSearchChallenge(body []byte) bool {
-	value := strings.ToLower(string(body))
-	for _, marker := range []string{"anomaly-modal", "challenge-form", "cf-chl-", "bots use duckduckgo", "unusual traffic", "verify you are human", "verifying your connection", "security verification", "captcha"} {
+	// Challenge pages put their markers near the beginning. Limiting the scan
+	// avoids rejecting a legitimate long article merely because it discusses
+	// CAPTCHA or bot protection later in its body.
+	prefix := body
+	if len(prefix) > 20_000 {
+		prefix = prefix[:20_000]
+	}
+	value := strings.ToLower(string(prefix))
+	for _, marker := range []string{
+		"anomaly-modal", "challenge-form", "cf-chl-", "bots use duckduckgo",
+		"unusual traffic", "verify you are human", "verifying your connection",
+		"security verification", "captcha", "making sure you're not a bot",
+		"checking your browser before accessing", "enable javascript and cookies to continue",
+		"attention required! | cloudflare", "sorry, you have been blocked",
+	} {
 		if strings.Contains(value, marker) {
 			return true
 		}

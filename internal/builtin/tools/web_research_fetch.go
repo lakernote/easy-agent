@@ -23,10 +23,13 @@ import (
 const maxResearchSourceBytes = 4 * 1024 * 1024
 
 type researchFetcher struct {
-	client       *http.Client
-	readerClient *http.Client
-	readerURL    string
-	readerKey    string
+	client          *http.Client
+	readerClient    *http.Client
+	readerURL       string
+	readerKey       string
+	firecrawlClient *http.Client
+	firecrawlURL    string
+	firecrawlKey    string
 }
 
 type researchResolver interface {
@@ -39,11 +42,15 @@ func newResearchFetcher() *researchFetcher {
 
 func newResearchFetcherWithConfig(config ResearchConfig) *researchFetcher {
 	reader := config.Provider(ResearchProviderReader)
+	firecrawl := config.Provider(ResearchProviderFirecrawl)
 	return &researchFetcher{
-		client:       safeResearchHTTPClient(18 * time.Second),
-		readerClient: &http.Client{Timeout: 25 * time.Second},
-		readerURL:    strings.TrimRight(strings.TrimSpace(reader.Endpoint), "/"),
-		readerKey:    strings.TrimSpace(reader.Secret),
+		client:          safeResearchHTTPClient(18 * time.Second),
+		readerClient:    &http.Client{Timeout: 25 * time.Second},
+		readerURL:       strings.TrimRight(strings.TrimSpace(reader.Endpoint), "/"),
+		readerKey:       strings.TrimSpace(reader.Secret),
+		firecrawlClient: &http.Client{Timeout: 30 * time.Second},
+		firecrawlURL:    firecrawlAPIEndpoint(firecrawl.Endpoint, "scrape"),
+		firecrawlKey:    strings.TrimSpace(firecrawl.Secret),
 	}
 }
 
@@ -52,7 +59,7 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 	source := researchSource{
 		Title: candidate.Title, URL: target, Domain: researchDomain(target),
 		Provider: strings.Join(candidate.Providers, ","), Kind: "web_page", Rank: candidate.Rank,
-		RetrievedAt: time.Now().UTC().Format(time.RFC3339),
+		RetrievedAt: time.Now().UTC().Format(time.RFC3339), DiscoveredBy: uniqueResearchQueries(candidate.Queries),
 	}
 	parsed, err := url.Parse(target)
 	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -73,8 +80,7 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.7")
 	response, err := fetcher.client.Do(request)
 	if err != nil {
-		source.Error = "读取来源失败: " + compactResearchError(err)
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, "读取来源失败: "+compactResearchError(err))
 	}
 	defer response.Body.Close()
 	source.Status = response.StatusCode
@@ -83,20 +89,17 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 		source.Domain = researchDomain(source.URL)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		source.Error = fmt.Sprintf("来源返回 HTTP %d", response.StatusCode)
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, fmt.Sprintf("来源返回 HTTP %d", response.StatusCode))
 	}
 	body, err := readBounded(response.Body, maxResearchSourceBytes)
 	if err != nil {
-		source.Error = "读取来源正文失败: " + compactResearchError(err)
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, "读取来源正文失败: "+compactResearchError(err))
 	}
 	contentType := response.Header.Get("Content-Type")
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 	source.ContentType = mediaType
 	if (mediaType == "" || mediaType == "text/html" || mediaType == "application/xhtml+xml") && isSearchChallenge(body) {
-		source.Error = "来源返回了人机验证页，已尝试后续候选"
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, "来源返回了人机验证页，已尝试后续候选")
 	}
 
 	switch {
@@ -114,16 +117,11 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 		source.Content, source.Truncated = truncateRunes(string(formatted), maxChars)
 	case mediaType == "application/pdf":
 		source.Kind = "pdf"
-		if value, readerErr := fetcher.fetchViaReader(ctx, source, query, maxChars); readerErr == nil {
-			return value
-		}
-		source.Error = "PDF 来源需要配置 EASYAGENT_READER_URL 或 PDF 提取服务，已尝试后续候选"
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, "PDF 来源需要配置 Reader 或 Firecrawl 提取服务，已尝试后续候选")
 	case mediaType == "" || mediaType == "text/html" || mediaType == "application/xhtml+xml":
 		document, err := extractResearchHTML(body, contentType)
 		if err != nil {
-			source.Error = "HTML 来源无法解析"
-			return source
+			return fetcher.withExtractionFallback(ctx, source, query, maxChars, "HTML 来源无法解析")
 		}
 		if document.Title != "" {
 			source.Title = document.Title
@@ -143,16 +141,42 @@ func (fetcher *researchFetcher) Fetch(ctx context.Context, candidate researchSea
 		}
 		source.Content, source.Truncated = selectRelevantPassages(query, splitResearchParagraphs(string(decoded)), maxChars)
 	default:
-		source.Error = fmt.Sprintf("不支持的来源内容类型 %q", contentType)
-		return source
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, fmt.Sprintf("不支持的来源内容类型 %q", contentType))
 	}
 	if strings.TrimSpace(source.Content) == "" {
-		if value, readerErr := fetcher.fetchViaReader(ctx, source, query, maxChars); readerErr == nil {
-			return value
-		}
-		source.Error = "来源没有提取到可读正文"
+		return fetcher.withExtractionFallback(ctx, source, query, maxChars, "来源没有提取到可读正文")
 	}
 	return source
+}
+
+func (fetcher *researchFetcher) withExtractionFallback(ctx context.Context, source researchSource, query string, maxChars int, directError string) researchSource {
+	if value, err := fetcher.fetchViaExtractionProvider(ctx, source, query, maxChars); err == nil {
+		return value
+	}
+	source.Error = directError
+	return source
+}
+
+func (fetcher *researchFetcher) fetchViaExtractionProvider(ctx context.Context, source researchSource, query string, maxChars int) (researchSource, error) {
+	failures := make([]error, 0, 2)
+	if fetcher.readerURL != "" {
+		if value, err := fetcher.fetchViaReader(ctx, source, query, maxChars); err == nil {
+			return value, nil
+		} else {
+			failures = append(failures, fmt.Errorf("reader: %w", err))
+		}
+	}
+	if fetcher.firecrawlKey != "" && fetcher.firecrawlClient != nil {
+		if value, err := fetcher.fetchViaFirecrawl(ctx, source, query, maxChars); err == nil {
+			return value, nil
+		} else {
+			failures = append(failures, fmt.Errorf("firecrawl: %w", err))
+		}
+	}
+	if len(failures) == 0 {
+		return source, errors.New("未配置正文提取 provider")
+	}
+	return source, errors.Join(failures...)
 }
 
 func (fetcher *researchFetcher) fetchViaReader(ctx context.Context, source researchSource, query string, maxChars int) (researchSource, error) {
@@ -192,6 +216,83 @@ func (fetcher *researchFetcher) fetchViaReader(ctx context.Context, source resea
 	source.Provider = strings.Join(uniqueStrings(append(strings.Split(source.Provider, ","), "reader_service")), ",")
 	source.Kind = "reader_document"
 	source.ContentType = "text/markdown"
+	source.Content = content
+	source.Truncated = truncated
+	source.Error = ""
+	return source, nil
+}
+
+func (fetcher *researchFetcher) fetchViaFirecrawl(ctx context.Context, source researchSource, query string, maxChars int) (researchSource, error) {
+	if fetcher.firecrawlKey == "" || fetcher.firecrawlClient == nil {
+		return source, errors.New("未配置 Firecrawl")
+	}
+	body, err := json.Marshal(map[string]any{
+		"url": source.URL, "formats": []string{"markdown"}, "onlyMainContent": true,
+		"removeBase64Images": true, "blockAds": true, "timeout": 25_000,
+	})
+	if err != nil {
+		return source, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, fetcher.firecrawlURL, bytes.NewReader(body))
+	if err != nil {
+		return source, err
+	}
+	request.Header.Set("Authorization", "Bearer "+fetcher.firecrawlKey)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "EasyAgent/1.0")
+	response, err := fetcher.firecrawlClient.Do(request)
+	if err != nil {
+		return source, err
+	}
+	defer response.Body.Close()
+	encoded, err := readBounded(response.Body, maxResearchSourceBytes)
+	if err != nil {
+		return source, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return source, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Markdown string `json:"markdown"`
+			Metadata struct {
+				Title      string `json:"title"`
+				SourceURL  string `json:"sourceURL"`
+				URL        string `json:"url"`
+				StatusCode int    `json:"statusCode"`
+				Error      string `json:"error"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return source, fmt.Errorf("返回无效 JSON: %w", err)
+	}
+	if !result.Success || strings.TrimSpace(result.Data.Markdown) == "" {
+		detail := ""
+		if result.Data.Metadata.Error != "" {
+			detail = ": " + compactResearchError(errors.New(result.Data.Metadata.Error))
+		}
+		return source, fmt.Errorf("没有返回正文%s", detail)
+	}
+	content, truncated := selectRelevantPassages(query, splitResearchParagraphs(result.Data.Markdown), maxChars)
+	if strings.TrimSpace(content) == "" {
+		return source, errors.New("正文没有相关可读段落")
+	}
+	if title := compactWhitespace(result.Data.Metadata.Title); title != "" {
+		source.Title = title
+	}
+	if target := canonicalResearchURL(firstNonEmpty(result.Data.Metadata.SourceURL, result.Data.Metadata.URL)); target != "" {
+		source.URL = target
+		source.Domain = researchDomain(target)
+	}
+	source.Provider = strings.Join(uniqueStrings(append(strings.Split(source.Provider, ","), "firecrawl")), ",")
+	source.Kind = "reader_document"
+	source.ContentType = "text/markdown"
+	if result.Data.Metadata.StatusCode > 0 {
+		source.Status = result.Data.Metadata.StatusCode
+	}
 	source.Content = content
 	source.Truncated = truncated
 	source.Error = ""

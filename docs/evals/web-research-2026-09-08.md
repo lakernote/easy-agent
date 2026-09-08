@@ -53,3 +53,37 @@
 4. 质量门槛持续记录：工具选择率、可读取来源率、官方域名遵从率、字段覆盖率、引用完整率、事实支持率、P50/P95 tool latency，以及 provider 降级原因。
 
 已知限制：本地 `qwen3:14b-16k` 偶尔只输出 `[S1]` 而不复制 Markdown citation，且可能把常识补入有引用的句子。当前通过更强证据规则与“字段缺失就声明缺失”显著收敛，但真正的逐句语义蕴含校验需要单独的回答 verifier/eval，不应伪装成搜索 provider 能完全解决的问题。
+
+## 多项目实现复核与本轮吸收
+
+本轮继续直接阅读开源实现，而不只比较 README：
+
+- Open Deep Research 采用 supervisor、并行 researcher、迭代搜索预算和多查询并发；其 Tavily 层会去重 URL，并在长页面上先压缩再回传。EasyAgent 不复制多 Agent 的上下文成本，只吸收“模型表达语义拆分、Runtime 控制预算”的边界。
+- GPT Researcher 先生成子查询，再并行检索、维护已访问 URL、区分“只返回 URL”和“已返回正文”的 retriever，并在抓取后做相关性压缩。EasyAgent 因此把检索式溯源保存到最终来源，而不是只保留搜索 provider 名称。
+- Perplexica 的一次搜索 action 最多接收少量查询，并按 speed/balanced/quality 控制循环；质量模式先选可信且多样的来源，再抓取和抽取事实。EasyAgent 对应使用 quick/normal/deep 的 2/5/8 条硬预算，并继续把天气等结构化能力隐藏在高层工具内部。
+- DeerFlow 把搜索 provider、网页抓取、Browserless/Crawl4AI 和输出预算分层；浏览器是读取/交互层，不是搜索引擎。EasyAgent 保持 HTTP 安全抓取为默认，只在普通读取失败时使用 Reader/Firecrawl，后续需要登录或点击时再考虑独立 browser worker。
+- Jina node-DeepResearch 与 dzhng/deep-research 都采用 Search → Read → Reason 的预算循环和查询去重。Jina 在搜索后禁止直接根据 snippet 作答，这与 EasyAgent“只有实际读取的 `sources.content` 才是证据”一致。
+- Codex 的宿主搜索仍是一个模型可见入口，内部区分 Search/OpenPage/FindInPage；当前时间则以运行环境上下文提供。EasyAgent 保留单一 `web_research`，不重新暴露 `web_search` / `web_fetch`。
+
+对应落地：新增可选 `subqueries`，查询硬预算和去重，`requested_subqueries` / `executed_search_queries`，每个来源的 `discovered_by`，以及一个由同一配置页驱动的 Firecrawl Search + Scrape provider。Firecrawl、Reader 都是可选增强；没有密钥时原有零配置路径不受影响。
+
+### 查询规划真实浏览器回归
+
+| 场景 | 会话 | Tool / 模型耗时 | 结论 |
+|---|---:|---:|---|
+| Kafka 多方面官方研究（首次） | `ffa1a97d` | 2.4s / 152.3s | Qwen 正确生成 3 条互补子查询，但误把通用资料范围写成天气专用的 `time_range_days=365`；Runtime 拒绝后自动修正。由此收紧 Prompt 字段契约。 |
+| Kafka 多方面官方研究（字段修正后） | `6e0006bc` | 1.9s / 169.7s | 一次 Tool 调用成功，不再误填天气范围；来源从错误优先的 Kafka 0.11 切换到 4.3/4.2，并在每个来源保留命中检索式。 |
+| Kafka 多方面官方研究（加强拆分规则） | `a2fb1375` | 2.0s / 130.1s | 一次生成 2 条互补子查询，实际执行 5 条预算内查询，返回 Kafka 4.3 官方 operations / implementation 来源。模型把技术主题选成 `entity`，虽被官方域名约束安全降级，仍多做一次消歧；随后将 `entity` 明确限定为“辨认模糊名称”，技术原理/文档归 `web`。 |
+| 合肥今天和明天天气 | `dcf28bc4` | 2.7s / 51.9s | 一次调用 `data_type=weather`、`time_range_days=2`，没有错误拆分 `subqueries`；两天日期、温度、降水概率、确定性建议和 Open-Meteo 链接均正确渲染。 |
+
+浏览器同时验证了设置页会从后端注册表自动出现 Firecrawl 的 Base URL/API Key/连接测试交互，结果卡显示实际检索式数量，展开来源显示 `discovered_by`；结构化来源和最终回答中的 `[S1]` 均保持可点击链接。
+
+实现参考：
+
+- [Open Deep Research researcher](https://github.com/langchain-ai/open_deep_research/blob/main/src/open_deep_research/deep_researcher.py)
+- [GPT Researcher query processing](https://github.com/assafelovic/gpt-researcher/blob/main/gpt_researcher/actions/query_processing.py)
+- [Perplexica base search action](https://github.com/ItzCrazyKns/Perplexica/blob/master/src/lib/agents/search/researcher/actions/search/baseSearch.ts)
+- [DeerFlow Firecrawl tools](https://github.com/bytedance/deer-flow/blob/main/backend/packages/harness/deerflow/community/firecrawl/tools.py)
+- [Jina DeepResearch agent loop](https://github.com/jina-ai/node-DeepResearch/blob/main/src/agent.ts)
+- [dzhng recursive deep research](https://github.com/dzhng/deep-research/blob/main/src/deep-research.ts)
+- [Codex hosted web search tool](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/hosted_spec.rs)

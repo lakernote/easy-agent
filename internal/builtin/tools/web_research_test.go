@@ -145,7 +145,7 @@ func TestParseResearchSitemapFiltersDomainsAndPrefersCurrentDocs(t *testing.T) {
 		<url><loc>https://kafka.apache.org/11/implementation/distribution/</loc></url>
 		<url><loc>https://kafka.apache.org/43/implementation/distribution/</loc></url>
 		<url><loc>https://outside.example/kafka</loc></url>
-	</urlset>`), []string{"kafka.apache.org"})
+		</urlset>`), []string{"kafka.apache.org"}, "https://kafka.apache.org/sitemap.xml")
 	if err != nil || len(values) != 2 {
 		t.Fatalf("sitemap 解析或白名单过滤错误: values=%+v err=%v", values, err)
 	}
@@ -165,6 +165,34 @@ func TestResearchQueriesPreserveExactEntitySpelling(t *testing.T) {
 	if len(domainQueries) < 3 || domainQueries[0] != "site:openai.com OpenAI Codex updates" ||
 		domainQueries[1] != `site:openai.com "OpenAI" "Codex" updates` {
 		t.Fatalf("站点限定查询没有保留精确实体拼写: %#v", domainQueries)
+	}
+}
+
+func TestModelPlannedSubqueriesAreBudgetedAndPreserveOrder(t *testing.T) {
+	arguments := researchArguments{
+		Query: "Kafka architecture explained", Depth: "normal", SourceScope: "any",
+		Subqueries: []string{"Kafka replication quorum", "Kafka consumer group offsets", "Kafka storage log segments"},
+	}
+	queries := plannedResearchQueries(arguments)
+	if len(queries) != researchQueryBudget("normal") || queries[0] != "Kafka replication quorum" || queries[1] != "Kafka consumer group offsets" {
+		t.Fatalf("模型子查询没有优先执行或预算错误: %#v", queries)
+	}
+	deep := plannedResearchQueries(researchArguments{
+		Query: "Kafka architecture", Depth: "deep", Domains: []string{"kafka.apache.org"},
+		Subqueries: []string{"Kafka replication", "Kafka consumer offsets"},
+	})
+	if len(deep) > researchQueryBudget("deep") || deep[0] != "site:kafka.apache.org Kafka replication" {
+		t.Fatalf("限定域名的模型子查询错误: %#v", deep)
+	}
+}
+
+func TestSearchResultMergesDiscoveryQueryProvenance(t *testing.T) {
+	values := rankResearchCandidates([]researchSearchResult{
+		{Title: "Kafka docs", URL: "https://kafka.apache.org/documentation/", Queries: []string{"Kafka replication"}},
+		{Title: "Kafka documentation", URL: "https://kafka.apache.org/documentation/?utm_source=test", Queries: []string{"Kafka consumer offsets"}},
+	}, "Kafka architecture", nil)
+	if len(values) != 1 || len(values[0].Queries) != 2 {
+		t.Fatalf("同一来源没有合并检索溯源: %+v", values)
 	}
 }
 
@@ -189,6 +217,30 @@ func TestResearchSourcesDeduplicateVersionedDocumentPaths(t *testing.T) {
 	})
 	if len(sources) != 3 || duplicates != 1 || sources[0].URL != "https://kafka.apache.org/43/operations/basic-kafka-operations/" {
 		t.Fatalf("版本路径去重错误: sources=%+v duplicates=%d", sources, duplicates)
+	}
+}
+
+func TestCompactDocumentationVersionsPreferCurrentRelease(t *testing.T) {
+	if researchVersionPathScore("https://kafka.apache.org/0110/implementation/distribution/") >= researchVersionPathScore("https://kafka.apache.org/43/implementation/distribution/") {
+		t.Fatal("紧凑旧版本 0110 不应排在 Kafka 4.3 之前")
+	}
+	sources, duplicates := deduplicateResearchSourcesWithStats([]researchSource{
+		{Kind: "web_page", URL: "https://kafka.apache.org/0110/implementation/distribution/", Content: "old"},
+		{Kind: "web_page", URL: "https://kafka.apache.org/43/implementation/distribution/", Content: "current"},
+	})
+	if len(sources) != 1 || duplicates != 1 || sources[0].URL != "https://kafka.apache.org/43/implementation/distribution/" {
+		t.Fatalf("紧凑文档版本去重没有保留当前版本: sources=%+v duplicates=%d", sources, duplicates)
+	}
+}
+
+func TestSitemapDiscoveryKeepsQueryProvenance(t *testing.T) {
+	endpoint := "https://example.com/sitemap.xml"
+	results, err := parseResearchSitemap([]byte(`<urlset><url><loc>https://example.com/docs/</loc></url></urlset>`), []string{"example.com"}, endpoint)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("sitemap 解析失败: results=%+v err=%v", results, err)
+	}
+	if len(results[0].Queries) != 1 || results[0].Queries[0] != endpoint {
+		t.Fatalf("sitemap 来源缺少发现溯源: %+v", results[0])
 	}
 }
 
@@ -300,6 +352,30 @@ func TestTavilyProviderUsesStrictDomainsAndFreshness(t *testing.T) {
 	}
 }
 
+func TestFirecrawlProviderUsesSearchV2Contract(t *testing.T) {
+	client := researchJSONClient(func(request *http.Request) (int, string) {
+		if request.Method != http.MethodPost || request.URL.String() != "https://firecrawl.test/v2/search" || request.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("Firecrawl 请求错误: %s %s %q", request.Method, request.URL, request.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		domains, _ := body["includeDomains"].([]any)
+		if body["tbs"] != "qdr:w" || body["limit"] != float64(4) || len(domains) != 1 || domains[0] != "kafka.apache.org" {
+			t.Fatalf("Firecrawl 查询参数错误: %#v", body)
+		}
+		return http.StatusOK, `{"success":true,"data":{"web":[{"title":"Kafka Design","description":"Official architecture","url":"https://kafka.apache.org/documentation/"}]}}`
+	})
+	provider := &firecrawlSearchProvider{client: client, key: "test-key", endpoint: firecrawlAPIEndpoint("https://firecrawl.test/v2", "search")}
+	results, err := provider.Search(context.Background(), researchSearchRequest{
+		Query: "Kafka architecture", Freshness: "week", Limit: 4, Domains: []string{"kafka.apache.org"},
+	})
+	if err != nil || len(results) != 1 || results[0].Providers[0] != "firecrawl" {
+		t.Fatalf("Firecrawl 搜索结果错误: results=%+v err=%v", results, err)
+	}
+}
+
 func TestBingParserReadsResultBlocks(t *testing.T) {
 	body := `<ol><li class="b_algo"><h2><a href="https://example.com/kafka">Kafka Design</a></h2><div class="b_caption"><p>Official design documentation.</p></div></li></ol>`
 	results := parseBingResults(body, 3)
@@ -313,6 +389,9 @@ func TestSearchChallengeIsNotReportedAsEmptyResults(t *testing.T) {
 		if !isSearchChallenge([]byte(body)) {
 			t.Fatalf("没有识别验证页: %q", body)
 		}
+	}
+	if isSearchChallenge([]byte(strings.Repeat("ordinary article content ", 1_100) + "captcha is discussed only near the end")) {
+		t.Fatal("正文后部讨论 CAPTCHA 不应被误判为验证页")
 	}
 }
 
@@ -657,6 +736,22 @@ func TestConfiguredReaderCanExtractPDFFallback(t *testing.T) {
 	}
 }
 
+func TestConfiguredFirecrawlCanExtractDynamicPageFallback(t *testing.T) {
+	client := researchJSONClient(func(request *http.Request) (int, string) {
+		if request.Method != http.MethodPost || request.URL.String() != "https://firecrawl.test/v2/scrape" || request.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("Firecrawl scrape 请求错误: %s %s %q", request.Method, request.URL, request.Header.Get("Authorization"))
+		}
+		return http.StatusOK, `{"success":true,"data":{"markdown":"# Kafka Architecture\n\nKafka partition replication and consumer offsets are described here.","metadata":{"title":"Kafka Architecture","sourceURL":"https://kafka.apache.org/documentation/","statusCode":200}}}`
+	})
+	fetcher := &researchFetcher{firecrawlClient: client, firecrawlURL: "https://firecrawl.test/v2/scrape", firecrawlKey: "test-key"}
+	source, err := fetcher.fetchViaFirecrawl(context.Background(), researchSource{
+		URL: "https://kafka.apache.org/documentation/", Provider: "search", Kind: "web_page",
+	}, "Kafka replication offsets", 500)
+	if err != nil || source.Kind != "reader_document" || !strings.Contains(source.Provider, "firecrawl") || !strings.Contains(source.Content, "consumer offsets") {
+		t.Fatalf("Firecrawl 正文降级错误: source=%+v err=%v", source, err)
+	}
+}
+
 func TestParseResearchArgumentsRejectsInvalidDomain(t *testing.T) {
 	_, err := parseResearchArguments(json.RawMessage(`{"query":"test","domains":["https://example.com/path"]}`))
 	if err == nil || !strings.Contains(err.Error(), "无效优先域名") {
@@ -675,6 +770,17 @@ func TestParseResearchArgumentsKeepsModelRoutingHints(t *testing.T) {
 	arguments, err := parseResearchArguments(json.RawMessage(`{"query":"请查询","data_type":"weather","subject":"安徽省合肥市","time_range_days":7}`))
 	if err != nil || arguments.DataType != "weather" || arguments.Subject != "安徽省合肥市" || arguments.TimeRangeDays != 7 {
 		t.Fatalf("模型路由提示未保留: arguments=%+v err=%v", arguments, err)
+	}
+}
+
+func TestParseResearchArgumentsNormalizesSubqueries(t *testing.T) {
+	arguments, err := parseResearchArguments(json.RawMessage(`{"query":"Kafka architecture","subqueries":[" Kafka replication ","kafka replication","Kafka consumer offsets",""]}`))
+	if err != nil || len(arguments.Subqueries) != 2 || arguments.Subqueries[0] != "Kafka replication" {
+		t.Fatalf("subqueries 归一化错误: arguments=%+v err=%v", arguments, err)
+	}
+	_, err = parseResearchArguments(json.RawMessage(`{"query":"test","subqueries":["1","2","3","4","5"]}`))
+	if err == nil {
+		t.Fatal("超过查询预算的 subqueries 应被拒绝")
 	}
 }
 
@@ -718,7 +824,7 @@ func TestResearchConfigUsesSavedValuesOverEnvironment(t *testing.T) {
 
 func TestResearchProviderRegistryIsPublicMetadataOnly(t *testing.T) {
 	definitions := ResearchProviderDefinitions()
-	if len(definitions) != 5 {
+	if len(definitions) != 6 {
 		t.Fatalf("Provider 注册表数量异常: %d", len(definitions))
 	}
 	seen := make(map[string]bool, len(definitions))

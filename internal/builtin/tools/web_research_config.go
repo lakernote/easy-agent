@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	ResearchProviderTavily  = "tavily"
-	ResearchProviderSearXNG = "searxng"
-	ResearchProviderBrave   = "brave"
-	ResearchProviderReader  = "reader"
-	ResearchProviderGitHub  = "github"
+	ResearchProviderTavily    = "tavily"
+	ResearchProviderSearXNG   = "searxng"
+	ResearchProviderBrave     = "brave"
+	ResearchProviderFirecrawl = "firecrawl"
+	ResearchProviderReader    = "reader"
+	ResearchProviderGitHub    = "github"
 )
 
 var ErrResearchProviderConfiguration = errors.New("research provider configuration invalid")
@@ -83,6 +84,13 @@ var researchProviderDefinitions = []ResearchProviderDefinition{
 		EnvironmentVariables: []string{"EASYAGENT_BRAVE_SEARCH_API_KEY", "BRAVE_SEARCH_API_KEY"},
 	},
 	{
+		ID: ResearchProviderFirecrawl, Name: "Firecrawl", Category: "搜索与正文",
+		Description:   "Search API 加动态页面/PDF 正文提取；直连页面不可读时自动作为降级，不向模型暴露额外工具。",
+		EndpointLabel: "API Base URL", EndpointPlaceholder: "https://api.firecrawl.dev/v2",
+		SecretLabel: "API Key", RequiresSecret: true, PrimarySearch: true,
+		EnvironmentVariables: []string{"EASYAGENT_FIRECRAWL_URL", "EASYAGENT_FIRECRAWL_API_KEY", "FIRECRAWL_API_KEY"},
+	},
+	{
 		ID: ResearchProviderReader, Name: "Reader", Category: "正文读取",
 		Description:   "为 PDF、JavaScript 页面或静态提取失败页面提供正文降级。",
 		EndpointLabel: "Reader URL", EndpointPlaceholder: "https://reader.example.com/{url}", RequiresEndpoint: true,
@@ -124,6 +132,10 @@ func ResearchConfigFromEnvironment() ResearchConfig {
 		ResearchProviderTavily:  {Secret: firstEnvironmentValue("EASYAGENT_TAVILY_API_KEY", "TAVILY_API_KEY")},
 		ResearchProviderSearXNG: {Endpoint: firstEnvironmentValue("EASYAGENT_SEARXNG_URL")},
 		ResearchProviderBrave:   {Secret: firstEnvironmentValue("EASYAGENT_BRAVE_SEARCH_API_KEY", "BRAVE_SEARCH_API_KEY")},
+		ResearchProviderFirecrawl: {
+			Endpoint: firstEnvironmentValue("EASYAGENT_FIRECRAWL_URL"),
+			Secret:   firstEnvironmentValue("EASYAGENT_FIRECRAWL_API_KEY", "FIRECRAWL_API_KEY"),
+		},
 		ResearchProviderReader: {
 			Endpoint: firstEnvironmentValue("EASYAGENT_READER_URL"),
 			Secret:   firstEnvironmentValue("EASYAGENT_READER_API_KEY"),
@@ -200,7 +212,7 @@ func TestResearchProvider(ctx context.Context, config ResearchConfig, id string)
 	started := time.Now()
 	result := ResearchProviderTestResult{ID: id, Name: definition.Name}
 	switch id {
-	case ResearchProviderTavily, ResearchProviderSearXNG, ResearchProviderBrave:
+	case ResearchProviderTavily, ResearchProviderSearXNG, ResearchProviderBrave, ResearchProviderFirecrawl:
 		var selected researchSearchProvider
 		for _, provider := range researchSearchProviders(config) {
 			if provider.Name() == id || (id == ResearchProviderBrave && provider.Name() == "brave_search") {
@@ -256,6 +268,20 @@ func TestResearchProvider(ctx context.Context, config ResearchConfig, id string)
 	}
 	result.DurationMS = time.Since(started).Milliseconds()
 	return result, nil
+}
+
+func firecrawlAPIEndpoint(baseURL, operation string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.firecrawl.dev/v2"
+	}
+	for _, suffix := range []string{"/search", "/scrape"} {
+		if strings.HasSuffix(baseURL, suffix) {
+			baseURL = strings.TrimSuffix(baseURL, suffix)
+			break
+		}
+	}
+	return baseURL + "/" + strings.TrimLeft(operation, "/")
 }
 
 func firstEnvironmentValue(names ...string) string {

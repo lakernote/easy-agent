@@ -19,8 +19,8 @@ export function MessageView({ message, relatedCall, researchCitations = [] }: { 
   return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => { const item = describeToolCall(call); return <span className={item.kind} key={call.id}><b>{item.label}</b>{item.name}</span> })}</div>}{message.content && <div className="answer-text"><Markdown researchCitations={researchCitations}>{message.content}</Markdown></div>}</div></div>
 }
 
-type ResearchSource = { id?: string; title?: string; url?: string; domain?: string; provider?: string; kind?: string; content?: string }
-type ResearchResult = { ok?: boolean; depth?: string; source_scope?: string; domain_constraints?: string[]; evidence_status?: string; independent_domain_count?: number; source_count?: number; sources?: ResearchSource[]; limitations?: string[] }
+type ResearchSource = { id?: string; title?: string; url?: string; domain?: string; provider?: string; kind?: string; content?: string; discovered_by?: string[] }
+type ResearchResult = { ok?: boolean; depth?: string; source_scope?: string; domain_constraints?: string[]; evidence_status?: string; independent_domain_count?: number; source_count?: number; sources?: ResearchSource[]; limitations?: string[]; executed_search_queries?: string[] }
 export type ResearchCitation = { id: string; url: string }
 
 // web_research 的 S1/S2 只在单个用户轮次内有效。模型偶尔会保留编号却漏掉
@@ -72,10 +72,11 @@ function ToolResult({ name, value }: { name: string; value: string }) {
   try { research = JSON.parse(value) as ResearchResult } catch { return <Payload value={value} /> }
   if (!research.ok || !Array.isArray(research.sources)) return <Payload value={value} />
   return <div className="research-result">
-    <div className="research-result-head"><strong>{research.source_count ?? research.sources.length} 个已读取来源</strong><span>{research.depth || 'normal'} · {researchScopeLabel(research)}{researchEvidenceLabel(research)} · S=来源编号</span></div>
+    <div className="research-result-head"><strong>{research.source_count ?? research.sources.length} 个已读取来源</strong><span>{research.depth || 'normal'} · {researchScopeLabel(research)}{researchEvidenceLabel(research)}{Array.isArray(research.executed_search_queries) ? ` · ${research.executed_search_queries.length} 条检索式` : ''} · S=来源编号</span></div>
     <div className="research-source-list">{research.sources.map((source, index) => <details className="research-source" key={`${source.id || index}-${source.url || ''}`}>
       <summary><b title="本次研究的来源编号，不代表质量或可信度排名">{source.id || `S${index + 1}`}</b><span>{source.title || source.domain || '来源'}</span><small>{source.provider || source.kind || ''}</small></summary>
       {safeResearchLink(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.domain || source.url}</a>}
+      {Array.isArray(source.discovered_by) && source.discovered_by.length > 0 && <p className="research-source-query">发现于：{source.discovered_by.join(' · ')}</p>}
       {source.content && <pre>{source.content}</pre>}
     </details>)}</div>
     {Array.isArray(research.limitations) && research.limitations.length > 0 && <p className="research-limitations">{research.limitations.join('；')}</p>}

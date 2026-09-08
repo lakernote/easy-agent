@@ -90,9 +90,9 @@ export function ResearchSettings({ data, onRefresh, onError }: { data: Bootstrap
       <div className="research-health" aria-label={`${primaryReady} 个生产搜索源已就绪`}><strong>{primaryReady}</strong><span>生产搜索源</span></div>
     </div>
     <div className="research-architecture-note">
-      <span><strong>模型决策</strong><small>data_type · subject · 深度 · 来源范围</small></span>
+      <span><strong>模型决策</strong><small>数据类型 · 对象 · 互补检索式 · 来源范围</small></span>
       <b aria-hidden="true">→</b>
-      <span><strong>Runtime 执行</strong><small>结构化数据 · 多源搜索 · 安全抓取 · 引用</small></span>
+      <span><strong>Runtime 执行</strong><small>查询预算 · 多源搜索 · 安全抓取 · 证据引用</small></span>
     </div>
     <div className="research-provider-list">
       {providers.map((provider) => {
