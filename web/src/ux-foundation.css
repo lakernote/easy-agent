@@ -1,0 +1,362 @@
+/* Shared UX foundation. Keep cross-page accessibility, density and interaction
+   rules here so feature styles do not need another round of page-level patches. */
+:root {
+  --type-caption: 11px;
+  --type-label: 12px;
+  --type-body: 14px;
+  --control-compact: 40px;
+  --control-touch: 44px;
+  --motion-fast: 160ms;
+  --motion-standard: 220ms;
+  --layer-nav: 10;
+  --layer-toast: 60;
+  --layer-modal: 80;
+}
+
+body { color: #1e293b; font-size: var(--type-body); line-height: 1.5; }
+button { touch-action: manipulation; }
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 10px;
+  left: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #fff;
+  background: #1d4ed8;
+  transform: translateY(-160%);
+  transition: transform var(--motion-fast) ease-out;
+}
+.skip-link:focus { transform: translateY(0); }
+.sidebar { z-index: var(--layer-nav); }
+.toast { z-index: var(--layer-toast); }
+.modal-backdrop, .confirm-backdrop, .approval-backdrop, .model-drawer-backdrop { z-index: var(--layer-modal); }
+
+/* Settings navigation is grouped by intent rather than looking like a wizard. */
+.settings-side-nav { display: block; }
+.settings-nav-groups { display: grid; gap: 18px; }
+.settings-nav-group { display: grid; gap: 3px; }
+.settings-nav-group-label {
+  margin: 0 0 4px 12px;
+  color: #8290a4;
+  font-size: var(--type-caption);
+  font-weight: 650;
+  letter-spacing: .04em;
+}
+.settings-side-nav button {
+  min-height: 52px;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 11px;
+}
+.settings-nav-marker {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #aab8ca;
+  border-radius: 50%;
+}
+.settings-side-nav button.active .settings-nav-marker {
+  border-color: #2563eb;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px #dbeafe;
+}
+.settings-side-nav button strong { font-size: 13px; }
+.settings-side-nav button small,
+.settings-side-note,
+.settings-hub-header > div > p:last-child,
+.settings-hub .runtime-main-head p:last-child,
+.settings-hub .model-catalog-head p:last-child,
+.settings-hub .section-heading p,
+.settings-hub .field-help,
+.settings-hub .directory-foot,
+.settings-hub .model-profile-select small,
+.settings-hub .model-drawer-head p:last-child,
+.settings-hub .model-drawer-body .form-grid label > small,
+.settings-hub .codex-profile-override label > small { font-size: var(--type-caption); }
+.settings-hub .eyebrow,
+.settings-hub .settings-kicker,
+.settings-hub label { font-size: var(--type-label); }
+.settings-hub input,
+.settings-hub textarea,
+.settings-hub select { font-size: 13px; }
+.settings-hub .ghost-button,
+.settings-hub .primary-button,
+.settings-hub .profile-activate,
+.settings-hub .profile-edit,
+.settings-hub .account-logout,
+.settings-hub .drawer-close { min-height: var(--control-compact); }
+.settings-hub .drawer-close { width: var(--control-compact); height: var(--control-compact); }
+.settings-hub .profile-default-state { min-height: var(--control-compact); font-size: var(--type-caption); }
+.settings-hub .profile-activate,
+.settings-hub .profile-edit { font-size: var(--type-caption); }
+.settings-side-note { margin-top: 20px; line-height: 1.65; }
+
+/* Runtime selection is informational; the model directory owns the default. */
+.runtime-state.pending { color: #53657e; background: #eef2f7; }
+.settings-hub .runtime-status > div > small { font-size: var(--type-caption); line-height: 1.5; }
+
+/* New-session preflight prevents known runtime failures before task creation. */
+.composer-readiness {
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0 10px;
+  padding: 5px 4px 5px 7px;
+  border-bottom: 1px solid #edf1f6;
+  color: #53627a;
+}
+.composer-readiness > span { width: 7px; height: 7px; border-radius: 50%; background: #38a169; }
+.composer-readiness > div { min-width: 0; }
+.composer-readiness strong,
+.composer-readiness small { display: inline; font-size: var(--type-caption); }
+.composer-readiness small { margin-left: 8px; color: #7b8798; }
+.composer-readiness.warning > span { background: #c98a24; }
+.composer-readiness.blocked > span { background: #c45249; }
+.composer-readiness.warning { color: #805f25; background: #fffbef; }
+.composer-readiness.blocked { color: #95463f; background: #fff7f5; }
+.composer-readiness button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #1d4ed8;
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--type-caption);
+  font-weight: 650;
+}
+.composer-readiness button:hover { background: #eaf2ff; }
+.composer-select-field > span,
+.composer-model > span,
+.composer-project-select .composer-field-label,
+.composer-fixed-field > span { font-size: 10px; }
+.composer-select-field select,
+.composer-project-select strong,
+.session-context .composer-model > strong,
+.composer-fixed-field > strong { font-size: var(--type-label); }
+
+/* All execution state actions stay in one stable composer slot. */
+.composer-run-actions { display: flex; align-items: center; gap: 8px; }
+.composer-run-secondary,
+.composer-run-primary {
+  min-height: var(--control-compact);
+  padding: 0 13px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: var(--type-label);
+  font-weight: 650;
+}
+.composer-run-secondary { border: 1px solid #d4dfed; color: #52627a; background: #fff; }
+.composer-run-secondary:hover:not(:disabled) { border-color: #9bb8e8; background: #f5f8ff; }
+.composer-run-secondary.danger { color: #a3483d; border-color: #e8c6c1; background: #fff8f6; }
+.composer-run-primary { border: 1px solid #2563eb; color: #fff; background: #2563eb; }
+.composer-run-primary:hover:not(:disabled) { background: #1d4ed8; }
+.composer-run-secondary:disabled,
+.composer-run-primary:disabled,
+.composer-stop-button:disabled { cursor: wait; opacity: .55; }
+
+/* Automation creation follows the same project -> runtime -> model sequence. */
+.automation-context-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e0e7f0;
+  border-radius: 10px;
+  background: #f9fbff;
+}
+.automation-context-grid legend {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 2px 8px;
+  color: #40516b;
+  font-size: var(--type-label);
+  font-weight: 650;
+}
+.automation-context-grid legend small { color: #7f8ca0; font-size: var(--type-caption); font-weight: 400; }
+.automation-context-grid label { display: grid; min-width: 0; gap: 7px; }
+.automation-context-grid label > span,
+.automation-form > label > span,
+.automation-field-label,
+.automation-schedule-head span,
+.automation-cron-editor > label > span { font-size: var(--type-label); }
+.automation-form input:not([type="checkbox"]),
+.automation-form textarea,
+.automation-form select { font-size: 13px; }
+.automation-form label small,
+.automation-form-divider small,
+.automation-schedule-head small,
+.automation-cron-editor label small,
+.automation-row-times small,
+.automation-row-meta,
+.automation-toolbar small { font-size: var(--type-caption); }
+.automation-cron-preview { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px; font-size: var(--type-caption); }
+.automation-cron-preview > span { color: #718096; }
+.automation-cron-preview > small { justify-self: end; color: #8491a4; }
+.automation-cron-presets button,
+.automation-row-actions button,
+.danger-text-button { min-height: var(--control-compact); font-size: var(--type-caption); }
+.automation-editor-actions {
+  position: sticky;
+  bottom: -25px;
+  z-index: 2;
+  margin: 22px -25px -25px;
+  padding: 15px 25px 20px;
+  background: #fff;
+  box-shadow: 0 -10px 24px #1720330a;
+}
+.automation-editor-actions button { min-height: var(--control-compact); }
+
+/* Large histories render cheaply while keeping native scrolling and semantics. */
+.session-row { content-visibility: auto; contain-intrinsic-size: 60px; }
+.session-copy small { font-size: 10px; }
+.session-label button { min-width: 36px; min-height: 36px; }
+.capability-options > button { min-height: 58px; }
+.capability-options strong,
+.capability-options small,
+.capability-options em,
+.capability-picker-foot,
+.selected-capabilities > span { font-size: var(--type-caption); }
+.capability-picker-foot button { min-height: 36px; font-size: var(--type-caption); }
+.selected-capabilities button { width: 32px; height: 32px; }
+.trace-context > summary,
+.trace-toolbar input,
+.trace-filters button,
+.trace-turn-head strong,
+.conversation-activity-group > summary strong,
+.conversation-activity-group > summary small,
+.conversation-activity > strong,
+.conversation-activity > small { font-size: var(--type-caption); }
+
+.confirm-symbol.discard { color: #8a641f; background: #fff4d7; }
+.confirm-symbol.discard span { font-size: 20px; font-weight: 750; }
+
+@media (max-width: 860px) {
+  .settings-side-nav { overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; }
+  .settings-side-nav::-webkit-scrollbar { display: none; }
+  .settings-side-label, .settings-side-note, .settings-nav-group-label { display: none; }
+  .settings-nav-groups { display: flex; width: max-content; gap: 6px; }
+  .settings-nav-group { display: contents; }
+  .settings-side-nav button { width: auto; min-width: 142px; min-height: var(--control-touch); }
+  .settings-hub .ghost-button,
+  .settings-hub .primary-button,
+  .settings-hub .profile-activate,
+  .settings-hub .profile-edit,
+  .settings-hub .account-logout,
+  .settings-hub .drawer-close { min-height: var(--control-touch); }
+  .automation-context-grid { grid-template-columns: 1fr; }
+  .automation-context-grid legend { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .automation-row-actions button,
+  .automation-cron-presets button,
+  .danger-text-button,
+  .composer-run-secondary,
+  .composer-run-primary { min-height: var(--control-touch); }
+}
+
+@media (max-width: 700px) {
+  .composer-readiness { margin-inline: 5px; grid-template-columns: 8px minmax(0, 1fr) auto; }
+  .composer-readiness strong,
+  .composer-readiness small { display: block; }
+  .composer-readiness small { overflow: hidden; margin: 2px 0 0; text-overflow: ellipsis; white-space: nowrap; }
+  .composer-readiness button { min-height: var(--control-touch); }
+  .composer-run-actions { gap: 6px; }
+  .composer-run-secondary,
+  .composer-run-primary { padding-inline: 10px; }
+  .automation-editor { max-height: calc(100dvh - 24px); }
+  .automation-editor-actions { bottom: -18px; margin: 18px -18px -18px; padding: 14px 18px calc(18px + env(safe-area-inset-bottom)); }
+  .automation-cron-preview { grid-template-columns: auto 1fr; }
+  .automation-cron-preview > small { grid-column: 1 / -1; justify-self: start; }
+  input, textarea, select { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skip-link { transition: none; }
+}
+
+/* Settings use a fixed frame: the product bar, compact page summary and
+   category navigation stay visible while only the selected panel scrolls. */
+.settings-canvas { overflow: hidden; }
+.settings-hub {
+  display: flex;
+  height: calc(100% - var(--topbar-height));
+  min-height: 0;
+  flex-direction: column;
+  padding-top: 20px;
+  padding-bottom: 0;
+}
+.settings-hub-header {
+  min-height: 66px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-bottom: 16px;
+}
+.settings-hub-header h1 { font-size: 26px; }
+.settings-hub-header > div > p:last-child { margin-top: 5px; }
+.settings-hub-context { margin-top: 0; padding-block: 5px; }
+.settings-hub-context > div { gap: 2px; }
+.settings-hub-context strong { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.settings-hub-layout {
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+  gap: 30px;
+  overflow: hidden;
+  padding-top: 16px;
+}
+.settings-side-nav {
+  position: static;
+  align-self: start;
+  overflow: visible;
+}
+.settings-nav-groups { gap: 13px; }
+.settings-nav-group { gap: 2px; }
+.settings-nav-group-label { margin-bottom: 2px; }
+.settings-side-nav button {
+  min-height: 40px;
+  grid-template-columns: 7px minmax(0, 1fr);
+  padding-block: 6px;
+}
+.settings-side-nav button strong { font-size: 13px; }
+.settings-hub-content {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 56px 0;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.settings-hub-content::-webkit-scrollbar { width: 10px; }
+.settings-hub-content::-webkit-scrollbar-track { background: transparent; }
+.settings-hub-content::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #b8c7db;
+  background-clip: content-box;
+}
+
+@media (max-width: 860px) {
+  .settings-hub {
+    height: calc(100% - var(--mobile-topbar-height));
+    padding-top: 14px;
+  }
+  .settings-hub-header { display: none; }
+  .settings-hub-layout {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    padding-top: 10px;
+  }
+  .settings-side-nav { overflow-x: auto; padding-bottom: 5px; }
+  .settings-nav-groups { gap: 4px; }
+  .settings-side-nav button { min-width: 116px; min-height: var(--control-touch); }
+  .settings-hub-content { padding: 0 4px 40px 0; }
+}

@@ -3,7 +3,7 @@ import { api, type DirectoryBrowserResponse } from './api'
 import { FolderIcon, TrashIcon } from './ui'
 import type { Bootstrap, Session } from './types'
 import { sessionDisplayTitle } from './sessionState'
-export function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+export function ConfirmDialog({ title, description, subject, confirmLabel, busy, onCancel, onConfirm, kind = 'delete' }: { title: string; description: string; subject?: string; confirmLabel: string; busy: boolean; onCancel: () => void; onConfirm: () => void; kind?: 'delete' | 'discard' }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     cancelRef.current?.focus()
@@ -16,9 +16,9 @@ export function ConfirmDialog({ title, description, subject, confirmLabel, busy,
 
   return <div className="confirm-backdrop" onMouseDown={() => !busy && onCancel()}>
     <div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
-      <div className="confirm-symbol"><TrashIcon /></div>
-      <div className="confirm-copy"><p className="eyebrow">确认删除</p><h2>{title}</h2><p>{description}</p>{subject && <div className="confirm-subject" title={subject}>{subject}</div>}</div>
-      <div className="confirm-actions"><button ref={cancelRef} className="ghost-button" disabled={busy} onClick={onCancel}>取消</button><button className="danger-button" disabled={busy} onClick={onConfirm}>{busy ? '删除中…' : confirmLabel}</button></div>
+      <div className={`confirm-symbol ${kind}`}>{kind === 'delete' ? <TrashIcon /> : <span aria-hidden="true">!</span>}</div>
+      <div className="confirm-copy"><p className="eyebrow">{kind === 'delete' ? '确认删除' : '未保存修改'}</p><h2>{title}</h2><p>{description}</p>{subject && <div className="confirm-subject" title={subject}>{subject}</div>}</div>
+      <div className="confirm-actions"><button ref={cancelRef} className="ghost-button" disabled={busy} onClick={onCancel}>取消</button><button className={kind === 'delete' ? 'danger-button' : 'primary-button'} disabled={busy} onClick={onConfirm}>{busy ? '处理中…' : confirmLabel}</button></div>
     </div>
   </div>
 }

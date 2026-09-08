@@ -11,7 +11,7 @@ import { CodexActivityGroup, ExecutionProgress, codexConversationActivities } fr
 type ConversationItem = { kind: 'message'; createdAt: string; id: number; message: Session['messages'][number] } | { kind: 'activity'; createdAt: string; id: number; event: TraceEvent }
 type GroupedConversationItem = ConversationItem | { kind: 'activity-group'; createdAt: string; id: number; events: TraceEvent[] }
 
-export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenModelSettings, onOpenTrace, onStop }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenModelSettings: () => void; onOpenTrace: () => void; onStop: () => Promise<void> }) {
+export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenModelSettings, onOpenTrace, onStop, onPause, onResume, runActionBusy }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenModelSettings: () => void; onOpenTrace: () => void; onStop: () => Promise<void>; onPause: () => Promise<void>; onResume: () => Promise<void>; runActionBusy: boolean }) {
   const endRef = useRef<HTMLDivElement>(null)
   const conversationRef = useRef<HTMLDivElement>(null)
   const loadingOlderRef = useRef(false)
@@ -89,7 +89,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
       {groupedConversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : item.kind === 'activity-group' ? <CodexActivityGroup key={`activities-${item.id}`} events={item.events} onOpenTrace={onOpenTrace} /> : null)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
-      {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以从顶部继续或取消。</span></div></div>}
+      {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以在输入区继续或取消。</span></div></div>}
       {session?.status === 'running' && <ExecutionProgress session={session} />}
       {session?.status === 'running' && session.partialOutput && <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>}
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
@@ -100,7 +100,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       <div ref={endRef} className="conversation-end-space" aria-hidden="true" />
       </div>
     </div>
-    <ChatComposer {...composer} onStop={onStop} />
+    <ChatComposer {...composer} onStop={onStop} onPause={onPause} onResume={onResume} runActionBusy={runActionBusy} />
   </section>
 }
 

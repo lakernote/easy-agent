@@ -17,15 +17,21 @@ type SettingsShellProps = {
   onOpenSession: (id: string) => void
 }
 
-const sections: { id: SettingsSection; label: string; description: string }[] = [
-  { id: 'runtime', label: '运行时', description: '选择默认执行引擎' },
-  { id: 'tasks', label: '任务设置', description: '并发、超时与恢复' },
-  { id: 'models', label: '模型配置', description: '按运行时管理' },
-  { id: 'skills', label: 'Skills', description: '按需加载能力' },
-  { id: 'tools', label: '工具与 MCP', description: '共享工具与连接' },
-  { id: 'usage', label: '用量', description: '调用统计' },
-  { id: 'weixin', label: '微信远程', description: '扫码绑定与停用' },
-  { id: 'security', label: '账户安全', description: '修改登录密码' },
+const sectionGroups: { label: string; sections: { id: SettingsSection; label: string }[] }[] = [
+  { label: '运行与模型', sections: [
+    { id: 'runtime', label: '运行环境' },
+    { id: 'models', label: '模型配置' },
+    { id: 'tasks', label: '任务设置' },
+  ] },
+  { label: '能力扩展', sections: [
+    { id: 'skills', label: 'Skills' },
+    { id: 'tools', label: '工具与 MCP' },
+  ] },
+  { label: '渠道与账户', sections: [
+    { id: 'weixin', label: '微信远程' },
+    { id: 'usage', label: '用量' },
+    { id: 'security', label: '账户安全' },
+  ] },
 ]
 
 function activeSection(page: Page): SettingsSection {
@@ -35,11 +41,17 @@ function activeSection(page: Page): SettingsSection {
 export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
   const selected = activeSection(page)
   const activeProfile = data.modelProfiles.find((profile) => profile.id === data.activeModelProfileId)
-  const pageDescription = selected === 'security'
-    ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。'
-    : selected === 'weixin'
-      ? '管理团队微信绑定与远程启停；微信只回传必要状态和最终任务结果。'
-      : '先选择 Runtime，再管理对应模型配置；任务策略、Skills 与 MCP 在运行时之间共享。'
+  const pageDescription: Record<SettingsSection, string> = {
+    runtime: '检查 Runtime 状态',
+    models: '管理新会话默认配置',
+    tasks: '调整并发、超时与恢复',
+    skills: '管理按需加载的 Skills',
+    tools: '管理内置工具与 MCP',
+    usage: '查看模型与任务用量',
+    weixin: '管理微信绑定与远程任务',
+    security: '修改登录密码',
+  }
+  const selectedLabel = sectionGroups.flatMap((group) => group.sections).find((section) => section.id === selected)?.label || '设置'
   const [showPassword, setShowPassword] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -48,7 +60,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
   const [accountError, setAccountError] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
   useEffect(() => {
-    document.querySelector<HTMLElement>('.settings-canvas')?.scrollTo({ top: 0, behavior: 'auto' })
+    document.querySelector<HTMLElement>('.settings-hub-content')?.scrollTo({ top: 0, behavior: 'auto' })
   }, [page])
   useEffect(() => {
     if (selected !== 'security') {
@@ -78,30 +90,32 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
   return <section className="settings-hub">
     <header className="settings-hub-header">
       <div>
-        <p className="settings-kicker">配置中心</p>
-        <h1>设置</h1>
-        <p>{pageDescription}</p>
+        <h1>{selectedLabel}</h1>
+        <p>{pageDescription[selected]}</p>
       </div>
       <div className="settings-hub-context">
         <span className="service-dot" />
-        <div><small>新会话默认</small><strong>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'}</strong><span>{activeProfile?.name || '未命名配置'}</span></div>
+        <div><small>新会话默认</small><strong>{data.model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · {activeProfile?.name || '未命名配置'}</strong></div>
         <button className="account-logout" type="button" onClick={() => void onLogout()}>退出</button>
       </div>
     </header>
     <div className="settings-hub-layout">
       <nav className="settings-side-nav" aria-label="设置分区">
-        <p className="settings-side-label">配置中心</p>
-        {sections.map((section, index) => <button key={section.id} className={selected === section.id ? 'active' : ''} type="button" aria-current={selected === section.id ? 'page' : undefined} onClick={() => onPage(section.id)}>
-          <span className="settings-nav-index">{String(index + 1).padStart(2, '0')}</span>
-          <span><strong>{section.label}</strong><small>{section.description}</small></span>
-        </button>)}
-        <p className="settings-side-note">Runtime 决定执行方式；每个 Runtime 独立管理模型配置，Skills 与 MCP 共享。</p>
+        <div className="settings-nav-groups">
+          {sectionGroups.map((group) => <section className="settings-nav-group" key={group.label} aria-label={group.label}>
+            <p className="settings-nav-group-label">{group.label}</p>
+            {group.sections.map((section) => <button key={section.id} className={selected === section.id ? 'active' : ''} type="button" aria-current={selected === section.id ? 'page' : undefined} onClick={() => onPage(section.id)}>
+              <span className="settings-nav-marker" aria-hidden="true" />
+              <strong>{section.label}</strong>
+            </button>)}
+          </section>)}
+        </div>
       </nav>
       <main className="settings-hub-content">
         {selected === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'usage' && <UsagePage data={data} />}
         {selected === 'weixin' && <WeixinPage onError={onError} onOpenSession={onOpenSession} />}
-        {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} data={data} onRefresh={onRefresh} onError={onError} />}
+        {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} data={data} onRefresh={onRefresh} onError={onError} onSettingsSectionChange={onPage} />}
         {selected === 'security' && <section className="account-panel account-security-page" aria-labelledby="account-title">
           <div><p className="settings-kicker">账户安全</p><h2 id="account-title">管理员账号</h2><p>当前登录用户：<code>admin</code>。服务重启、12 小时后或修改密码后需要重新登录。</p></div>
           <button className="ghost-button" type="button" onClick={() => { setShowPassword(!showPassword); setAccountError(''); setAccountMessage('') }}>{showPassword ? '收起改密' : '修改密码'}</button>

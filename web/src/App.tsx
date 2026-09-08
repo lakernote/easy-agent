@@ -23,6 +23,7 @@ export default function App() {
   const [forking, setForking] = useState(false)
   const [worktreeOpen, setWorktreeOpen] = useState(false)
   const [cleaningWorktree, setCleaningWorktree] = useState(false)
+  const [updatingRunState, setUpdatingRunState] = useState(false)
 
   const refresh = useCallback(async () => {
     const next = await api.bootstrap()
@@ -103,28 +104,34 @@ export default function App() {
 
   const newChat = () => { setSession(null); setPage('chat'); setTraceOpen(false); setForkOpen(false); setWorktreeOpen(false); setError('') }
   const stopSession = async () => {
-    if (!session || (!isActive(session.status) && session.status !== 'paused')) return
+    if (!session || updatingRunState || (!isActive(session.status) && session.status !== 'paused')) return
+    setUpdatingRunState(true)
     try {
       const next = await api.cancelSession(session.id)
       setCurrentSession(next)
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
+    finally { setUpdatingRunState(false) }
   }
 
   const pauseSession = async () => {
-    if (!session || session.status !== 'queued') return
+    if (!session || updatingRunState || session.status !== 'queued') return
+    setUpdatingRunState(true)
     try {
       setCurrentSession(await api.pauseSession(session.id))
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
+    finally { setUpdatingRunState(false) }
   }
 
   const resumeSession = async () => {
-    if (!session || session.status !== 'paused') return
+    if (!session || updatingRunState || session.status !== 'paused') return
+    setUpdatingRunState(true)
     try {
       setCurrentSession(await api.resumeSession(session.id))
       await refresh()
     } catch (reason) { setError((reason as Error).message) }
+    finally { setUpdatingRunState(false) }
   }
 
   const forkSession = async (workspaceMode: ForkWorkspaceMode) => {
@@ -156,21 +163,20 @@ export default function App() {
   if (!data) return <div className="boot error-page">无法读取服务：{error || '未知错误'}</div>
 
   return <div className="app-shell">
+    <a className="skip-link" href="#main-content">跳到主要内容</a>
     <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
-    <main className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
+    <main id="main-content" className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
         <div className="topbar-title">{page === 'chat' ? (session ? sessionDisplayTitle(session) : '新会话') : page === 'automations' ? '定时任务' : '设置'}</div>
         <div className="topbar-actions">
           {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
           {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}
-          {page === 'chat' && session?.status === 'queued' && <button className="ghost-button" onClick={() => void pauseSession()}>暂停排队</button>}
-          {page === 'chat' && session?.status === 'paused' && <><button className="ghost-button" onClick={() => void stopSession()}>取消任务</button><button className="primary-button" onClick={() => void resumeSession()}>继续</button></>}
           {page === 'chat' && session && <button className="ghost-button trace-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}
         </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('models')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('models')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
       {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
       {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
     </main>

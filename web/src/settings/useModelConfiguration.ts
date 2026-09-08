@@ -19,7 +19,9 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const [modelEditorOpen, setModelEditorOpen] = useState(false)
   const [modelEditorMode, setModelEditorMode] = useState<'new' | 'edit'>('edit')
   const [modelEditorSnapshot, setModelEditorSnapshot] = useState<ModelSettings | null>(null)
+  const [modelEditorBaseline, setModelEditorBaseline] = useState<ModelSettings | null>(null)
   const [codexConfig, setCodexConfig] = useState<CodexProviderConfig>({ ...data.codexConfig })
+  const [codexConfigBaseline, setCodexConfigBaseline] = useState<CodexProviderConfig | null>(null)
   const [savingCodexConfig, setSavingCodexConfig] = useState(false)
 
   useEffect(() => setModel({ ...data.model }), [data.model])
@@ -28,19 +30,13 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const saveModel = async (clearAPIKey = false) => {
     if (savingModel) return
     setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel({ ...model, clearApiKey: clearAPIKey }); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false); onError('') }
-    catch (reason) { onError((reason as Error).message) }
-    finally { setSavingModel(false) }
-  }
-
-  const enableRuntime = async () => {
-    if (savingModel || !model.profileId) return
-    setSavingModel(true); setModelNotice(null); onError('')
     try {
-      if (!currentProfileSaved) await api.saveModel(model)
-      await api.activateModelProfile(model.profileId)
+      await api.saveModel({ ...model, clearApiKey: clearAPIKey })
       await onRefresh()
-    } catch (reason) { onError((reason as Error).message) }
+      setCodexConfig(codexConfigBaseline ? { ...codexConfigBaseline } : { ...data.codexConfig })
+      setModelEditorSnapshot(null); setModelEditorBaseline(null); setCodexConfigBaseline(null); setModelEditorOpen(false); onError('')
+    }
+    catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
 
@@ -115,16 +111,18 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
 
   const openProfileEditor = (profile?: ModelProfile, runtime: ModelSettings['runtime'] = model.runtime) => {
     setModelEditorSnapshot({ ...model })
-    if (profile) {
-      selectProfile(profile); setModelEditorMode('edit')
-    } else {
-      createProfile(runtime); setModelEditorMode('new')
-    }
+    const next = profile
+      ? { ...profile.settings, profileId: profile.id, profileName: profile.name }
+      : draftProfile(runtime)
+    setModel(next)
+    setModelEditorBaseline(next)
+    setCodexConfigBaseline({ ...codexConfig })
+    setModelEditorMode(profile ? 'edit' : 'new')
     setModelEditorOpen(true); setModelNotice(null); onError('')
   }
 
   const closeModelEditor = () => {
-    if (savingModel) return
+    if (savingModel || savingCodexConfig) return
     const savedSnapshot = modelEditorSnapshot && data.modelProfiles.some((profile) => profile.id === modelEditorSnapshot.profileId)
       ? modelEditorSnapshot
       : null
@@ -135,16 +133,21 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
         ? { ...savedRuntimeProfile.settings, profileId: savedRuntimeProfile.id, profileName: savedRuntimeProfile.name }
         : { ...data.model })
     }
-    setModelEditorSnapshot(null); setModelEditorOpen(false); setModelNotice(null); onError('')
+    setCodexConfig(codexConfigBaseline ? { ...codexConfigBaseline } : { ...data.codexConfig })
+    setModelEditorSnapshot(null); setModelEditorBaseline(null); setCodexConfigBaseline(null); setModelEditorOpen(false); setModelNotice(null); onError('')
   }
+
+  const modelEditorDirty = Boolean(modelEditorOpen && (
+    (modelEditorBaseline && JSON.stringify(model) !== JSON.stringify(modelEditorBaseline))
+    || (codexConfigBaseline && JSON.stringify(codexConfig) !== JSON.stringify(codexConfigBaseline))
+  ))
 
   const removeProfile = async () => {
     if (!model.profileId || deletingProfile) return
     if (!currentProfileSaved) { setModel({ ...data.model }); return }
     if (data.modelProfiles.length <= 1) return
-    if (!window.confirm(`删除“${model.profileName || '当前配置'}”？已有会话不会受影响。`)) return
     setDeletingProfile(true); onError('')
-    try { await api.deleteModelProfile(model.profileId); await onRefresh(); setModelEditorSnapshot(null); setModelEditorOpen(false) }
+    try { await api.deleteModelProfile(model.profileId); await onRefresh(); setModelEditorSnapshot(null); setModelEditorBaseline(null); setCodexConfigBaseline(null); setModelEditorOpen(false) }
     catch (reason) { onError((reason as Error).message) }
     finally { setDeletingProfile(false) }
   }
@@ -177,10 +180,13 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const saveCodexConfig = async (input: CodexProviderConfig & { apiKey?: string; clearApiKey?: boolean }) => {
     if (savingCodexConfig) return
     setSavingCodexConfig(true); setModelNotice(null); onError('')
-    try { setCodexConfig(await api.saveCodexConfig({ provider: input.provider, providerName: input.providerName, baseUrl: input.baseUrl, model: input.model, reasoningEffort: input.reasoningEffort, envKey: input.envKey, apiKey: input.apiKey, clearApiKey: input.clearApiKey })) }
+    try {
+      const saved = await api.saveCodexConfig({ provider: input.provider, providerName: input.providerName, baseUrl: input.baseUrl, model: input.model, reasoningEffort: input.reasoningEffort, envKey: input.envKey, apiKey: input.apiKey, clearApiKey: input.clearApiKey })
+      setCodexConfig(saved); setCodexConfigBaseline(saved)
+    }
     catch (reason) { setModelNotice({ ready: false, title: 'Codex 配置保存失败', message: (reason as Error).message }) }
     finally { setSavingCodexConfig(false) }
   }
 
-  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, codexConfig, setCodexConfig, savingCodexConfig, currentProfileSaved, saveModel, enableRuntime, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, saveCodexConfig }
+  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, modelEditorDirty, codexConfig, setCodexConfig, savingCodexConfig, currentProfileSaved, saveModel, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, saveCodexConfig }
 }

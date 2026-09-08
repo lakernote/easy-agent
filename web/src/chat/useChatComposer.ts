@@ -7,6 +7,8 @@ import { encodeAttachment, supportedAttachment, type PendingAttachment } from '.
 import { capabilityKindLabel, capabilityMention, capabilityOptions, hasCapabilityToken, type CapabilityOption } from '../capabilities'
 import type { StarterSuggestion } from '../suggestions'
 
+export type ComposerReadiness = { tone: 'ready' | 'warning' | 'blocked'; label: string; detail: string; canSend: boolean }
+
 type ChatComposerOptions = {
   session: Session | null
   data: Bootstrap
@@ -49,7 +51,24 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
   const profileOptions = useMemo(() => data.modelProfiles.filter((item) => item.settings.runtime === runtime), [data.modelProfiles, runtime])
   const selectedProfile = profileOptions.find((item) => item.id === selectedProfileId)
+  const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
   const displayedModel = session?.model || selectedProfile?.settings.model || (isCodexRuntime ? '使用 config.toml' : data.model.model || '未配置模型')
+  const readiness = useMemo<ComposerReadiness>(() => {
+    if (session) return { tone: 'ready', label: '会话已固定', detail: '继续使用创建时的项目、Runtime 与模型配置。', canSend: true }
+    if (!selectedProject) return { tone: 'blocked', label: '缺少项目', detail: '请先添加一个服务器项目。', canSend: false }
+    if (!selectedProfile) return { tone: 'blocked', label: '需要配置', detail: `${isCodexRuntime ? 'Codex' : 'EasyAgent'} 暂无可用模型配置。`, canSend: false }
+    if (isCodexRuntime) {
+      const ready = data.codex.installed && data.codex.appServerAvailable
+      return ready
+        ? { tone: 'ready', label: '运行环境可用', detail: 'Codex CLI 与 app-server 已就绪。', canSend: true }
+        : { tone: 'blocked', label: 'Codex 不可用', detail: data.codex.message || '请安装或更新 Codex CLI 后重新检测。', canSend: false }
+    }
+    const settings = selectedProfile.settings
+    if (!settings.provider || !settings.baseUrl || !settings.model) return { tone: 'blocked', label: '配置不完整', detail: '请补全 Provider、服务地址和模型名称。', canSend: false }
+    if (settings.provider.toLocaleLowerCase() === 'ollama' && !data.ollama.running) return { tone: 'blocked', label: 'Ollama 未连接', detail: data.ollama.message || '请先启动 Ollama，再重新选择模型。', canSend: false }
+    if (settings.provider.toLocaleLowerCase() !== 'ollama' && !settings.secretConfigured && !settings.apiKeyEnv) return { tone: 'warning', label: '建议先测试', detail: '当前配置没有已保存的密钥；无需认证的兼容服务仍可直接使用。', canSend: true }
+    return { tone: 'ready', label: '运行环境可用', detail: `${settings.provider} · ${settings.model}`, canSend: true }
+  }, [data.codex, data.ollama.message, data.ollama.running, isCodexRuntime, selectedProfile, selectedProject, session])
   useEffect(() => {
     if (!textareaRef.current) return
     textareaRef.current.style.height = 'auto'
@@ -81,7 +100,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }, [capabilityOpen])
 
   const addFiles = (files: FileList | File[]) => {
-    if (sending || isActive(session?.status)) return
+    if (sending || isActive(session?.status) || session?.status === 'paused') return
     const incoming = Array.from(files)
     if (!incoming.length) return
     setAttachmentError('')
@@ -115,7 +134,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }
 
   const openCapabilityPicker = () => {
-    if (sending || isActive(session?.status)) return
+    if (sending || isActive(session?.status) || session?.status === 'paused') return
     const textarea = textareaRef.current
     setCapabilityRange({ start: textarea?.selectionStart ?? draft.length, end: textarea?.selectionEnd ?? draft.length })
     setCapabilityQuery('')
@@ -188,9 +207,9 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
 
   const send = async (preset?: string) => {
     const message = (preset ?? draft).trim()
-    if ((!message && attachments.length === 0) || sending || isActive(session?.status)) return
-    if (!session && !selectedProfileId) {
-      onError(`${runtime === 'codex' ? 'Codex' : 'EasyAgent'} 暂无可用模型配置，请先创建一套配置。`)
+    if ((!message && attachments.length === 0) || sending || isActive(session?.status) || session?.status === 'paused') return
+    if (!session && !readiness.canSend) {
+      onError(readiness.detail)
       return
     }
     setSending(true); onError(''); setAttachmentError('')
@@ -227,8 +246,6 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setCapabilityOpen(false)
   }
 
-  const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
-
   return {
     session, data, onOpenSkills, onOpenCapabilities,
     draft, setDraft, sending, attachments, attachmentError, dragging, setDragging,
@@ -237,7 +254,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
     workspace: session?.workspace || selectedProject?.directories[0] || data.runtime.workspace,
     projectOptions: data.projects, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen,
-    profileOptions, selectedRuntime, selectRuntime, selectedProfileId, setSelectedProfileId, displayedModel,
+    profileOptions, selectedRuntime, selectRuntime, selectedProfileId, setSelectedProfileId, displayedModel, readiness,
     onOpenModelSettings,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,
