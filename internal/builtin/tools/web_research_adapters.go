@@ -55,6 +55,10 @@ type financeResearchAdapter struct {
 	quoteBase   string
 	wikidataURL string
 }
+type entityResearchAdapter struct {
+	client      *http.Client
+	wikidataURL string
+}
 
 type researchHTTPError struct {
 	StatusCode int
@@ -85,6 +89,7 @@ func defaultResearchAdapters() []researchAdapter {
 		&weatherResearchAdapter{client: client, geocodingURL: "https://geocoding-api.open-meteo.com/v1/search", forecastURL: "https://api.open-meteo.com/v1/forecast"},
 		&githubResearchAdapter{client: client, token: token, apiBase: "https://api.github.com", webBase: "https://github.com"},
 		&financeResearchAdapter{client: client, searchURL: "https://query1.finance.yahoo.com/v1/finance/search", chartBase: "https://query1.finance.yahoo.com/v8/finance/chart", quoteBase: "https://finance.yahoo.com/quote", wikidataURL: "https://www.wikidata.org/w/api.php"},
+		&entityResearchAdapter{client: client, wikidataURL: "https://www.wikidata.org/w/api.php"},
 	}
 }
 
@@ -119,6 +124,102 @@ type githubRepositorySnapshot struct {
 func (adapter *weatherResearchAdapter) Name() string { return "open_meteo" }
 func (adapter *githubResearchAdapter) Name() string  { return "github_api" }
 func (adapter *financeResearchAdapter) Name() string { return "yahoo_finance" }
+func (adapter *entityResearchAdapter) Name() string  { return "wikidata_entities" }
+
+func (adapter *entityResearchAdapter) Applicable(query string) bool {
+	return entityResearchLookup(query) != ""
+}
+
+func (adapter *entityResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
+	lookup := entityResearchLookup(query)
+	if lookup == "" {
+		return nil, errors.New("无法从问题中确定待消歧实体")
+	}
+	language := "en"
+	for _, character := range lookup {
+		if character >= '\u4e00' && character <= '\u9fff' {
+			language = "zh"
+			break
+		}
+	}
+	endpoint := adapter.wikidataURL + "?" + url.Values{
+		"action": {"wbsearchentities"}, "search": {lookup}, "language": {language},
+		"uselang": {language}, "type": {"item"}, "limit": {"8"}, "format": {"json"},
+	}.Encode()
+	var payload struct {
+		Search []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+			ConceptURI  string `json:"concepturi"`
+			Match       struct {
+				Type     string `json:"type"`
+				Language string `json:"language"`
+				Text     string `json:"text"`
+			} `json:"match"`
+		} `json:"search"`
+	}
+	if err := getResearchJSON(ctx, adapter.client, endpoint, nil, &payload); err != nil {
+		return nil, fmt.Errorf("实体消歧失败: %w", err)
+	}
+	if len(payload.Search) == 0 {
+		return nil, fmt.Errorf("Wikidata 没有找到实体 %q", lookup)
+	}
+	candidates := make([]map[string]any, 0, len(payload.Search))
+	for _, item := range payload.Search {
+		candidate := map[string]any{"id": item.ID, "label": item.Label, "description": item.Description}
+		if item.ConceptURI != "" {
+			candidate["url"] = item.ConceptURI
+		}
+		if item.Match.Text != "" {
+			candidate["matched_text"] = item.Match.Text
+			candidate["match_type"] = item.Match.Type
+		}
+		candidates = append(candidates, candidate)
+	}
+	content, _ := json.MarshalIndent(map[string]any{
+		"query": lookup, "candidates": candidates,
+		"note": "这是实体候选列表，不表示第一个候选必然是用户所指对象；结合其他来源和用户上下文消歧。",
+	}, "", "  ")
+	return []researchSource{{
+		Title: lookup + " entity candidates", URL: endpoint, Domain: "wikidata.org",
+		Provider: adapter.Name(), Kind: "entity_candidates", ContentType: "application/json",
+		Status: http.StatusOK, RetrievedAt: time.Now().UTC().Format(time.RFC3339), Content: string(content),
+	}}, nil
+}
+
+func entityResearchLookup(query string) string {
+	lower := strings.ToLower(query)
+	markers := []string{"是谁", "是什么", "什么意思", "含义", "who is", "what is", "meaning"}
+	found := false
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ""
+	}
+	value := strings.TrimSpace(query)
+	if index := strings.IndexAny(value, "?？!！;；\n"); index >= 0 {
+		value = value[:index]
+	}
+	for _, marker := range markers {
+		for {
+			index := strings.Index(strings.ToLower(value), marker)
+			if index < 0 {
+				break
+			}
+			value = value[:index] + " " + value[index+len(marker):]
+		}
+	}
+	value = compactWhitespace(strings.Trim(value, " ,.:，。："))
+	if value == "" || len([]rune(value)) > 80 {
+		return ""
+	}
+	return value
+}
 
 func (adapter *weatherResearchAdapter) Applicable(query string) bool {
 	value := strings.ToLower(query)

@@ -25,22 +25,31 @@ export type ResearchCitation = { id: string; url: string }
 
 // web_research 的 S1/S2 只在单个用户轮次内有效。模型偶尔会保留编号却漏掉
 // Markdown URL，因此页面从真实 Tool 结果确定性地补上引用定义；不修改会话原文，
-// 也不会把上一个用户轮次的来源错误地带到下一轮。
+// 也不会把上一个用户轮次的来源错误地带到下一轮。同一轮多次调用若复用了
+// 相同编号但 URL 不同，则放弃该编号的自动补链，避免把引用链到错误来源。
 export function collectResearchCitations(messages: Session['messages']) {
   const byMessageID = new Map<number, ResearchCitation[]>()
-  let active: ResearchCitation[] = []
+  let active = new Map<string, string | null>()
   for (const message of messages) {
     if (message.role === 'user') {
-      active = []
+      active = new Map()
       continue
     }
     if (message.role === 'tool' && message.name === 'web_research') {
-      active = parseResearchCitations(message.content || '')
+      for (const citation of parseResearchCitations(message.content || '')) {
+        const previous = active.get(citation.id)
+        if (previous === undefined) active.set(citation.id, citation.url)
+        else if (previous !== citation.url) active.set(citation.id, null)
+      }
       continue
     }
-    if (message.role === 'assistant' && message.content && active.length > 0) byMessageID.set(message.id, active)
+    if (message.role === 'assistant' && message.content && active.size > 0) byMessageID.set(message.id, unambiguousResearchCitations(active))
   }
-  return { byMessageID, active }
+  return { byMessageID, active: unambiguousResearchCitations(active) }
+}
+
+function unambiguousResearchCitations(values: Map<string, string | null>): ResearchCitation[] {
+  return Array.from(values.entries()).flatMap(([id, url]) => url ? [{ id, url }] : [])
 }
 
 function parseResearchCitations(value: string): ResearchCitation[] {

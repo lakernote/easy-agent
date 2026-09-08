@@ -36,6 +36,15 @@
 
 真实浏览器回归之外，`EASYAGENT_LIVE_RESEARCH=1` 覆盖天气、GitHub、行情、人物与 Kafka 官方文档。零配置 HTML provider 在连续调用后曾触发 DuckDuckGo 人机验证；新增的白名单内 `sitemap.xml` 降级仍成功恢复 Kafka 当前文档，并通过断言确认证据同时包含 `replica` 与 `offset`。这说明 HTML 搜索适合作为开发/降级路径，不应作为生产唯一 provider。
 
+## 前后端闭环复核
+
+| 场景 | 会话 | Tool / 模型耗时 | 结论 |
+|---|---:|---:|---|
+| 同一用户轮次连续查 GitHub 和天气 | `06908b2c` | 5.1s / 153.2s | 页面创建会话、SSE、三次 Tool 记录、持久化和最终链接渲染均通。暴露出单一事实的 `max_sources=1` 被后端误拒绝，以及多次调用都从 `S1` 开始可能串链的边界。 |
+| 重启后单一 GitHub 实时事实 | `94690f6b` | 0.7s / 84.3s | Qwen 实际传入 `max_sources=1`，后端成功返回 GitHub 结构化证据；会话回到 `idle`，回答中仓库链接和 `[S1]` 均渲染为 `https://github.com/lakernote/easy-agent`。 |
+
+针对上述复核补充了四个保护：允许单一事实使用 1 个来源；同轮同号来源指向不同 URL 时不自动补链；`source_scope=official` 同样约束结构化 adapter；“是谁/是什么”类短实体先取 Wikidata 候选消歧，但不跳过普通网页搜索。外网集成测试再次覆盖合肥天气、EasyPostman GitHub、Cisco 行情、Laker 消歧和 Kafka 官方文档，5/5 通过。
+
 ## 生产部署建议
 
 1. 模型只看到一个 `web_research`；天气、行情、GitHub 等结构化 adapter 继续作为内部确定性数据源，不恢复多个模型可见工具。

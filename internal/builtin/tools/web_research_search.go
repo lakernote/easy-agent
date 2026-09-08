@@ -541,6 +541,12 @@ func likelyOfficialResearchURL(rawURL string, terms []string) bool {
 			if containsString(pathTerms, term) {
 				return true
 			}
+			normalizedTerm := normalizedRepositoryName(term)
+			for _, pathTerm := range pathTerms {
+				if normalizedTerm != "" && normalizedTerm == normalizedRepositoryName(pathTerm) {
+					return true
+				}
+			}
 		}
 	}
 	return false

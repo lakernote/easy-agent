@@ -41,7 +41,7 @@ func webResearchTool() agent.Tool {
 					"description": "资料时间范围；实时/今天用 day，最近 7 天/一周必须用 week，最近 30 天用 month，不限时间用 any",
 				},
 				"max_sources": map[string]any{
-					"type": "integer", "description": "最多返回的可引用来源数，默认 5，范围 2-8", "minimum": 2, "maximum": maxResearchSources,
+					"type": "integer", "description": "最多返回的可引用来源数，默认 5，范围 1-8；单一实时事实可用 1，复杂研究使用更多来源", "minimum": 1, "maximum": maxResearchSources,
 				},
 				"source_scope": map[string]any{
 					"type": "string", "enum": []string{"any", "official"},
@@ -189,8 +189,8 @@ func parseResearchArguments(raw json.RawMessage) (researchArguments, error) {
 	if arguments.Depth == "deep" && arguments.MaxSources < 6 {
 		arguments.MaxSources = 6
 	}
-	if arguments.MaxSources < 2 || arguments.MaxSources > maxResearchSources {
-		return arguments, invalidResearchArguments(fmt.Sprintf("max_sources 必须在 2 到 %d 之间", maxResearchSources), nil)
+	if arguments.MaxSources < 1 || arguments.MaxSources > maxResearchSources {
+		return arguments, invalidResearchArguments(fmt.Sprintf("max_sources 必须在 1 到 %d 之间", maxResearchSources), nil)
 	}
 	domains := make([]string, 0, len(arguments.Domains))
 	for _, value := range arguments.Domains {
@@ -205,7 +205,7 @@ func parseResearchArguments(raw json.RawMessage) (researchArguments, error) {
 }
 
 func invalidResearchArguments(message string, cause error) error {
-	return &agent.ToolError{Code: "invalid_arguments", Message: message, Hint: "提供明确的问题、合法的时间范围和 2-8 个来源", Retryable: false, Cause: cause}
+	return &agent.ToolError{Code: "invalid_arguments", Message: message, Hint: "提供明确的问题、合法的时间范围和 1-8 个来源", Retryable: false, Cause: cause}
 }
 
 func (engine *researchEngine) Run(ctx context.Context, arguments researchArguments) (string, error) {
@@ -256,12 +256,16 @@ func (engine *researchEngine) Run(ctx context.Context, arguments researchArgumen
 	var candidates []researchSearchResult
 	var searchErr error
 	filteredStructured := 0
+	filteredByScope := 0
 	// 对天气、行情、GitHub 指标等结构化实时事实，quick/normal 不等待也不
 	// 混入低质量网页；adapter 失败再降级搜索。只有 deep 强制追加多源研究。
 	if arguments.Depth != "deep" {
 		collectAdapters()
 		structuredSources, filteredStructured = filterResearchSourcesByDomains(structuredSources, arguments.Domains)
-		if len(structuredSources) == 0 {
+		var count int
+		structuredSources, count = filterResearchSourcesByScope(structuredSources, arguments)
+		filteredByScope += count
+		if !structuredSourcesCanFinish(structuredSources) {
 			var searchAttempts []researchAttempt
 			candidates, searchAttempts, searchErr = engine.search(researchCtx, arguments)
 			attempts = append(attempts, searchAttempts...)
@@ -272,6 +276,9 @@ func (engine *researchEngine) Run(ctx context.Context, arguments researchArgumen
 		attempts = append(attempts, searchAttempts...)
 		collectAdapters()
 		structuredSources, filteredStructured = filterResearchSourcesByDomains(structuredSources, arguments.Domains)
+		var count int
+		structuredSources, count = filterResearchSourcesByScope(structuredSources, arguments)
+		filteredByScope += count
 	}
 
 	webLimit := arguments.MaxSources - len(structuredSources)
@@ -337,6 +344,9 @@ func (engine *researchEngine) Run(ctx context.Context, arguments researchArgumen
 	if filteredByDomain > 0 {
 		limitations = append(limitations, fmt.Sprintf("%d 个来源因不在 domains 硬白名单内而被丢弃", filteredByDomain))
 	}
+	if filteredByScope > 0 {
+		limitations = append(limitations, fmt.Sprintf("%d 个结构化第三方来源因 source_scope=official 而被丢弃", filteredByScope))
+	}
 	if nearDuplicateCount > 0 {
 		limitations = append(limitations, fmt.Sprintf("%d 个正文高度重复的来源已去重", nearDuplicateCount))
 	}
@@ -370,6 +380,18 @@ func (engine *researchEngine) Run(ctx context.Context, arguments researchArgumen
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+func structuredSourcesCanFinish(sources []researchSource) bool {
+	if len(sources) == 0 {
+		return false
+	}
+	for _, source := range sources {
+		if source.Kind == "entity_candidates" {
+			return false
+		}
+	}
+	return true
 }
 
 func researchCitationRule(sources []researchSource) string {
@@ -627,6 +649,27 @@ func filterResearchSourcesByDomains(sources []researchSource, domains []string) 
 	filtered := 0
 	for _, source := range sources {
 		if researchDomainAllowed(researchDomain(source.URL), domains) {
+			result = append(result, source)
+		} else {
+			filtered++
+		}
+	}
+	return result, filtered
+}
+
+// source_scope applies to structured adapters as well as ordinary search
+// results. Without this second gate an "official only" quote or forecast could
+// silently return Yahoo Finance or Open-Meteo even though the search pipeline
+// correctly rejected third-party pages.
+func filterResearchSourcesByScope(sources []researchSource, arguments researchArguments) ([]researchSource, int) {
+	if arguments.SourceScope != "official" || len(arguments.Domains) > 0 {
+		return sources, 0
+	}
+	terms := officialEntityTerms(arguments.Query)
+	result := make([]researchSource, 0, len(sources))
+	filtered := 0
+	for _, source := range sources {
+		if likelyOfficialResearchURL(source.URL, terms) {
 			result = append(result, source)
 		} else {
 			filtered++

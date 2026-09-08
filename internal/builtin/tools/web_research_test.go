@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -17,13 +18,13 @@ type stubSearchProvider struct {
 	name    string
 	results []researchSearchResult
 	err     error
-	calls   *int
+	calls   *atomic.Int64
 }
 
 func (provider stubSearchProvider) Name() string { return provider.name }
 func (provider stubSearchProvider) Search(context.Context, researchSearchRequest) ([]researchSearchResult, error) {
 	if provider.calls != nil {
-		(*provider.calls)++
+		provider.calls.Add(1)
 	}
 	result := append([]researchSearchResult(nil), provider.results...)
 	for index := range result {
@@ -219,8 +220,47 @@ func TestOfficialScopeKeepsLikelyEntityDomainsAndOfficialRepositories(t *testing
 	}
 }
 
+func TestOfficialScopeAlsoFiltersStructuredAdapters(t *testing.T) {
+	var searchCalls atomic.Int64
+	engine := &researchEngine{
+		providers: []researchSearchProvider{stubSearchProvider{
+			name: "official_search", calls: &searchCalls,
+			results: []researchSearchResult{{Title: "Cisco investor relations", URL: "https://investor.cisco.com/stock-information/stock-quote"}},
+		}},
+		adapters: []researchAdapter{stubResearchAdapter{name: "finance", applies: true, sources: []researchSource{{
+			Title: "CSCO market quote", URL: "https://finance.yahoo.com/quote/CSCO", Provider: "yahoo_finance",
+			Kind: "market_quote", RetrievedAt: "2026-09-08T00:00:00Z", Content: "third-party quote",
+		}}}},
+		fetcher: &stubResearchFetcher{sources: map[string]researchSource{
+			"https://investor.cisco.com/stock-information/stock-quote": {
+				Title: "Cisco investor relations", URL: "https://investor.cisco.com/stock-information/stock-quote",
+				Provider: "official_search", Kind: "web_page", RetrievedAt: "2026-09-08T00:00:00Z", Content: "official stock information",
+			},
+		}},
+		now: time.Now,
+	}
+	output, err := engine.Run(context.Background(), researchArguments{
+		Query: "Cisco official stock information", Depth: "normal", Freshness: "day", MaxSources: 2, SourceScope: "official",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if searchCalls.Load() == 0 || strings.Contains(output, "finance.yahoo.com") || !strings.Contains(output, "investor.cisco.com") {
+		t.Fatalf("official scope 没有约束结构化来源: calls=%d output=%s", searchCalls.Load(), output)
+	}
+}
+
+func TestOfficialScopeKeepsNormalizedRepositoryName(t *testing.T) {
+	values := []researchSearchResult{{Title: "Easy Postman", URL: "https://github.com/lakernote/easy-postman"}}
+	ranked := rankResearchCandidates(values, "EasyPostman official GitHub repository", nil)
+	filtered := filterResearchCandidates(ranked, researchArguments{Query: "EasyPostman official GitHub repository", SourceScope: "official"})
+	if len(filtered) != 1 {
+		t.Fatalf("连字符仓库名应匹配精确实体拼写: %+v", filtered)
+	}
+}
+
 func TestConfiguredSearchProviderAvoidsHTMLFallbackWhenItHasEnoughCandidates(t *testing.T) {
-	primaryCalls, fallbackCalls := 0, 0
+	var primaryCalls, fallbackCalls atomic.Int64
 	results := []researchSearchResult{
 		{Title: "one", URL: "https://one.example/doc"},
 		{Title: "two", URL: "https://two.example/doc"},
@@ -232,8 +272,8 @@ func TestConfiguredSearchProviderAvoidsHTMLFallbackWhenItHasEnoughCandidates(t *
 		stubSearchProvider{name: "duckduckgo_html", results: results, calls: &fallbackCalls},
 	}}
 	ranked, _, err := engine.search(context.Background(), researchArguments{Query: "test", Depth: "quick", SourceScope: "any", Freshness: "any", MaxSources: 2})
-	if err != nil || len(ranked) < 4 || primaryCalls == 0 || fallbackCalls != 0 {
-		t.Fatalf("配置型 provider 分层错误: primary=%d fallback=%d results=%d err=%v", primaryCalls, fallbackCalls, len(ranked), err)
+	if err != nil || len(ranked) < 4 || primaryCalls.Load() == 0 || fallbackCalls.Load() != 0 {
+		t.Fatalf("配置型 provider 分层错误: primary=%d fallback=%d results=%d err=%v", primaryCalls.Load(), fallbackCalls.Load(), len(ranked), err)
 	}
 }
 
@@ -348,7 +388,7 @@ func TestEvidenceStatusDistinguishesIndependentWebsites(t *testing.T) {
 }
 
 func TestNormalStructuredFactDoesNotWaitForGeneralSearch(t *testing.T) {
-	searchCalls := 0
+	var searchCalls atomic.Int64
 	engine := &researchEngine{
 		providers: []researchSearchProvider{stubSearchProvider{
 			name: "should_not_run", calls: &searchCalls,
@@ -365,8 +405,8 @@ func TestNormalStructuredFactDoesNotWaitForGeneralSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if searchCalls != 0 || !strings.Contains(output, `"kind": "structured_fact"`) {
-		t.Fatalf("normal 结构化事实不应等待通用搜索: calls=%d output=%s", searchCalls, output)
+	if searchCalls.Load() != 0 || !strings.Contains(output, `"kind": "structured_fact"`) {
+		t.Fatalf("normal 结构化事实不应等待通用搜索: calls=%d output=%s", searchCalls.Load(), output)
 	}
 }
 
@@ -420,6 +460,24 @@ func TestStructuredIntentParsing(t *testing.T) {
 	lookup, ticker := financeIdentity("CSCO stock price")
 	if lookup != "CSCO" || ticker != "CSCO" {
 		t.Fatalf("股票代码解析错误: lookup=%q ticker=%q", lookup, ticker)
+	}
+}
+
+func TestEntityAdapterProvidesAmbiguousCandidatesWithoutSuppressingSearch(t *testing.T) {
+	client := researchJSONClient(func(request *http.Request) (int, string) {
+		if request.URL.Query().Get("search") != "Laker" || request.URL.Query().Get("language") != "en" {
+			t.Fatalf("实体消歧请求错误: %s", request.URL.String())
+		}
+		return http.StatusOK, `{"search":[{"id":"Q37007996","label":"Laker","description":"family name","concepturi":"https://www.wikidata.org/entity/Q37007996","match":{"type":"label","language":"en","text":"Laker"}},{"id":"Q121783","label":"Los Angeles Lakers","description":"American professional basketball team","concepturi":"https://www.wikidata.org/entity/Q121783","match":{"type":"alias","language":"en","text":"Lakers"}}]}`
+	})
+	adapter := &entityResearchAdapter{client: client, wikidataURL: "https://www.wikidata.org/w/api.php"}
+	if !adapter.Applicable("Laker 是谁？请检索并区分含义") || adapter.Applicable("Laker 最新新闻") {
+		t.Fatal("实体问题识别错误")
+	}
+	sources, err := adapter.Research(context.Background(), "Laker 是谁？请检索并区分含义")
+	if err != nil || len(sources) != 1 || sources[0].Kind != "entity_candidates" ||
+		!strings.Contains(sources[0].Content, "Los Angeles Lakers") || structuredSourcesCanFinish(sources) {
+		t.Fatalf("实体候选结果错误: sources=%+v err=%v", sources, err)
 	}
 }
 
@@ -603,6 +661,13 @@ func TestParseResearchArgumentsRejectsInvalidDomain(t *testing.T) {
 	_, err := parseResearchArguments(json.RawMessage(`{"query":"test","domains":["https://example.com/path"]}`))
 	if err == nil || !strings.Contains(err.Error(), "无效优先域名") {
 		t.Fatalf("带路径的优先域名应被拒绝: %v", err)
+	}
+}
+
+func TestParseResearchArgumentsAllowsOneSourceForExactFact(t *testing.T) {
+	arguments, err := parseResearchArguments(json.RawMessage(`{"query":"lakernote/easy-agent stars","depth":"quick","max_sources":1}`))
+	if err != nil || arguments.MaxSources != 1 {
+		t.Fatalf("单一实时事实应允许一个来源: arguments=%+v err=%v", arguments, err)
 	}
 }
 
