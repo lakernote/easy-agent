@@ -26,7 +26,7 @@ internal/builtin/
 ├── prompt/system.md         # 常规 Agent 的稳定基础 Prompt
 ├── prompt/compaction.md     # 独立的上下文检查点 Prompt
 ├── skills/definitions/*     # 一个目录一个 SKILL.md
-├── tools/                   # 文件、网页、时间、天气、计算、Shell 和 Skill 加载
+├── tools/                   # 文件、高层网页研究、时间、计算、Shell 和 Skill 加载
 
 internal/mcp/
 └── presets/                 # 页面一键安装预设
@@ -110,7 +110,11 @@ Skill 默认使用渐进式加载：模型先看到简短元数据；任务相�
 
 内置 Tool 首轮常驻 `current_time`、`calculate`、`shell`、`read`、`grep`、`find`、`ls`、`web_research` 八个高频核心工具，同时注册 `load_tools`：其描述只包含 information、files、execution、web、skills 五个稳定能力组，不向小模型暴露其余函数名。时间、计算、命令、只读文件检查和联网研究任务可以直接进入真实工具调用；写文件和 Skill 能力仍由模型自主选出最少能力组，Runtime 动态注册组内 Schema。Loader 结果不是任务证据，下一轮会临时隐藏 Loader，使用 `tool_choice=auto` 并由 Runner 验证真实工具调用。`@tool:name` 是用户显式预加载，不是语义路由。当历史上下文仍包含某个内置 function call 时，Runtime 会恢复其 Schema，防止历史与本轮 `tools` 不一致。MCP 默认同样先提供服务元数据；用户明确输入 `@mcp:id` 时，如果该 MCP 不超过 5 个工具且 Schema 体积较小，Runtime 直接预加载，否则仍调用 `search_mcp_tools(id, query)` 按需检索，一次最多注册 5 个最相关 Schema。若 Provider 在 HTTP 200 的 SSE 尾部返回工具校验错误，Trace 会保留原始错误并关闭流式重试一次。空响应只在本轮已成功执行真实工具后才可进入 `none` 收敛；Loader 结果和历史工具结果不会触发收敛。
 
-`web_research` 对模型保持一个 Schema，内部同时运行结构化数据 adapter 和搜索/抓取管线。零配置时使用 DuckDuckGo、Bing HTML；生产环境可设置 `TAVILY_API_KEY`（或 `EASYAGENT_TAVILY_API_KEY`）、`EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY`。配置型 API provider 优先，候选不足才调用 HTML 降级。`domains` 是抓取前后校验的硬白名单，官方资料请求使用 `source_scope=official`；搜索候选全部失效时，在白名单内通过标准 `sitemap.xml` 恢复站内文档发现，再降级到官网常见入口。候选优先覆盖不同网站域名，短英文实体会追加精确拼写与消歧查询，版本化文档与正文近重复来源会合并并保留较新版本。中文公司名先由 Wikidata 做实体消歧，再读取行情；GitHub REST API 被限流时自动降级到 GitHub 官方搜索页和仓库页，`GITHUB_TOKEN`/`GH_TOKEN` 可进一步提高 API 限额。可选 `EASYAGENT_READER_URL` 与 `EASYAGENT_READER_API_KEY` 为 PDF、动态页面提供 reader 降级。所有秘密只从服务环境读取，不写入 Prompt、Tool 参数、结果或 Trace。
+`web_research` 对模型保持一个 Schema，内部同时运行结构化数据 adapter 和搜索/抓取管线。零配置时使用 DuckDuckGo、Bing HTML；生产环境可设置 `TAVILY_API_KEY`（或 `EASYAGENT_TAVILY_API_KEY`）、`EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY`。配置型 API provider 优先，候选不足才调用 HTML 降级。`domains` 是抓取前后校验的硬白名单，官方资料请求使用 `source_scope=official`；搜索候选全部失效时，在白名单内通过标准 `sitemap.xml` 恢复站内文档发现，再降级到官网常见入口。候选优先覆盖不同网站域名，短英文实体会追加精确拼写与消歧查询，版本化文档与正文近重复来源会合并并保留较新版本。中文公司名先由 Wikidata 做实体消歧，再读取行情；GitHub REST API 被限流时自动降级到 GitHub 官方搜索页和仓库页，`GITHUB_TOKEN`/`GH_TOKEN` 可进一步提高 API 限额。可选 `EASYAGENT_READER_URL` 与 `EASYAGENT_READER_API_KEY` 为 PDF、动态页面提供 reader 降级。这些内部凭据不会被写进 Prompt、`web_research` 参数、结果或 Trace；但 Shell、Codex 和 stdio MCP 以同一个服务账号运行并继承服务环境，所以它们不是面向不可信租户的隔离边界。
+
+页面会从同一用户轮次的真实 `web_research` 结果建立来源表。即使小模型只输出 `[S1]` 而漏抄 `citation` 中的 Markdown URL，Web 回答区也会把该编号确定性地链接到对应来源；映射在新用户轮次开始时清空，防止跨轮串用编号。
+
+GitHub/GitLab 能力分三层：公开事实由 `web_research` 读取；本地版本控制由 `shell` 调用服务账号 PATH 中的 `git`、`gh` 或 `glab`；仓库平台的私有对象与工作流优先通过 MCP。GitHub 官方远端 MCP 可在 **设置 → 工具与 MCP** 填写 Bearer Token。GitLab 官方远端 MCP 依赖 OAuth 动态客户端注册，当前 MCP 客户端尚未实现该登录流程；临时接入可安装支持 `mcp serve` 的 `glab` 并配置为 stdio MCP。MCP 密钥会从 Bootstrap/API 响应中遮蔽，但仍保存在权限受限的本地 SQLite 中，不应把数据库当成独立密钥保险库。
 
 工作区文件能力直接编译进 Go 二进制：`read` 分段读取文本，`grep` 搜索内容，`find` 查找文件，`ls` 查看目录，`edit` 做唯一精确替换，`write` 创建文件或在已读取版本未变化时完整覆盖。默认工作区固定为 `~/.easyagent/workspaces/default`，不使用进程 CWD。用户在页面创建会话时可以选择服务器上已存在的目录；绝对路径保存在会话中，后续多轮固定使用它。每轮从会话派生独立 Environment，文件、Shell 和 stdio MCP 共用该工作区，路径解析会校验真实符号链接目标并拒绝越界。
 

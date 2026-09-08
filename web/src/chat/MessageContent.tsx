@@ -12,15 +12,50 @@ import { capabilityResultLabel, describeToolCall, SelectedCapabilities } from '.
 const MathMarkdown = lazy(() => import('../MathMarkdown'))
 const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
 
-export function MessageView({ message, relatedCall }: { message: Session['messages'][number]; relatedCall?: Session['messages'][number]['toolCalls'][number] }) {
+export function MessageView({ message, relatedCall, researchCitations = [] }: { message: Session['messages'][number]; relatedCall?: Session['messages'][number]['toolCalls'][number]; researchCitations?: ResearchCitation[] }) {
 	if (message.role === 'tool') return <details className={`tool-result ${relatedCall ? describeToolCall(relatedCall).kind : ''}`}><summary><span>⌁</span>{capabilityResultLabel(relatedCall, message.name || '工具')}</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
   if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}<SelectedCapabilities message={message} />{message.content && <div>{message.content}</div>}</div></div>
   if (message.role !== 'assistant') return null
-  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => { const item = describeToolCall(call); return <span className={item.kind} key={call.id}><b>{item.label}</b>{item.name}</span> })}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
+  return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => { const item = describeToolCall(call); return <span className={item.kind} key={call.id}><b>{item.label}</b>{item.name}</span> })}</div>}{message.content && <div className="answer-text"><Markdown researchCitations={researchCitations}>{message.content}</Markdown></div>}</div></div>
 }
 
 type ResearchSource = { id?: string; title?: string; url?: string; domain?: string; provider?: string; kind?: string; content?: string }
 type ResearchResult = { ok?: boolean; depth?: string; source_scope?: string; domain_constraints?: string[]; evidence_status?: string; independent_domain_count?: number; source_count?: number; sources?: ResearchSource[]; limitations?: string[] }
+export type ResearchCitation = { id: string; url: string }
+
+// web_research 的 S1/S2 只在单个用户轮次内有效。模型偶尔会保留编号却漏掉
+// Markdown URL，因此页面从真实 Tool 结果确定性地补上引用定义；不修改会话原文，
+// 也不会把上一个用户轮次的来源错误地带到下一轮。
+export function collectResearchCitations(messages: Session['messages']) {
+  const byMessageID = new Map<number, ResearchCitation[]>()
+  let active: ResearchCitation[] = []
+  for (const message of messages) {
+    if (message.role === 'user') {
+      active = []
+      continue
+    }
+    if (message.role === 'tool' && message.name === 'web_research') {
+      active = parseResearchCitations(message.content || '')
+      continue
+    }
+    if (message.role === 'assistant' && message.content && active.length > 0) byMessageID.set(message.id, active)
+  }
+  return { byMessageID, active }
+}
+
+function parseResearchCitations(value: string): ResearchCitation[] {
+  let research: ResearchResult
+  try { research = JSON.parse(value) as ResearchResult } catch { return [] }
+  if (!research.ok || !Array.isArray(research.sources)) return []
+  const seen = new Set<string>()
+  return research.sources.flatMap((source, index) => {
+    const id = String(source.id || `S${index + 1}`).toUpperCase()
+    const url = normalizedResearchURL(source.url)
+    if (!/^S\d+$/.test(id) || !url || seen.has(id)) return []
+    seen.add(id)
+    return [{ id, url }]
+  })
+}
 
 function ToolResult({ name, value }: { name: string; value: string }) {
   if (name !== 'web_research') return <Payload value={value} />
@@ -51,7 +86,17 @@ function researchEvidenceLabel(research: ResearchResult) {
   return '单一来源'
 }
 
-function safeResearchLink(value?: string) { return !!value && /^https?:\/\//i.test(value) }
+function safeResearchLink(value?: string) { return normalizedResearchURL(value) !== '' }
+
+function normalizedResearchURL(value?: string) {
+  if (!value) return ''
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : ''
+  } catch {
+    return ''
+  }
+}
 
 function MessageAttachments({ attachments }: { attachments: Session['messages'][number]['attachments'] }) {
   return <div className="message-attachments">{attachments.map((attachment) => {
@@ -64,9 +109,20 @@ function MessageAttachments({ attachments }: { attachments: Session['messages'][
 
 export function Avatar() { return <div className="avatar"><Logo /></div> }
 
-export function Markdown({ children }: { children: string }) {
-  if (hasMath(children)) return <Suspense fallback={<ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{children}</ReactMarkdown>}><MathMarkdown>{children}</MathMarkdown></Suspense>
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{children}</ReactMarkdown>
+export function Markdown({ children, researchCitations = [] }: { children: string; researchCitations?: ResearchCitation[] }) {
+  const content = addResearchCitationDefinitions(children, researchCitations)
+  if (hasMath(content)) return <Suspense fallback={<ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>}><MathMarkdown>{content}</MathMarkdown></Suspense>
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
+}
+
+function addResearchCitationDefinitions(content: string, citations: ResearchCitation[]) {
+  const definitions = citations.flatMap((citation) => {
+    const escapedID = citation.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (!new RegExp(`\\[${escapedID}\\]`, 'i').test(content)) return []
+    if (new RegExp(`^\\s*\\[${escapedID}\\]:`, 'im').test(content)) return []
+    return [`[${citation.id}]: <${citation.url}>`]
+  })
+  return definitions.length > 0 ? `${content.trimEnd()}\n\n${definitions.join('\n')}` : content
 }
 
 export function ContextBar({ session }: { session: Session }) {

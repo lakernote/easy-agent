@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Bootstrap, Session, TraceEvent } from './types'
 import { starterSuggestions } from './suggestions'
-import { Avatar, ContextBar, Markdown, MessageView } from './chat/MessageContent'
+import { Avatar, collectResearchCitations, ContextBar, Markdown, MessageView } from './chat/MessageContent'
 import { Logo } from './ui'
 import { RunError } from './dialogs'
 import { ChatComposer } from './chat/ChatComposer'
@@ -20,6 +20,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   const composer = useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities, onOpenModelSettings })
   const { isCodexRuntime, sending, send, startSuggestion } = composer
   const callsByID = new Map(session?.messages.flatMap((message) => message.toolCalls.map((call) => [call.id, call] as const)) || [])
+  const researchCitations = collectResearchCitations(session?.messages || [])
   const conversationItems: ConversationItem[] = session ? [
     ...session.messages.map((message) => ({ kind: 'message' as const, createdAt: message.createdAt, id: message.id, message })),
     ...(session.runtime === 'codex' ? codexConversationActivities(session.events).map((event) => ({ kind: 'activity' as const, createdAt: event.createdAt, id: event.id, event })) : []),
@@ -87,11 +88,11 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">自托管 Agent · 在服务器持续执行</p><h1>今天要交付什么？</h1><p>选择项目与运行环境，描述要完成的任务；输入 <code>@</code> 可指定 Skill、Tool 或 MCP。</p><div className="suggestion-heading"><div><strong>试试这些任务</strong><span>快速查询，也可以处理真实研发工作</span></div><small>点击填入，可继续编辑</small></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`填入示例：${suggestion.category}，${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow" aria-hidden="true">→</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
-      {groupedConversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : item.kind === 'activity-group' ? <CodexActivityGroup key={`activities-${item.id}`} events={item.events} onOpenTrace={onOpenTrace} /> : null)}
+      {groupedConversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} researchCitations={researchCitations.byMessageID.get(item.message.id)} /> : item.kind === 'activity-group' ? <CodexActivityGroup key={`activities-${item.id}`} events={item.events} onOpenTrace={onOpenTrace} /> : null)}
       {session?.status === 'queued' && <div className="assistant-row"><Avatar /><div className="thinking queued" role="status" aria-live="polite"><i /><i /><i /><span>{session.runProgress || `${isCodexRuntime ? 'Codex' : 'EasyAgent'} · 任务排队中`}</span></div></div>}
       {session?.status === 'paused' && <div className="run-error paused"><div className="run-error-mark" aria-hidden="true">Ⅱ</div><div className="run-error-copy"><strong>排队任务已暂停</strong><span>任务尚未开始执行，可以在输入区继续或取消。</span></div></div>}
       {session?.status === 'running' && <ExecutionProgress session={session} />}
-      {session?.status === 'running' && session.partialOutput && <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown>{session.partialOutput}</Markdown></div></div></div>}
+      {session?.status === 'running' && session.partialOutput && <div className="assistant-row"><Avatar /><div className="assistant-message streaming-message"><div className="answer-text"><Markdown researchCitations={researchCitations.active}>{session.partialOutput}</Markdown></div></div></div>}
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
         const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
         if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)
