@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,22 +32,6 @@ func TestCurrentTimeIncludesOffset(t *testing.T) {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("current_time 缺少 %s: %s", expected, output)
 		}
-	}
-}
-
-func TestBuildWeatherForecast(t *testing.T) {
-	forecast := buildWeatherForecast(weatherDaily{
-		Time:                 []string{"2026-09-01", "2026-09-02"},
-		WeatherCode:          []int{1, 61},
-		TemperatureMax:       []float64{31.5, 28},
-		TemperatureMin:       []float64{24, 22.5},
-		PrecipitationProbMax: []int{10, 70},
-	})
-	if len(forecast) != 2 || forecast[1]["condition"] != "雨" || forecast[1]["precipitation_probability_percent"] != 70 {
-		t.Fatalf("天气预报结构错误: %+v", forecast)
-	}
-	if got := buildWeatherForecast(weatherDaily{Time: []string{"2026-09-01"}, WeatherCode: []int{0}}); len(got) != 0 {
-		t.Fatalf("缺少温度字段时不应生成不完整预报: %+v", got)
 	}
 }
 
@@ -225,7 +207,7 @@ func TestToolCategoriesComeFromRegistration(t *testing.T) {
 	}
 	for name, expected := range map[string]string{
 		"read": categoryFile, "shell": categoryExecution,
-		"web_search": categoryInformation, "current_time": categoryInformation,
+		"web_research": categoryInformation, "current_time": categoryInformation,
 	} {
 		if categories[name] != expected {
 			t.Fatalf("工具 %s 分类错误: got=%q want=%q", name, categories[name], expected)
@@ -233,26 +215,30 @@ func TestToolCategoriesComeFromRegistration(t *testing.T) {
 	}
 }
 
-func TestWebFetchReadsHTMLAndLimitsContent(t *testing.T) {
-	remote := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = response.Write([]byte(`<html><head><style>hidden</style></head><body><nav>导航噪声</nav><main><h1>真实标题</h1><p>` + strings.Repeat("内容", 800) + `</p></main></body></html>`))
-	}))
-	defer remote.Close()
-
-	input, _ := json.Marshal(map[string]any{"url": remote.URL, "max_chars": 1000})
-	output, err := runWebFetch(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output, "真实标题") || strings.Contains(output, "hidden") || strings.Contains(output, "导航噪声") || !strings.Contains(output, `"truncated": true`) || !strings.Contains(output, `"content_trust": "untrusted_external"`) || !strings.Contains(output, `"stage": "source"`) || !strings.Contains(output, `"evidence_status": "source_retrieved"`) {
-		t.Fatalf("网页正文提取错误: %s", output)
+func TestCatalogExposesOnlyHighLevelWebResearch(t *testing.T) {
+	for _, info := range InfoList(testEnvironment(t, t.TempDir()), nil) {
+		if info.Name == "web_search" || info.Name == "web_fetch" || info.Name == "weather" {
+			t.Fatalf("旧联网工具不应再暴露: %+v", info)
+		}
 	}
 }
 
-func TestWebSearchIsMarkedAsDiscoveryOnly(t *testing.T) {
-	tool := webSearchTool()
-	if !tool.Spec.DiscoveryOnly || !strings.Contains(tool.Spec.Description, "搜索摘要不是原始证据") {
-		t.Fatalf("web_search 必须声明候选发现语义: %+v", tool.Spec)
+func TestWebResearchExtractsMetadataAndEvidence(t *testing.T) {
+	page := `<html><head><title>官方标题</title><meta property="article:published_time" content="2026-09-08"></head><body><nav>导航噪声</nav><main><h1>研究正文</h1><p>` + strings.Repeat("内容", 800) + `</p></main></body></html>`
+	title, published := pageMetadata(page, "候选标题")
+	content := cleanHTMLText(mainOrArticleHTML(page))
+	if title != "官方标题" || published != "2026-09-08" || !strings.Contains(content, "研究正文") || strings.Contains(content, "导航噪声") {
+		t.Fatalf("网页正文或元数据提取错误: title=%q published=%q content=%q", title, published, content[:min(len(content), 100)])
+	}
+	truncated, ok := truncateRunes(content, 1000)
+	if !ok || !strings.Contains(truncated, "内容已截断") {
+		t.Fatalf("来源正文截断标记错误: %q", truncated)
+	}
+}
+
+func TestWebResearchToolIsHighLevelAndDirect(t *testing.T) {
+	tool := webResearchTool()
+	if tool.Spec.Name != "web_research" || tool.Spec.DiscoveryOnly || !strings.Contains(tool.Spec.Description, "自动") || !strings.Contains(tool.Spec.Description, "[S1]") {
+		t.Fatalf("web_research 应是高层证据工具: %+v", tool.Spec)
 	}
 }

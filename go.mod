@@ -5,6 +5,7 @@ go 1.26.7
 require (
 	github.com/BurntSushi/toml v1.5.0 // 读写 Codex 配置 config.toml
 	github.com/modelcontextprotocol/go-sdk v1.7.0 // MCP 官方 Go SDK，用于动态接入外部 Agent 工具
+	golang.org/x/net v0.55.0 // 安全网络连接、HTML 解析和网页字符集解码
 	modernc.org/sqlite v1.45.0 // 纯 Go SQLite 驱动，不依赖系统 SQLite 或 CGO
 )
 
@@ -23,6 +24,7 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

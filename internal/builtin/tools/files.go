@@ -84,7 +84,7 @@ func (workspace *fileWorkspace) grepTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "grep",
-			Description: "只在本地工作区文本文件中搜索内容，返回相对路径、行号和匹配行。path 必须是文件系统路径，不能传 URL；网页正文应继续使用 web_fetch 的返回，不能用 grep 二次搜索网页。搜索代码时优先于 shell grep/rg。",
+			Description: "只在本地工作区文本文件中搜索内容，返回相对路径、行号和匹配行。path 必须是文件系统路径，不能传 URL；网页正文应使用 web_research 的来源内容，不能用 grep 二次搜索网页。搜索代码时优先于 shell grep/rg。",
 			Parameters: objectSchema(map[string]any{
 				"query":          stringSchema("要搜索的文本或正则表达式"),
 				"path":           stringSchema("可选，本地工作区内的文件或目录路径，默认工作区根目录；不能是 URL"),

@@ -11,7 +11,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/agent"
 )
 
-var coreToolNames = []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch"}
+var coreToolNames = []string{"current_time", "calculate", "shell", "read", "grep", "find", "ls", "web_research"}
 
 // Loader 只把一个精简的工具组目录放进首轮请求。模型确认需要某类能力后，调用
 // load_tools 按组加载真实 Tool Schema；下一轮即可调用这些工具。
@@ -82,8 +82,8 @@ func (loader *Loader) Preload(names []string) []agent.Tool {
 	return result
 }
 
-// PreloadCore 常驻研发、测试和运维任务最高频的当前时间、Shell、只读文件检索和网页工具。
-// 写文件、Skill、天气和计算等低频能力仍按需加载，兼顾首轮执行成功率与 Token。
+// PreloadCore 常驻研发、测试和运维任务最高频的当前时间、Shell、只读文件检索和网页研究。
+// 写文件、Skill 和其他低频能力仍按需加载，兼顾首轮执行成功率与 Token。
 func (loader *Loader) PreloadCore() []agent.Tool {
 	return loader.Preload(coreToolNames)
 }

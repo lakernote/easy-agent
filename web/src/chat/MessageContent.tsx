@@ -13,46 +13,32 @@ const MathMarkdown = lazy(() => import('../MathMarkdown'))
 const hasMath = (value: string) => /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/.test(value)
 
 export function MessageView({ message, relatedCall }: { message: Session['messages'][number]; relatedCall?: Session['messages'][number]['toolCalls'][number] }) {
-  if (message.role === 'tool') return <details className={`tool-result ${relatedCall ? describeToolCall(relatedCall).kind : ''}`} open={message.name === 'weather'}><summary><span>⌁</span>{message.name === 'weather' ? '天气预报' : capabilityResultLabel(relatedCall, message.name || '工具')}</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
+	if (message.role === 'tool') return <details className={`tool-result ${relatedCall ? describeToolCall(relatedCall).kind : ''}`}><summary><span>⌁</span>{capabilityResultLabel(relatedCall, message.name || '工具')}</summary><ToolResult name={message.name || ''} value={message.content || ''} /></details>
   if (message.role === 'user') return <div className="user-row"><div className="user-message">{message.attachments?.length > 0 && <MessageAttachments attachments={message.attachments} />}<SelectedCapabilities message={message} />{message.content && <div>{message.content}</div>}</div></div>
   if (message.role !== 'assistant') return null
   return <div className="assistant-row"><Avatar /><div className="assistant-message">{message.toolCalls?.length > 0 && <div className="tool-intent">{message.toolCalls.map((call) => { const item = describeToolCall(call); return <span className={item.kind} key={call.id}><b>{item.label}</b>{item.name}</span> })}</div>}{message.content && <div className="answer-text"><Markdown>{message.content}</Markdown></div>}</div></div>
 }
 
-type WeatherResult = {
-  location?: { name?: string; admin1?: string; country?: string }
-  observed_at?: string
-  condition?: string
-  temperature_c?: number
-  feels_like_c?: number
-  humidity_percent?: number
-  wind_kmh?: number
-  source?: string
-  forecast?: Array<{ date?: string; condition?: string; temp_max_c?: number; temp_min_c?: number; precipitation_probability_percent?: number }>
-}
+type ResearchSource = { id?: string; title?: string; url?: string; domain?: string; provider?: string; kind?: string; content?: string }
+type ResearchResult = { ok?: boolean; depth?: string; evidence_status?: string; source_count?: number; sources?: ResearchSource[]; limitations?: string[] }
 
 function ToolResult({ name, value }: { name: string; value: string }) {
-  if (name !== 'weather') return <Payload value={value} />
-  let weather: WeatherResult
-  try { weather = JSON.parse(value) as WeatherResult } catch { return <Payload value={value} /> }
-  if (!weather.location || !Array.isArray(weather.forecast)) return <Payload value={value} />
-  const place = [weather.location.name, weather.location.admin1, weather.location.country].filter(Boolean).join(' · ')
-  return <div className="weather-result">
-    <div className="weather-current"><div><strong>{place || '天气'}</strong><span>{weather.condition || '—'}</span></div><b>{typeof weather.temperature_c === 'number' ? `${weather.temperature_c}°C` : '—'}</b><small>体感 {formatWeatherNumber(weather.feels_like_c)}°C · 湿度 {formatWeatherNumber(weather.humidity_percent)}% · 风速 {formatWeatherNumber(weather.wind_kmh)} km/h</small><small>{weather.observed_at ? `观测于 ${weather.observed_at}` : ''}{weather.source ? ` · ${weather.source}` : ''}</small></div>
-    <div className="weather-forecast" aria-label="未来天气预报">{weather.forecast.map((day, index) => <div className="weather-day" key={`${day.date || 'day'}-${index}`}><strong>{formatWeatherDate(day.date)}</strong><span>{day.condition || '—'}</span><b>{formatWeatherNumber(day.temp_max_c)}° / {formatWeatherNumber(day.temp_min_c)}°</b>{typeof day.precipitation_probability_percent === 'number' && <small>降水 {day.precipitation_probability_percent}%</small>}</div>)}</div>
-    <details className="weather-raw"><summary>查看原始天气数据</summary><Payload value={value} /></details>
+  if (name !== 'web_research') return <Payload value={value} />
+  let research: ResearchResult
+  try { research = JSON.parse(value) as ResearchResult } catch { return <Payload value={value} /> }
+  if (!research.ok || !Array.isArray(research.sources)) return <Payload value={value} />
+  return <div className="research-result">
+    <div className="research-result-head"><strong>{research.source_count ?? research.sources.length} 个已读取来源</strong><span>{research.depth || 'normal'} · {research.evidence_status === 'multiple_sources_retrieved' ? '多源证据' : '单一来源'}</span></div>
+    <div className="research-source-list">{research.sources.map((source, index) => <details className="research-source" key={`${source.id || index}-${source.url || ''}`}>
+      <summary><b>{source.id || `S${index + 1}`}</b><span>{source.title || source.domain || '来源'}</span><small>{source.provider || source.kind || ''}</small></summary>
+      {safeResearchLink(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.domain || source.url}</a>}
+      {source.content && <pre>{source.content}</pre>}
+    </details>)}</div>
+    {Array.isArray(research.limitations) && research.limitations.length > 0 && <p className="research-limitations">{research.limitations.join('；')}</p>}
   </div>
 }
 
-function formatWeatherDate(value?: string) {
-  if (!value) return '—'
-  const date = new Date(`${value}T00:00:00`)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(date)
-}
-
-function formatWeatherNumber(value?: number) {
-  return typeof value === 'number' ? Number.isInteger(value) ? String(value) : value.toFixed(1) : '—'
-}
+function safeResearchLink(value?: string) { return !!value && /^https?:\/\//i.test(value) }
 
 function MessageAttachments({ attachments }: { attachments: Session['messages'][number]['attachments'] }) {
   return <div className="message-attachments">{attachments.map((attachment) => {

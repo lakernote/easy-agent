@@ -38,8 +38,8 @@ func TestLoaderRegistersOnlySelectedTools(t *testing.T) {
 }
 
 func TestLoaderPreloadsCoreTools(t *testing.T) {
-	names := []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch", "weather"}
-	expected := []string{"current_time", "shell", "read", "grep", "find", "ls", "web_search", "web_fetch"}
+	names := []string{"current_time", "calculate", "shell", "read", "grep", "find", "ls", "web_research", "legacy_tool"}
+	expected := []string{"current_time", "calculate", "shell", "read", "grep", "find", "ls", "web_research"}
 	catalog := make([]agent.Tool, 0, len(names))
 	for _, name := range names {
 		catalog = append(catalog, agent.Tool{Spec: agent.ToolSpec{Name: name, Group: "test", Description: name, Parameters: map[string]any{"type": "object"}}, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }})

@@ -51,10 +51,10 @@ const (
 )
 
 var groupDescriptions = map[string]string{
-	groupInformation: "日期、时间和天气",
+	groupInformation: "日期、时间和外部事实研究",
 	groupFiles:       "工作区文件的列出、查找、搜索、读取和修改",
 	groupExecution:   "数学计算、Shell、构建、测试和 CLI",
-	groupWeb:         "互联网搜索和已知网页读取",
+	groupWeb:         "互联网研究、来源核验和引用",
 	groupSkills:      "按需加载与任务相关的 Skill 方法",
 }
 
@@ -83,10 +83,8 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry
 	files := newFileWorkspace(environment.Workspace(), environment.Directories())
 	result := []entry{
 		{tool: currentTimeTool(), category: categoryInformation, group: groupInformation},
-		{tool: weatherTool(), category: categoryInformation, group: groupInformation},
 		{tool: calculateTool(), category: categoryExecution, group: groupExecution},
-		{tool: webSearchTool(), category: categoryInformation, group: groupWeb},
-		{tool: webFetchTool(), category: categoryInformation, group: groupWeb},
+		{tool: webResearchTool(), category: categoryInformation, group: groupWeb},
 	}
 	for _, tool := range files.tools() {
 		result = append(result, entry{tool: tool, category: categoryFile, group: groupFiles})

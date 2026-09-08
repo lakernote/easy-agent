@@ -386,7 +386,7 @@ func (runner *Runner) describeToolCall(call ToolCall) ToolCall {
 
 const visibleAnswerReminder = "上一响应没有可展示的最终正文。不要重复调用已经成功的工具；请根据已有工具结果，在 assistant content 中直接给出最终答案。"
 
-const sourceVerificationReminder = "你刚才只获得了搜索候选和摘要，它们不是原始来源证据。请继续调用当前可用的 web_fetch、Shell、MCP 或其他合适工具读取至少一个权威原始来源；核对实体和关键数值后再回答。若原始来源确实无法访问，请明确说明已尝试的地址和限制，不要把搜索摘要当成已核验事实。"
+const sourceVerificationReminder = "你刚才只获得了发现阶段的候选和摘要，它们不是原始来源证据。请继续调用当前可用的来源读取能力、Shell、MCP 或其他合适工具读取至少一个权威原始来源；核对实体和关键数值后再回答。若原始来源确实无法访问，请明确说明已尝试的地址和限制，不要把摘要当成已核验事实。"
 
 // prepareEmptyResponseRetry 只在当前 Run 已成功执行真实工具时强制收敛。
 // Loader、失败结果和历史消息都不是本轮已经取得事实证据的证明。

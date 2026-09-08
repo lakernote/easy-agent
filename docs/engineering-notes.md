@@ -39,7 +39,7 @@ Runtime 校验并执行 → 结果回给模型 → 最终回答
 **错误示例**：
 
 ```text
-if contains(userText, "天气") then call weather
+if userText requires current external data then call web_research
 if contains(userText, "GitHub") then load github
 if matches(userText, "bug|修复") then load repair skill
 ```
@@ -69,24 +69,26 @@ entry {
 
 模型仍只接收 `ToolSpec`，Category 只返回页面展示。
 
-### 2.4 通用 `web_search` 内置 GitHub 特判
+### 2.4 高层 `web_research` 统一联网研究
 
-**问题文件**：`internal/builtin/tools/web_search.go`
+**问题文件**：`internal/builtin/tools/web_research.go`
 
-**旧方案**：搜索结果指向 GitHub 时，`web_search` 自动拼 GitHub API 地址并补充 star、fork 等字段。
+**旧方案**：模型先调用搜索，再自行选择网页读取工具，容易把搜索摘要当成事实，也容易在第二步停止。
 
-**为什么不合适**：它不是按用户文本路由，但破坏了通用搜索的单一职责。以后继续加入 GitLab、Jira、Stack Overflow 会演变成网站特判集合。
+**为什么不合适**：小模型必须正确完成两个工具调用、来源选择和上下文控制，任一步都可能提前停止；单一 HTML 搜索 provider 也无法稳定承担天气、行情和 GitHub 指标等结构化实时事实。
 
 **当前方案**：
 
-- `web_search` 只发现候选网址，并在结构化结果中标记 `candidates_only`；
-- `web_fetch` 读取已知网页证据，并标记 `source_retrieved`；
-- GitHub 精确结构化数据使用 GitHub MCP；
-- 其他平台使用对应 MCP 或独立、明确命名的 Tool。
+- `web_research` 在一次调用内选择结构化适配器、聚合多个搜索 provider、读取来源、去重并返回稳定 source ID；
+- 模型只引用实际读取的 `sources`，不引用搜索摘要；
+- 天气、GitHub 仓库指标和行情作为不可见 adapter，仍由同一个高层工具返回统一证据；
+- 候选抓取失败自动补位，HTML 使用 DOM/字符集解析并只保留与问题相关的段落；
+- DNS 解析后校验并固定公开 IP，阻止私网跳转和 DNS rebinding；
+- 工具结果按深度设置 4K/7K/10K 字符证据预算，避免挤爆 16K 本地模型窗口。
 
-如果模型只拿到 Discovery 结果就直接回答，Runner 会在不改变 `tool_choice=auto` 的前提下提醒一次继续读取原始来源。这个规则依赖 Tool 自身的 `DiscoveryOnly` 元数据，不扫描用户文本，也不替模型选择具体来源工具。
+`web_research` 已在一次工具调用内完成来源读取，因此 Runner 不需要依赖模型自行完成第二个网页工具调用；工具返回的 `sources` 和 source ID 直接作为回答依据。
 
-搜索实现当前使用 DuckDuckGo HTML 作为零配置后端。这是可替换的基础设施实现，不是业务语义判断；如果稳定性成为问题，应抽象 Search Provider，而不是添加网站特判。
+默认并发使用 DuckDuckGo 与 Bing HTML 作为零配置后端，并识别验证码/挑战页；生产环境可配置 `EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY`，provider 失败会保留诊断并由其他 provider 降级。可选 `EASYAGENT_READER_URL` 用于 PDF 或静态抓取无法提取正文的页面，`EASYAGENT_READER_API_KEY` 只通过请求头发送，不进入 Tool 结果。
 
 ### 2.5 把日期、星期和精确时间混为一谈
 
@@ -100,7 +102,7 @@ entry {
 
 **错误方案**：流式和非流式都为空后移除全部工具，再用 `tool_choice=none` 请求自由回答。这样虽然会得到文字，却可能让模型猜出一个错误的计算值、实时事实或执行结果，并把任务错误标记成成功。
 
-**解决**：同一个 Step 中记录真实失败 Attempt，只允许关闭流式重试一次。SSE 尾部的 Provider 错误必须按错误显示，不能冒充空响应。`current_time`、`weather`、`calculate`、`shell` 四个高频核心工具首轮常驻，其余工具仍让模型从五个短能力组中选择。Loader 成功后下一步临时隐藏 Loader，使用 `auto` 并由 Runner 验证真实工具调用。只有当前 Run 已成功执行真实工具时，空正文重试才会进入 `none` 收敛；Loader、失败工具和旧轮次结果均不能触发。重试均进入 Trace。
+**解决**：同一个 Step 中记录真实失败 Attempt，只允许关闭流式重试一次。SSE 尾部的 Provider 错误必须按错误显示，不能冒充空响应。`current_time`、`calculate`、`shell`、四个只读文件工具和 `web_research` 共八个高频核心工具首轮常驻，文件写入和 Skill 等低频工具仍让模型从五个短能力组中选择。Loader 成功后下一步临时隐藏 Loader，使用 `auto` 并由 Runner 验证真实工具调用。只有当前 Run 已成功执行真实工具时，空正文重试才会进入 `none` 收敛；Loader、失败工具和旧轮次结果均不能触发。重试均进入 Trace。
 
 ### 2.7 工具失败后重复调用
 
