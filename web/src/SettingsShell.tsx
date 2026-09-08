@@ -34,6 +34,7 @@ function activeSection(page: Page): SettingsSection {
 
 export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
   const selected = activeSection(page)
+  const activeProfile = data.modelProfiles.find((profile) => profile.id === data.activeModelProfileId)
   const pageDescription = selected === 'security'
     ? '管理 EasyAgent 工作台的登录凭据；密码修改后当前会话会立即退出。'
     : selected === 'weixin'
@@ -83,7 +84,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
       </div>
       <div className="settings-hub-context">
         <span className="service-dot" />
-        <div><small>当前默认运行时</small><strong>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'}</strong></div>
+        <div><small>新会话默认</small><strong>{data.model.runtime === 'codex' ? 'Codex Runtime' : 'EasyAgent Runtime'}</strong><span>{activeProfile?.name || '未命名配置'}</span></div>
         <button className="account-logout" type="button" onClick={() => void onLogout()}>退出</button>
       </div>
     </header>

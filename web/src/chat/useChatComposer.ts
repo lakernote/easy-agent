@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import { api } from '../api'
-import type { Bootstrap, Session } from '../types'
+import type { Bootstrap, ModelSettings, Session } from '../types'
 import { isActive, mergeSessionSnapshot } from '../sessionState'
 import { encodeAttachment, supportedAttachment, type PendingAttachment } from '../attachments'
 import { capabilityKindLabel, capabilityMention, capabilityOptions, hasCapabilityToken, type CapabilityOption } from '../capabilities'
@@ -15,9 +15,10 @@ type ChatComposerOptions = {
   onError: (value: string) => void
   onOpenSkills: () => void
   onOpenCapabilities: () => void
+  onOpenModelSettings: () => void
 }
 
-export function useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities }: ChatComposerOptions) {
+export function useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities, onOpenModelSettings }: ChatComposerOptions) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -27,6 +28,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const [capabilityQuery, setCapabilityQuery] = useState('')
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
+  const [selectedRuntime, setSelectedRuntime] = useState<ModelSettings['runtime']>(() => data.model.runtime)
   const [selectedProfileId, setSelectedProfileId] = useState(data.activeModelProfileId)
   const defaultProject = data.projects.find((item) => item.default) || data.projects[0]
   const [selectedProjectId, setSelectedProjectId] = useState(() => window.localStorage.getItem('easyagent.project') || defaultProject?.id || '')
@@ -36,7 +38,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const capabilitySearchRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentRef = useRef<PendingAttachment[]>([])
-  const runtime = session?.runtime || data.model.runtime
+  const runtime = session?.runtime || selectedRuntime
   const isCodexRuntime = runtime === 'codex'
   const capabilities = useMemo(() => capabilityOptions(data).filter((item) => !isCodexRuntime || item.kind !== 'tool'), [data, isCodexRuntime])
   const visibleCapabilities = useMemo(() => {
@@ -56,7 +58,15 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   useEffect(() => { attachmentRef.current = attachments }, [attachments])
   useEffect(() => () => attachmentRef.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [])
   useEffect(() => { setCapabilityIndex(0) }, [capabilityQuery])
-  useEffect(() => { if (!session) setSelectedProfileId(data.activeModelProfileId) }, [data.activeModelProfileId, session?.id])
+  useEffect(() => {
+    if (session) return
+    const selectedProfile = data.modelProfiles.find((item) => item.id === selectedProfileId)
+    if (selectedProfile?.settings.runtime === selectedRuntime) return
+    const defaultProfile = data.modelProfiles.find((item) => item.id === data.activeModelProfileId && item.settings.runtime === selectedRuntime)
+      || data.modelProfiles.find((item) => item.settings.runtime === selectedRuntime)
+    setSelectedProfileId(defaultProfile?.id || '')
+  }, [data.activeModelProfileId, data.modelProfiles, selectedProfileId, selectedRuntime, session])
+  useEffect(() => { if (!session) setSelectedRuntime(data.model.runtime) }, [data.model.runtime, session])
   useEffect(() => {
     if (session || data.projects.some((item) => item.id === selectedProjectId)) return
     setSelectedProjectId(defaultProject?.id || '')
@@ -179,6 +189,10 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const send = async (preset?: string) => {
     const message = (preset ?? draft).trim()
     if ((!message && attachments.length === 0) || sending || isActive(session?.status)) return
+    if (!session && !selectedProfileId) {
+      onError(`${runtime === 'codex' ? 'Codex' : 'EasyAgent'} 暂无可用模型配置，请先创建一套配置。`)
+      return
+    }
     setSending(true); onError(''); setAttachmentError('')
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
@@ -192,13 +206,9 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }
 
   const startSuggestion = (suggestion: StarterSuggestion) => {
-    if (suggestion.attachment) {
-      setDraft(suggestion.prompt)
-      textareaRef.current?.focus()
-      window.setTimeout(() => fileInputRef.current?.click(), 0)
-      return
-    }
-    send(suggestion.prompt)
+    setDraft(suggestion.prompt)
+    textareaRef.current?.focus()
+    if (suggestion.attachment) window.setTimeout(() => fileInputRef.current?.click(), 0)
   }
 
   const selectProject = (value: string) => {
@@ -206,6 +216,15 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setWorkspaceOpen(false)
     window.localStorage.setItem('easyagent.project', value)
     textareaRef.current?.focus()
+  }
+
+  const selectRuntime = (value: ModelSettings['runtime']) => {
+    if (session) return
+    setSelectedRuntime(value)
+    const defaultProfile = data.modelProfiles.find((item) => item.id === data.activeModelProfileId && item.settings.runtime === value)
+      || data.modelProfiles.find((item) => item.settings.runtime === value)
+    setSelectedProfileId(defaultProfile?.id || '')
+    setCapabilityOpen(false)
   }
 
   const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
@@ -218,7 +237,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
     workspace: session?.workspace || selectedProject?.directories[0] || data.runtime.workspace,
     projectOptions: data.projects, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen,
-    profileOptions, selectedProfileId, setSelectedProfileId, displayedModel,
+    profileOptions, selectedRuntime, selectRuntime, selectedProfileId, setSelectedProfileId, displayedModel,
+    onOpenModelSettings,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,
   }

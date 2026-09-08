@@ -165,13 +165,12 @@ export default function App() {
           {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
           {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}
           {page === 'chat' && session?.status === 'queued' && <button className="ghost-button" onClick={() => void pauseSession()}>暂停排队</button>}
-          {page === 'chat' && session?.status === 'running' && <button className="stop-button" onClick={stopSession}>中断</button>}
           {page === 'chat' && session?.status === 'paused' && <><button className="ghost-button" onClick={() => void stopSession()}>取消任务</button><button className="primary-button" onClick={() => void resumeSession()}>继续</button></>}
           {page === 'chat' && session && <button className="ghost-button trace-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}
         </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenTrace={() => setTraceOpen(true)} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('models')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} />}
       {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
       {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
     </main>

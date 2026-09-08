@@ -11,13 +11,13 @@ import { CodexActivityGroup, ExecutionProgress, codexConversationActivities } fr
 type ConversationItem = { kind: 'message'; createdAt: string; id: number; message: Session['messages'][number] } | { kind: 'activity'; createdAt: string; id: number; event: TraceEvent }
 type GroupedConversationItem = ConversationItem | { kind: 'activity-group'; createdAt: string; id: number; events: TraceEvent[] }
 
-export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenTrace }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenTrace: () => void }) {
+export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenModelSettings, onOpenTrace, onStop }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenModelSettings: () => void; onOpenTrace: () => void; onStop: () => Promise<void> }) {
   const endRef = useRef<HTMLDivElement>(null)
   const conversationRef = useRef<HTMLDivElement>(null)
   const loadingOlderRef = useRef(false)
   const stickToBottomRef = useRef(true)
   const previousSessionIDRef = useRef<string | undefined>(undefined)
-  const composer = useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities })
+  const composer = useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities, onOpenModelSettings })
   const { isCodexRuntime, sending, send, startSuggestion } = composer
   const callsByID = new Map(session?.messages.flatMap((message) => message.toolCalls.map((call) => [call.id, call] as const)) || [])
   const conversationItems: ConversationItem[] = session ? [
@@ -84,7 +84,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
   return <section className="chat-page">
     <div className="conversation">
       <div ref={conversationRef} className="conversation-content">
-      {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">自托管 Agent · 在服务器持续执行</p><h1>今天要交付什么？</h1><p>选择服务器项目，直接交代代码、测试、发布或故障排查任务；输入 <code>@</code> 可指定 Skill、Tool 或 MCP。</p><div className="suggestion-heading"><strong>常用研发工作流</strong><span>点击立即创建任务</span></div><div className="suggestions">{starterSuggestions.map((suggestion) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`${suggestion.category}：${suggestion.title}`}><span className="suggestion-copy"><em>{suggestion.category}</em><strong>{suggestion.title}</strong></span><span className="suggestion-arrow">{suggestion.attachment ? '+' : '↗'}</span></button>)}</div></div>}
+      {!session && <div className="welcome"><div className="agent-orb"><Logo /></div><p className="eyebrow">自托管 Agent · 在服务器持续执行</p><h1>今天要交付什么？</h1><p>选择项目与运行环境，描述要完成的任务；输入 <code>@</code> 可指定 Skill、Tool 或 MCP。</p><div className="suggestion-heading"><div><strong>常用研发工作流</strong><span>从理解项目到交付收尾</span></div><small>点击填入，可继续编辑</small></div><div className="suggestions">{starterSuggestions.map((suggestion, index) => <button key={suggestion.category} onClick={() => startSuggestion(suggestion)} aria-label={`填入示例：${suggestion.category}，${suggestion.title}`}><span className="suggestion-copy"><span className="suggestion-meta"><em>{suggestion.category}</em><small>{String(index + 1).padStart(2, '0')}</small></span><strong>{suggestion.title}</strong></span><span className="suggestion-arrow" aria-hidden="true">→</span></button>)}</div></div>}
       {session && <ContextBar session={session} />}
       {session?.messagesTruncated && <div className="history-window-note">当前显示最近一段消息；向上滚动加载更早记录。原始历史仍保存在本地数据库，并参与 Agent 上下文处理。</div>}
       {groupedConversationItems.map((item) => item.kind === 'message' ? <MessageView key={`message-${item.id}`} message={item.message} relatedCall={item.message.toolCallId ? callsByID.get(item.message.toolCallId) : undefined} /> : item.kind === 'activity-group' ? <CodexActivityGroup key={`activities-${item.id}`} events={item.events} onOpenTrace={onOpenTrace} /> : null)}
@@ -100,7 +100,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       <div ref={endRef} className="conversation-end-space" aria-hidden="true" />
       </div>
     </div>
-    <ChatComposer {...composer} />
+    <ChatComposer {...composer} onStop={onStop} />
   </section>
 }
 
