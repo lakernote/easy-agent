@@ -1,4 +1,4 @@
-import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
+import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, ResearchProviderTest, ResearchSettings, ResearchSettingsInput, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
 import type { AutomationTask } from './types/automation'
 
 export class APIError extends Error {
@@ -43,6 +43,8 @@ export const api = {
   deleteAutomationTask: (id: string) => request<void>(`/api/v1/automations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   runAutomationTask: (id: string) => request<{ task: AutomationTask; sessionId: string }>(`/api/v1/automations/${encodeURIComponent(id)}/run`, { method: 'POST' }),
   saveRuntimeSettings: (settings: Bootstrap['runtimeSettings']) => request<Bootstrap['runtimeSettings']>('/api/v1/runtime/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  saveResearchSettings: (settings: ResearchSettingsInput) => request<ResearchSettings>('/api/v1/research/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  testResearchProvider: (providerId: string, settings: ResearchSettingsInput) => request<ResearchProviderTest>('/api/v1/research/test', { method: 'POST', body: JSON.stringify({ providerId, ...settings }) }),
   weixin: () => request<WeixinState>('/api/v1/channels/weixin'),
   saveWeixinSettings: (enabled: boolean) => request<WeixinState>('/api/v1/channels/weixin', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   startWeixinLogin: (label: string) => request<WeixinLogin>('/api/v1/channels/weixin/login', { method: 'POST', body: JSON.stringify({ label }) }),

@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -45,24 +44,22 @@ type tavilySearchProvider struct {
 }
 
 func defaultResearchSearchProviders() []researchSearchProvider {
+	return researchSearchProviders(ResearchConfigFromEnvironment())
+}
+
+func researchSearchProviders(config ResearchConfig) []researchSearchProvider {
 	client := &http.Client{Timeout: 12 * time.Second}
 	providers := make([]researchSearchProvider, 0, 5)
-	tavilyKey := strings.TrimSpace(os.Getenv("EASYAGENT_TAVILY_API_KEY"))
-	if tavilyKey == "" {
-		tavilyKey = strings.TrimSpace(os.Getenv("TAVILY_API_KEY"))
-	}
+	tavilyKey := strings.TrimSpace(config.Provider(ResearchProviderTavily).Secret)
 	if tavilyKey != "" {
 		providers = append(providers, &tavilySearchProvider{client: client, key: tavilyKey, endpoint: "https://api.tavily.com/search"})
 	}
-	if endpoint := strings.TrimSpace(os.Getenv("EASYAGENT_SEARXNG_URL")); endpoint != "" {
+	if endpoint := strings.TrimSpace(config.Provider(ResearchProviderSearXNG).Endpoint); endpoint != "" {
 		if parsed, err := url.Parse(endpoint); err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 			providers = append(providers, &searXNGSearchProvider{client: client, endpoint: strings.TrimRight(endpoint, "/")})
 		}
 	}
-	key := strings.TrimSpace(os.Getenv("EASYAGENT_BRAVE_SEARCH_API_KEY"))
-	if key == "" {
-		key = strings.TrimSpace(os.Getenv("BRAVE_SEARCH_API_KEY"))
-	}
+	key := strings.TrimSpace(config.Provider(ResearchProviderBrave).Secret)
 	if key != "" {
 		providers = append(providers, &braveSearchProvider{client: client, key: key})
 	}

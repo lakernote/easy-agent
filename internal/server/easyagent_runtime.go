@@ -35,7 +35,11 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		selectedSkillNamesForTurn = append(selectedSkillNamesForTurn, skill.Name)
 	}
 
-	toolCatalog := builtintools.Catalog(runEnvironment, catalog)
+	researchSettings, err := server.store.GetResearchSettings()
+	if err != nil {
+		return err
+	}
+	toolCatalog := builtintools.CatalogWithResearchConfig(runEnvironment, catalog, effectiveResearchConfig(researchSettings))
 	toolLoader, err := builtintools.NewLoader(toolCatalog)
 	if err != nil {
 		return err

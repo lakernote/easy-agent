@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -80,11 +79,12 @@ func (value *researchHTTPError) Error() string {
 }
 
 func defaultResearchAdapters() []researchAdapter {
+	return researchAdapters(ResearchConfigFromEnvironment())
+}
+
+func researchAdapters(config ResearchConfig) []researchAdapter {
 	client := safeResearchHTTPClient(12 * time.Second)
-	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("GH_TOKEN"))
-	}
+	token := strings.TrimSpace(config.Provider(ResearchProviderGitHub).Secret)
 	return []researchAdapter{
 		&weatherResearchAdapter{client: client, geocodingURL: "https://geocoding-api.open-meteo.com/v1/search", forecastURL: "https://api.open-meteo.com/v1/forecast"},
 		&githubResearchAdapter{client: client, token: token, apiBase: "https://api.github.com", webBase: "https://github.com"},
@@ -126,12 +126,24 @@ func (adapter *githubResearchAdapter) Name() string  { return "github_api" }
 func (adapter *financeResearchAdapter) Name() string { return "yahoo_finance" }
 func (adapter *entityResearchAdapter) Name() string  { return "wikidata_entities" }
 
-func (adapter *entityResearchAdapter) Applicable(query string) bool {
-	return entityResearchLookup(query) != ""
+// The model may explicitly select a structured data type. Lexical detection is
+// retained only for data_type=auto so older/smaller models still degrade safely.
+func adapterTypeApplicable(arguments researchArguments, dataType string, heuristic bool) bool {
+	if arguments.DataType == dataType {
+		return true
+	}
+	return (arguments.DataType == "" || arguments.DataType == "auto") && heuristic
 }
 
-func (adapter *entityResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
-	lookup := entityResearchLookup(query)
+func (adapter *entityResearchAdapter) Applicable(arguments researchArguments) bool {
+	return adapterTypeApplicable(arguments, "entity", entityResearchLookup(arguments.Query) != "")
+}
+
+func (adapter *entityResearchAdapter) Research(ctx context.Context, arguments researchArguments) ([]researchSource, error) {
+	lookup := strings.TrimSpace(arguments.Subject)
+	if lookup == "" {
+		lookup = entityResearchLookup(arguments.Query)
+	}
 	if lookup == "" {
 		return nil, errors.New("无法从问题中确定待消歧实体")
 	}
@@ -221,18 +233,23 @@ func entityResearchLookup(query string) string {
 	return value
 }
 
-func (adapter *weatherResearchAdapter) Applicable(query string) bool {
-	value := strings.ToLower(query)
+func (adapter *weatherResearchAdapter) Applicable(arguments researchArguments) bool {
+	value := strings.ToLower(arguments.Query)
 	for _, marker := range []string{"天气", "气温", "温度", "预报", "weather", "forecast", "temperature"} {
 		if strings.Contains(value, marker) {
-			return true
+			return adapterTypeApplicable(arguments, "weather", true)
 		}
 	}
-	return false
+	return adapterTypeApplicable(arguments, "weather", false)
 }
 
-func (adapter *weatherResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
-	locations := weatherLocationCandidates(query)
+func (adapter *weatherResearchAdapter) Research(ctx context.Context, arguments researchArguments) ([]researchSource, error) {
+	locations := []string{}
+	if arguments.Subject != "" {
+		locations = append(locations, arguments.Subject)
+	}
+	locations = append(locations, weatherLocationCandidates(arguments.Query)...)
+	locations = uniqueStrings(locations)
 	if len(locations) == 0 {
 		return nil, errors.New("无法从问题中确定天气地点")
 	}
@@ -266,7 +283,10 @@ func (adapter *weatherResearchAdapter) Research(ctx context.Context, query strin
 	if resolvedQuery == "" {
 		return nil, fmt.Errorf("没有找到地点候选 %q", strings.Join(locations, "、"))
 	}
-	days := weatherForecastDays(query)
+	days := arguments.TimeRangeDays
+	if days == 0 {
+		days = weatherForecastDays(arguments.Query)
+	}
 	forecastEndpoint := adapter.forecastURL + "?" + url.Values{
 		"latitude":      {strconv.FormatFloat(place.Latitude, 'f', 6, 64)},
 		"longitude":     {strconv.FormatFloat(place.Longitude, 'f', 6, 64)},
@@ -522,14 +542,19 @@ func weatherText(code int) string {
 	}
 }
 
-func (adapter *githubResearchAdapter) Applicable(query string) bool {
-	value := strings.ToLower(query)
-	return strings.Contains(value, "github") || strings.Contains(value, "star") ||
+func (adapter *githubResearchAdapter) Applicable(arguments researchArguments) bool {
+	value := strings.ToLower(arguments.Query)
+	heuristic := strings.Contains(value, "github") || strings.Contains(value, "star") ||
 		strings.Contains(value, "仓库") || strings.Contains(value, "repository")
+	return adapterTypeApplicable(arguments, "repository", heuristic)
 }
 
-func (adapter *githubResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
-	owner, repository, keyword := githubRepositoryIdentity(query)
+func (adapter *githubResearchAdapter) Research(ctx context.Context, arguments researchArguments) ([]researchSource, error) {
+	lookup := arguments.Query
+	if arguments.Subject != "" {
+		lookup = arguments.Subject
+	}
+	owner, repository, keyword := githubRepositoryIdentity(lookup)
 	var searchFallback *githubRepositorySnapshot
 	if owner == "" || repository == "" {
 		if keyword == "" {
@@ -907,17 +932,21 @@ func normalizedRepositoryName(value string) string {
 	return strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(value)
 }
 
-func (adapter *financeResearchAdapter) Applicable(query string) bool {
-	value := strings.ToLower(query)
+func (adapter *financeResearchAdapter) Applicable(arguments researchArguments) bool {
+	value := strings.ToLower(arguments.Query)
 	for _, marker := range []string{"股票", "股价", "行情", "市值", "stock price", "share price", "ticker", "market cap"} {
 		if strings.Contains(value, marker) {
-			return true
+			return adapterTypeApplicable(arguments, "market", true)
 		}
 	}
-	return false
+	return adapterTypeApplicable(arguments, "market", false)
 }
 
-func (adapter *financeResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
+func (adapter *financeResearchAdapter) Research(ctx context.Context, arguments researchArguments) ([]researchSource, error) {
+	query := arguments.Query
+	if arguments.Subject != "" {
+		query = arguments.Subject
+	}
 	lookup, ticker := financeIdentity(query)
 	if ticker == "" && adapter.wikidataURL != "" {
 		ticker, _ = adapter.resolveWikidataTicker(ctx, lookup)

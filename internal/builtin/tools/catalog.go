@@ -59,7 +59,11 @@ var groupDescriptions = map[string]string{
 }
 
 func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
-	entries := catalogEntries(environment, skills)
+	return CatalogWithResearchConfig(environment, skills, ResearchConfigFromEnvironment())
+}
+
+func CatalogWithResearchConfig(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig) []agent.Tool {
+	entries := catalogEntries(environment, skills, researchConfig)
 	result := make([]agent.Tool, 0, len(entries))
 	for _, item := range entries {
 		tool := item.tool
@@ -77,14 +81,14 @@ func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
 	return result
 }
 
-func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry {
+func catalogEntries(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig) []entry {
 	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
 	files := newFileWorkspace(environment.Workspace(), environment.Directories())
 	result := []entry{
 		{tool: currentTimeTool(), category: categoryInformation, group: groupInformation},
 		{tool: calculateTool(), category: categoryExecution, group: groupExecution},
-		{tool: webResearchTool(), category: categoryInformation, group: groupWeb},
+		{tool: webResearchToolWithConfig(researchConfig), category: categoryInformation, group: groupWeb},
 	}
 	for _, tool := range files.tools() {
 		result = append(result, entry{tool: tool, category: categoryFile, group: groupFiles})
@@ -97,7 +101,7 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource) []entry
 }
 
 func InfoList(environment *appenv.Environment, skills SkillSource) []Info {
-	entries := catalogEntries(environment, skills)
+	entries := catalogEntries(environment, skills, ResearchConfigFromEnvironment())
 	result := make([]Info, 0, len(entries))
 	for _, item := range entries {
 		result = append(result, Info{

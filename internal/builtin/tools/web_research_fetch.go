@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -35,11 +34,16 @@ type researchResolver interface {
 }
 
 func newResearchFetcher() *researchFetcher {
+	return newResearchFetcherWithConfig(ResearchConfigFromEnvironment())
+}
+
+func newResearchFetcherWithConfig(config ResearchConfig) *researchFetcher {
+	reader := config.Provider(ResearchProviderReader)
 	return &researchFetcher{
 		client:       safeResearchHTTPClient(18 * time.Second),
 		readerClient: &http.Client{Timeout: 25 * time.Second},
-		readerURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("EASYAGENT_READER_URL")), "/"),
-		readerKey:    strings.TrimSpace(os.Getenv("EASYAGENT_READER_API_KEY")),
+		readerURL:    strings.TrimRight(strings.TrimSpace(reader.Endpoint), "/"),
+		readerKey:    strings.TrimSpace(reader.Secret),
 	}
 }
 

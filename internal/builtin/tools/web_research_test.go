@@ -40,9 +40,9 @@ type stubResearchAdapter struct {
 	err     error
 }
 
-func (adapter stubResearchAdapter) Name() string           { return adapter.name }
-func (adapter stubResearchAdapter) Applicable(string) bool { return adapter.applies }
-func (adapter stubResearchAdapter) Research(context.Context, string) ([]researchSource, error) {
+func (adapter stubResearchAdapter) Name() string                      { return adapter.name }
+func (adapter stubResearchAdapter) Applicable(researchArguments) bool { return adapter.applies }
+func (adapter stubResearchAdapter) Research(context.Context, researchArguments) ([]researchSource, error) {
 	return append([]researchSource(nil), adapter.sources...), adapter.err
 }
 
@@ -471,10 +471,10 @@ func TestEntityAdapterProvidesAmbiguousCandidatesWithoutSuppressingSearch(t *tes
 		return http.StatusOK, `{"search":[{"id":"Q37007996","label":"Laker","description":"family name","concepturi":"https://www.wikidata.org/entity/Q37007996","match":{"type":"label","language":"en","text":"Laker"}},{"id":"Q121783","label":"Los Angeles Lakers","description":"American professional basketball team","concepturi":"https://www.wikidata.org/entity/Q121783","match":{"type":"alias","language":"en","text":"Lakers"}}]}`
 	})
 	adapter := &entityResearchAdapter{client: client, wikidataURL: "https://www.wikidata.org/w/api.php"}
-	if !adapter.Applicable("Laker 是谁？请检索并区分含义") || adapter.Applicable("Laker 最新新闻") {
+	if !adapter.Applicable(researchArguments{Query: "Laker 是谁？请检索并区分含义", DataType: "auto"}) || adapter.Applicable(researchArguments{Query: "Laker 最新新闻", DataType: "auto"}) {
 		t.Fatal("实体问题识别错误")
 	}
-	sources, err := adapter.Research(context.Background(), "Laker 是谁？请检索并区分含义")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "Laker 是谁？请检索并区分含义", DataType: "auto"})
 	if err != nil || len(sources) != 1 || sources[0].Kind != "entity_candidates" ||
 		!strings.Contains(sources[0].Content, "Los Angeles Lakers") || structuredSourcesCanFinish(sources) {
 		t.Fatalf("实体候选结果错误: sources=%+v err=%v", sources, err)
@@ -497,7 +497,7 @@ func TestWeatherAdapterUsesStructuredProvider(t *testing.T) {
 		}
 	})
 	adapter := &weatherResearchAdapter{client: client, geocodingURL: "https://weather.test/geo", forecastURL: "https://weather.test/forecast"}
-	sources, err := adapter.Research(context.Background(), "合肥 今天 天气 温度 降雨概率 出行建议")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "合肥 今天 天气 温度 降雨概率 出行建议", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestWeatherAdapterFallsBackAcrossLocationCandidates(t *testing.T) {
 		}
 	})
 	adapter := &weatherResearchAdapter{client: client, geocodingURL: "https://weather.test/geo", forecastURL: "https://weather.test/forecast"}
-	sources, err := adapter.Research(context.Background(), "安徽 合肥 今天 天气 温度和降雨概率")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "安徽 合肥 今天 天气 温度和降雨概率", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestGitHubAdapterReturnsExactRepositoryMetrics(t *testing.T) {
 		return http.StatusOK, `{"full_name":"lakernote/easy-postman","html_url":"https://github.com/lakernote/easy-postman","description":"API client","stargazers_count":702,"forks_count":12,"open_issues_count":3,"subscribers_count":7,"default_branch":"main","language":"Java","visibility":"public","created_at":"2024-01-01T00:00:00Z","updated_at":"2026-09-08T00:00:00Z"}`
 	})
 	adapter := &githubResearchAdapter{client: client, apiBase: "https://api.github.test"}
-	sources, err := adapter.Research(context.Background(), "github.com/lakernote/easy-postman stars")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "github.com/lakernote/easy-postman stars", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestGitHubAdapterFallsBackToOfficialWebPagesWhenAPIRateLimited(t *testing.T
 	adapter := &githubResearchAdapter{
 		client: client, apiBase: "https://api.github.test", webBase: "https://github.test",
 	}
-	sources, err := adapter.Research(context.Background(), "EasyPostman 的 GitHub star 多少")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "EasyPostman 的 GitHub star 多少", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,7 +600,7 @@ func TestFinanceAdapterResolvesCompanyAndReturnsTimestampedQuote(t *testing.T) {
 		client: client, searchURL: "https://finance.test/search",
 		chartBase: "https://finance.test/chart", quoteBase: "https://finance.example/quote",
 	}
-	sources, err := adapter.Research(context.Background(), "思科的股票啊")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "思科的股票啊", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestFinanceAdapterResolvesTickerFromExchangeQualifier(t *testing.T) {
 		client: client, searchURL: "https://finance.test/search", chartBase: "https://finance.test/chart",
 		quoteBase: "https://finance.example/quote", wikidataURL: "https://finance.test/wikidata",
 	}
-	sources, err := adapter.Research(context.Background(), "思科的股票价格")
+	sources, err := adapter.Research(context.Background(), researchArguments{Query: "思科的股票价格", DataType: "auto"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -668,6 +668,88 @@ func TestParseResearchArgumentsAllowsOneSourceForExactFact(t *testing.T) {
 	arguments, err := parseResearchArguments(json.RawMessage(`{"query":"lakernote/easy-agent stars","depth":"quick","max_sources":1}`))
 	if err != nil || arguments.MaxSources != 1 {
 		t.Fatalf("单一实时事实应允许一个来源: arguments=%+v err=%v", arguments, err)
+	}
+}
+
+func TestParseResearchArgumentsKeepsModelRoutingHints(t *testing.T) {
+	arguments, err := parseResearchArguments(json.RawMessage(`{"query":"请查询","data_type":"weather","subject":"安徽省合肥市","time_range_days":7}`))
+	if err != nil || arguments.DataType != "weather" || arguments.Subject != "安徽省合肥市" || arguments.TimeRangeDays != 7 {
+		t.Fatalf("模型路由提示未保留: arguments=%+v err=%v", arguments, err)
+	}
+}
+
+func TestStructuredAdaptersUseModelDataTypeBeforeLexicalFallback(t *testing.T) {
+	weather := &weatherResearchAdapter{}
+	github := &githubResearchAdapter{}
+	finance := &financeResearchAdapter{}
+	entity := &entityResearchAdapter{}
+	if !weather.Applicable(researchArguments{Query: "请查询", DataType: "weather", Subject: "合肥"}) {
+		t.Fatal("模型明确选择 weather 时应启用天气 adapter")
+	}
+	for name, adapter := range map[string]researchAdapter{"weather": weather, "github": github, "finance": finance, "entity": entity} {
+		if adapter.Applicable(researchArguments{Query: "GitHub 股票天气是什么", DataType: "web"}) {
+			t.Fatalf("模型选择 web 时不应由关键词触发 %s adapter", name)
+		}
+	}
+	if !github.Applicable(researchArguments{Query: "请查询", DataType: "repository"}) ||
+		!finance.Applicable(researchArguments{Query: "请查询", DataType: "market"}) ||
+		!entity.Applicable(researchArguments{Query: "请查询", DataType: "entity", Subject: "Laker"}) {
+		t.Fatal("模型显式数据类型没有触发对应 adapter")
+	}
+}
+
+func TestResearchConfigUsesSavedValuesOverEnvironment(t *testing.T) {
+	t.Setenv("EASYAGENT_TAVILY_API_KEY", "environment-tavily")
+	t.Setenv("EASYAGENT_SEARXNG_URL", "https://environment.example.com")
+	config := MergeResearchConfig(ResearchConfigFromEnvironment(), ResearchConfig{Providers: map[string]ResearchProviderConfig{
+		ResearchProviderTavily:  {Secret: "saved-tavily"},
+		ResearchProviderSearXNG: {Endpoint: "https://saved.example.com"},
+	}})
+	if got := config.Provider(ResearchProviderTavily).Secret; got != "saved-tavily" {
+		t.Fatalf("页面密钥没有覆盖环境变量: %q", got)
+	}
+	if got := config.Provider(ResearchProviderSearXNG).Endpoint; got != "https://saved.example.com" {
+		t.Fatalf("页面地址没有覆盖环境变量: %q", got)
+	}
+	if !ResearchProviderReady(config, ResearchProviderTavily) || !ResearchProviderReady(config, ResearchProviderSearXNG) {
+		t.Fatal("配置完整的生产搜索源应处于 ready 状态")
+	}
+}
+
+func TestResearchProviderRegistryIsPublicMetadataOnly(t *testing.T) {
+	definitions := ResearchProviderDefinitions()
+	if len(definitions) != 5 {
+		t.Fatalf("Provider 注册表数量异常: %d", len(definitions))
+	}
+	seen := make(map[string]bool, len(definitions))
+	for _, definition := range definitions {
+		if definition.ID == "" || definition.Name == "" || definition.Category == "" || seen[definition.ID] {
+			t.Fatalf("Provider 注册表元数据无效或重复: %+v", definition)
+		}
+		seen[definition.ID] = true
+	}
+	definitions[0].Name = "mutated"
+	if ResearchProviderDefinitions()[0].Name == "mutated" {
+		t.Fatal("调用方不应能修改 Provider 注册表")
+	}
+	layers := ResearchExecutionLayerDefinitions()
+	if len(layers) != 2 || layers[0].ID == "" || layers[1].Components == "" {
+		t.Fatalf("Research 执行层元数据不完整: %+v", layers)
+	}
+	layers[0].Name = "mutated"
+	if ResearchExecutionLayerDefinitions()[0].Name == "mutated" {
+		t.Fatal("调用方不应能修改 Research 执行层注册表")
+	}
+}
+
+func TestResearchConfigValidationRejectsUnsafeEndpointSyntax(t *testing.T) {
+	for _, endpoint := range []string{"ftp://search.example.com", "https://user:password@search.example.com", "not-a-url"} {
+		err := ValidateResearchConfig(ResearchConfig{Providers: map[string]ResearchProviderConfig{
+			ResearchProviderSearXNG: {Endpoint: endpoint},
+		}})
+		if err == nil {
+			t.Fatalf("不安全或无效地址应被拒绝: %s", endpoint)
+		}
 	}
 }
 

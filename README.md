@@ -98,9 +98,11 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
 Skills 和大型工具组按需加载，减少无关上下文。网页研究会先发现候选，再读取原始来源后回答。
 
+`web_research` 是模型唯一可见的联网入口。模型根据语义填写数据类型、查询对象、时间范围和研究深度；Runtime 再执行结构化数据读取、多源搜索、安全抓取和引用整理。Tavily、SearXNG、Brave Search、Reader 与 GitHub Token 可在 **设置 → 工具与 MCP → Web Research** 配置并执行真实连接测试，保存后下一轮立即生效；也可以继续使用环境变量部署。
+
 ### GitHub、GitLab 与 Git 凭据
 
-- 查询公开 GitHub 仓库指标不要求登录。若要提高 `web_research` 的 GitHub API 限额，可在启动 EasyAgent 的服务进程中设置 `GITHUB_TOKEN` 或 `GH_TOKEN`，然后重启服务；这里没有页面输入框。
+- 查询公开 GitHub 仓库指标不要求登录。若要提高 `web_research` 的 GitHub API 限额，可在 **设置 → 工具与 MCP → Web Research** 填写 GitHub Token，或为服务进程设置 `GITHUB_TOKEN` / `GH_TOKEN`。页面配置优先于环境变量，保存后下一轮立即生效。
 - 访问私有仓库、Issue、Pull Request 和 Actions，优先到 **设置 → 工具与 MCP → GitHub** 配置官方 GitHub MCP。Bearer Token 保存在 `~/.easyagent/easyagent.db`，接口和页面只返回已配置状态，不回传明文；数据库本身不是独立的密钥保险库，应继续依赖目录权限、磁盘加密和低权限服务账号。
 - 本地 clone、diff、commit 等操作直接使用服务器的 `git`。HTTPS 凭据、SSH Key 和 `gh`/`glab` 登录态属于运行 EasyAgent 的系统账号，不属于模型配置；请以同一个服务账号执行 `gh auth login` 或 `glab auth login`。GitHub/GitLab CLI 未安装时，EasyAgent 不会自动安装。
 - GitLab 官方远端 MCP 使用 OAuth 动态注册；EasyAgent 当前还没有这套交互式 OAuth 流程。可先使用公开网页研究、本地 `git`，或安装新版 `glab` 后把 `glab mcp serve` 配成自定义 stdio MCP。GitLab CLI MCP 仍是实验能力，生产环境应固定版本并限制权限。

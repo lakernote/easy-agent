@@ -17,6 +17,8 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("POST /api/v1/automations/{id}/run", server.runAutomationTask)
 	server.mux.HandleFunc("GET /api/v1/filesystem/directories", server.browseDirectories)
 	server.mux.HandleFunc("PUT /api/v1/runtime/settings", server.saveRuntimeSettings)
+	server.mux.HandleFunc("PUT /api/v1/research/settings", server.saveResearchSettings)
+	server.mux.HandleFunc("POST /api/v1/research/test", server.testResearchProvider)
 	server.mux.HandleFunc("GET /api/v1/channels/weixin", server.getWeixin)
 	server.mux.HandleFunc("PUT /api/v1/channels/weixin", server.saveWeixinSettings)
 	server.mux.HandleFunc("POST /api/v1/channels/weixin/login", server.startWeixinLogin)

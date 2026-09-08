@@ -1,11 +1,11 @@
 ---
 name: web-research
-description: 需要查询最新资料、官方文档或外部事实时，使用已启用的浏览器或搜索 MCP 完成可追溯研究。
+description: 需要查询最新资料、官方文档或外部事实时，使用高层 web_research 工具完成可追溯研究。
 ---
 
 # Web research
 
-1. 调用 `web_research`；query 完整保留用户原问题中的实体、时间范围和待核验字段，不省略“明天/未来一周”等范围，也不要把回答形式改写进实体名。它会在 runtime 内选择天气、GitHub、行情等结构化数据源，并使用搜索 provider 完成候选发现、原文读取、去重、相关段落压缩和证据整理。复杂问题通过 `depth`、`freshness`、`max_sources`、`source_scope` 和 `domains` 控制研究范围。
+1. 调用 `web_research`；query 完整保留用户原问题中的实体、时间范围和待核验字段。根据用户意图选择 `data_type`；对明确的天气、行情、GitHub 仓库或实体消歧任务，同时提供只包含准确对象的 `subject`，天气范围用 `time_range_days`。不确定类型才使用 `auto`，通用网页研究用 `web`。Runtime 内部负责结构化数据、候选发现、原文读取、去重、相关段落压缩和证据整理；复杂问题再用 `depth`、`freshness`、`max_sources`、`source_scope` 和 `domains` 控制范围。
 2. 技术问题优先使用官方文档、官方 API、源代码仓库和原始论文；用户要求官方资料时设置 `source_scope=official`，知道官网时同时填写 `domains`。`domains` 是硬白名单。不要用搜索摘要代替原页面证据。
 3. 对可能变化的信息核对发布日期和事实发生日期，必要时使用两个独立网站交叉验证；同一网站的多个页面不算独立证据。
 4. 只把 `web_research` 返回的、实际读取并支持结论的 sources 列为来源；`S1`、`S2` 是本次调用的来源编号，不是可信度排名。每条外部事实在写出和标注 source ID 前，逐句确认对应 `sources.content` 明确表达同一事实，不得用引用装饰模型自身知识；末尾复制对应 `citation` 字段，不伪造链接或引用。

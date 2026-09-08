@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -416,6 +417,30 @@ func TestRuntimeSettingsDefaultsAndNormalization(t *testing.T) {
 	loaded, err := value.GetRuntimeSettings()
 	if err != nil || loaded != saved {
 		t.Fatalf("运行设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
+	}
+}
+
+func TestResearchSettingsDefaultsPersistenceAndNormalization(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	defaults, err := value.GetResearchSettings()
+	if err != nil || defaults.Providers == nil || len(defaults.Providers) != 0 {
+		t.Fatalf("Research 默认设置异常: value=%+v err=%v", defaults, err)
+	}
+	saved, err := value.SaveResearchSettings(ResearchSettings{Providers: map[string]ResearchProviderSettings{
+		" tavily ": {Secret: "  saved-key  "},
+		"reader":   {Endpoint: " https://reader.example/{url} "},
+		"empty":    {},
+	}})
+	if err != nil || len(saved.Providers) != 2 || saved.Providers["tavily"].Secret != "saved-key" || saved.Providers["reader"].Endpoint != "https://reader.example/{url}" {
+		t.Fatalf("Research 设置归一化异常: value=%+v err=%v", saved, err)
+	}
+	loaded, err := value.GetResearchSettings()
+	if err != nil || !reflect.DeepEqual(loaded, saved) {
+		t.Fatalf("Research 设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
 	}
 }
 
