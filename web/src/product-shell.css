@@ -591,9 +591,7 @@ body { overflow: hidden; background: #f7f7f5; }
   box-shadow: none;
 }
 .suggestion-copy { display: grid; gap: 7px; }
-.suggestion-meta { display: flex; align-items: center; gap: 7px; }
-.suggestion-copy .suggestion-meta em { margin: 0; }
-.suggestion-meta small { color: #a0aec0; font-family: var(--mono); font-size: 8px; }
+.suggestion-copy > em { margin: 0; }
 .suggestion-copy strong { font-size: 11px; }
 .suggestion-arrow { width: 30px; height: 30px; flex-basis: 30px; }
 .suggestions button:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
