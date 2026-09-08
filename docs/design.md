@@ -176,9 +176,9 @@ EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语�
 
 内置 Tool 使用分层渐进披露：首轮常驻 `current_time`、`calculate`、`shell`、`read`、`grep`、`find`、`ls`、`web_research`，同时保留 `load_tools` 的自解释能力组；文件写入和 Skill 等低频能力由模型选择组后再加入下一轮。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader，使用 `tool_choice=auto` 交给 Provider，再由 Runner 验证至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时仍只按准确名称预加载。保留在协议历史中的内置 function call 会自动恢复同名 Schema。工具模式的空响应或 SSE 尾部工具校验错误可以从流式切到非流式重试一次；只有本轮已成功执行真实工具时，空正文重试才可进入无工具收敛。
 
-`web_research` 是直接可见的高层 Research Tool，在一次受控执行中返回实际读取的 sources、发布时间、抓取时间、可点击 citation 和稳定 source ID；模型必须根据 sources 回答并使用 `[S1]` 等 ID 引用。低层搜索和网页读取不再作为模型工具暴露。Tool 内部可以根据结构化数据协议选择天气、GitHub、行情适配器，这属于单个工具的确定性实现，不是 Runner 扫描用户文本后替模型调用不同 Tool。
+`web_research` 是直接可见的高层 Research Tool，在一次受控执行中返回实际读取的 sources、发布时间、抓取时间、可点击 citation 和本次调用内稳定的 source ID；`S1`、`S2` 只是来源编号，不是质量排名。模型必须根据 sources 回答并使用 `[S1]` 等 ID 引用，缺失字段不能补猜。低层搜索和网页读取不再作为模型工具暴露。Tool 内部可以根据结构化数据协议选择天气、GitHub、行情适配器，这属于单个工具的确定性实现，不是 Runner 扫描用户文本后替模型调用不同 Tool。
 
-联网研究内部采用 `structured adapters → search provider pool → safe fetch → relevance extraction → evidence packet`。默认使用 DuckDuckGo/Bing 零配置发现，可通过 `EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY` 接入生产搜索服务；`EASYAGENT_READER_URL` 可为 PDF 和动态页面提供 reader 降级。候选按跨 provider 共识、问题相关性和优先域名排序，抓取失败时继续读取后续候选。抓取器在连接前解析并校验全部目标 IP，拒绝私网、环回、链路本地和 DNS rebinding；最终工具结果按研究深度限制证据字符预算，避免压垮本地模型上下文。
+联网研究内部采用 `structured adapters → search provider pool → safe fetch → relevance extraction → evidence packet`。默认使用 DuckDuckGo/Bing 零配置发现，可通过 `EASYAGENT_SEARXNG_URL` 或 `BRAVE_SEARCH_API_KEY` 接入生产搜索服务；`EASYAGENT_READER_URL` 可为 PDF 和动态页面提供 reader 降级。候选按跨 provider 共识、问题相关性和优先域名排序，抓取失败时继续读取后续候选；证据状态按可注册域名区分“跨站多源”和“同站多页面”。抓取器在连接前解析并校验全部目标 IP，拒绝私网、环回、链路本地和 DNS rebinding；最终工具结果按研究深度限制证据字符预算，避免压垮本地模型上下文。
 
 Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读取正文，调用 `search_mcp_tools` 后才连接服务并按任务语义注册最多 5 个远端 Tool Schema。用户明确 `@skill:name` 时，该 Skill 正文直接注入本轮上下文。三类能力使用同一条“先目录、后正文/Schema”的原则，避免小模型首轮承受全部动态能力。
 

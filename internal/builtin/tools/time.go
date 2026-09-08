@@ -13,7 +13,7 @@ import (
 func currentTimeTool() agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
-			Name: "current_time", Description: "读取服务器当前日期、时间、星期和时区，或指定 IANA 时区的实时值。用户询问当前、现在、今天、几点、星期，或需要相对时间和是否过期判断时必须调用；不要凭模型知识或上下文日期推测。",
+			Name: "current_time", Description: "读取服务器当前日期、时间、星期和时区，或指定 IANA 时区的实时值。当答案本身需要当前时间/日期，或其他工具没有提供相对时间的可靠基准时调用；web_research 已按来源时区返回天气等查询的明确日期时无需重复调用。不要凭模型知识或上下文日期推测。",
 			Parameters: objectSchema(map[string]any{"timezone": stringSchema("可选 IANA 时区，例如 Asia/Shanghai；留空使用服务器时区")}, nil),
 		},
 		Run: func(_ context.Context, raw json.RawMessage) (string, error) {

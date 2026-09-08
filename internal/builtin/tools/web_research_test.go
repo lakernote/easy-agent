@@ -171,14 +171,31 @@ func TestResearchEngineReturnsStructuredAndWebEvidenceWithCitations(t *testing.T
 		t.Fatal(err)
 	}
 	var report struct {
-		SourceCount int              `json:"source_count"`
-		Sources     []researchSource `json:"sources"`
+		EvidenceStatus         string           `json:"evidence_status"`
+		IndependentDomainCount int              `json:"independent_domain_count"`
+		SourceCount            int              `json:"source_count"`
+		Sources                []researchSource `json:"sources"`
 	}
 	if err := json.Unmarshal([]byte(output), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.SourceCount != 2 || len(report.Sources) != 2 || report.Sources[0].ID != "S1" || !strings.Contains(report.Sources[0].Citation, "https://") {
+	if report.SourceCount != 2 || report.IndependentDomainCount != 2 || report.EvidenceStatus != "multiple_independent_sources_retrieved" ||
+		len(report.Sources) != 2 || report.Sources[0].ID != "S1" || !strings.Contains(report.Sources[0].Citation, "https://") {
 		t.Fatalf("研究证据包错误: %s", output)
+	}
+}
+
+func TestEvidenceStatusDistinguishesIndependentWebsites(t *testing.T) {
+	sameWebsite := []researchSource{
+		{URL: "https://weather.example.co.uk/today"},
+		{URL: "https://api.example.co.uk/forecast"},
+	}
+	if status := evidenceStatus(sameWebsite); status != "multiple_sources_same_domain" {
+		t.Fatalf("同站页面不应算独立证据: %s", status)
+	}
+	independent := append(sameWebsite, researchSource{URL: "https://example.org/weather"})
+	if status := evidenceStatus(independent); status != "multiple_independent_sources_retrieved" || independentResearchDomainCount(independent) != 2 {
+		t.Fatalf("独立网站识别错误: status=%s domains=%d", status, independentResearchDomainCount(independent))
 	}
 }
 
@@ -230,8 +247,23 @@ func TestStructuredIntentParsing(t *testing.T) {
 	if location := weatherLocation("查询合肥未来一周天气"); location != "合肥" {
 		t.Fatalf("天气地点解析错误: %q", location)
 	}
+	candidates := weatherLocationCandidates("合肥 今天 天气 温度 降雨概率 出行建议")
+	if len(candidates) == 0 || candidates[0] != "合肥" {
+		t.Fatalf("小模型扩写后的天气地点解析错误: %#v", candidates)
+	}
+	englishCandidates := weatherLocationCandidates("weather in New York tomorrow")
+	if len(englishCandidates) == 0 || englishCandidates[0] != "new york" {
+		t.Fatalf("英文天气地点解析错误: %#v", englishCandidates)
+	}
+	questionCandidates := weatherLocationCandidates("What is the weather in New York today?")
+	if len(questionCandidates) == 0 || questionCandidates[0] != "new york" {
+		t.Fatalf("英文问句天气地点解析错误: %#v", questionCandidates)
+	}
 	if days := weatherForecastDays("合肥未来10天天气"); days != 10 {
 		t.Fatalf("天气天数解析错误: %d", days)
+	}
+	if days := weatherForecastDays("合肥今天天气"); days != 2 {
+		t.Fatalf("今天查询应弹性覆盖明天: %d", days)
 	}
 	owner, repo, _ := githubRepositoryIdentity("https://github.com/lakernote/easy-postman 有多少 stars")
 	if owner != "lakernote" || repo != "easy-postman" {
@@ -244,23 +276,55 @@ func TestStructuredIntentParsing(t *testing.T) {
 }
 
 func TestWeatherAdapterUsesStructuredProvider(t *testing.T) {
+	geoQuery := ""
+	forecastDays := ""
 	client := researchJSONClient(func(request *http.Request) (int, string) {
 		switch request.URL.Path {
 		case "/geo":
+			geoQuery = request.URL.Query().Get("name")
 			return http.StatusOK, `{"results":[{"id":1,"name":"合肥","admin1":"安徽","country":"中国","timezone":"Asia/Shanghai","latitude":31.86,"longitude":117.28}]}`
 		case "/forecast":
+			forecastDays = request.URL.Query().Get("forecast_days")
 			return http.StatusOK, `{"timezone":"Asia/Shanghai","current":{"time":"2026-09-08T10:00","temperature_2m":28,"apparent_temperature":29,"relative_humidity_2m":55,"weather_code":0,"wind_speed_10m":8},"daily":{"time":["2026-09-08","2026-09-09"],"weather_code":[0,61],"temperature_2m_max":[31,29],"temperature_2m_min":[22,21],"precipitation_probability_max":[10,70],"sunrise":["06:00","06:01"],"sunset":["18:20","18:19"]}}`
 		default:
 			return http.StatusNotFound, `{}`
 		}
 	})
 	adapter := &weatherResearchAdapter{client: client, geocodingURL: "https://weather.test/geo", forecastURL: "https://weather.test/forecast"}
-	sources, err := adapter.Research(context.Background(), "合肥今天和明天天气")
+	sources, err := adapter.Research(context.Background(), "合肥 今天 天气 温度 降雨概率 出行建议")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != 1 || sources[0].Kind != "weather_forecast" || !strings.Contains(sources[0].Content, "2026-09-09") {
+	if geoQuery != "合肥" || forecastDays != "2" || len(sources) != 1 || sources[0].Kind != "weather_forecast" ||
+		!strings.Contains(sources[0].Content, "2026-09-09") || !strings.Contains(sources[0].Content, "precipitation_probability_percent") {
 		t.Fatalf("天气结构化来源错误: %+v", sources)
+	}
+}
+
+func TestWeatherAdapterFallsBackAcrossLocationCandidates(t *testing.T) {
+	geoQueries := make([]string, 0, 2)
+	client := researchJSONClient(func(request *http.Request) (int, string) {
+		switch request.URL.Path {
+		case "/geo":
+			location := request.URL.Query().Get("name")
+			geoQueries = append(geoQueries, location)
+			if location != "合肥" {
+				return http.StatusOK, `{"results":[]}`
+			}
+			return http.StatusOK, `{"results":[{"id":1,"name":"合肥","admin1":"安徽","country":"中国","timezone":"Asia/Shanghai","latitude":31.86,"longitude":117.28}]}`
+		case "/forecast":
+			return http.StatusOK, `{"timezone":"Asia/Shanghai","current":{"time":"2026-09-08T10:00","temperature_2m":28,"apparent_temperature":29,"relative_humidity_2m":55,"weather_code":0,"wind_speed_10m":8},"daily":{"time":["2026-09-08","2026-09-09"],"weather_code":[0,61],"temperature_2m_max":[31,29],"temperature_2m_min":[22,21],"precipitation_probability_max":[10,70]}}`
+		default:
+			return http.StatusNotFound, `{}`
+		}
+	})
+	adapter := &weatherResearchAdapter{client: client, geocodingURL: "https://weather.test/geo", forecastURL: "https://weather.test/forecast"}
+	sources, err := adapter.Research(context.Background(), "安徽 合肥 今天 天气 温度和降雨概率")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(geoQueries) != 2 || geoQueries[0] != "安徽 合肥" || geoQueries[1] != "合肥" || len(sources) != 1 {
+		t.Fatalf("天气地点候选降级错误: queries=%#v sources=%+v", geoQueries, sources)
 	}
 }
 
@@ -399,7 +463,7 @@ func TestWebResearchLiveScenarios(t *testing.T) {
 		depth    string
 		wantKind string
 	}{
-		{name: "weather", query: "合肥未来一周天气", depth: "normal", wantKind: "weather_forecast"},
+		{name: "weather", query: "合肥 今天 天气 温度 降雨概率 出行建议", depth: "normal", wantKind: "weather_forecast"},
 		{name: "github", query: "EasyPostman 的 GitHub star 多少", depth: "quick", wantKind: "github_repository"},
 		{name: "finance", query: "思科的股票价格", depth: "quick", wantKind: "market_quote"},
 		{name: "entity", query: "Laker 是谁", depth: "quick"},
@@ -427,7 +491,13 @@ func TestWebResearchLiveScenarios(t *testing.T) {
 			if test.wantKind != "" {
 				found := false
 				for _, source := range report.Sources {
-					found = found || source.Kind == test.wantKind
+					if source.Kind == test.wantKind {
+						found = true
+						if test.name == "weather" && (!strings.Contains(source.Content, `"query": "合肥"`) ||
+							strings.Count(source.Content, `"date":`) < 2 || !strings.Contains(source.Content, "precipitation_probability_percent")) {
+							t.Fatalf("天气结构化来源缺少地点、两天范围或降雨概率: %s", source.Content)
+						}
+					}
 				}
 				if !found {
 					t.Fatalf("缺少结构化来源 %s: %s", test.wantKind, output)

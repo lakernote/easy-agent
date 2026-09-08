@@ -28,6 +28,14 @@ var (
 	githubStarsJSON    = regexp.MustCompile(`"stargazerCount"\s*:\s*([0-9]+)`)
 )
 
+var weatherIntentMarkers = []string{
+	"今天和明天", "今天明天", "未来一周", "未来7天", "未来七天", "接下来一周",
+	"降水概率", "降雨概率", "下雨概率", "最高气温", "最低气温", "体感温度", "天气预报",
+	"今天", "明天", "后天", "现在", "当前", "实时", "天气", "气温", "温度", "预报",
+	"precipitation probability", "chance of rain", "next 7 days", "next week", "weather",
+	"forecast", "temperature", "today", "tomorrow", "current",
+}
+
 type weatherResearchAdapter struct {
 	client       *http.Client
 	geocodingURL string
@@ -119,31 +127,40 @@ func (adapter *weatherResearchAdapter) Applicable(query string) bool {
 }
 
 func (adapter *weatherResearchAdapter) Research(ctx context.Context, query string) ([]researchSource, error) {
-	location := weatherLocation(query)
-	if location == "" {
+	locations := weatherLocationCandidates(query)
+	if len(locations) == 0 {
 		return nil, errors.New("无法从问题中确定天气地点")
 	}
-	geoEndpoint := adapter.geocodingURL + "?" + url.Values{
-		"name": {location}, "count": {"5"}, "language": {"zh"}, "format": {"json"},
-	}.Encode()
-	var geoPayload struct {
-		Results []struct {
-			ID        int64   `json:"id"`
-			Name      string  `json:"name"`
-			Country   string  `json:"country"`
-			Admin1    string  `json:"admin1"`
-			Timezone  string  `json:"timezone"`
-			Latitude  float64 `json:"latitude"`
-			Longitude float64 `json:"longitude"`
-		} `json:"results"`
+	type weatherPlace struct {
+		ID        int64   `json:"id"`
+		Name      string  `json:"name"`
+		Country   string  `json:"country"`
+		Admin1    string  `json:"admin1"`
+		Timezone  string  `json:"timezone"`
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
 	}
-	if err := getResearchJSON(ctx, adapter.client, geoEndpoint, nil, &geoPayload); err != nil {
-		return nil, fmt.Errorf("地点解析失败: %w", err)
+	var place weatherPlace
+	resolvedQuery := ""
+	for _, location := range locations {
+		geoEndpoint := adapter.geocodingURL + "?" + url.Values{
+			"name": {location}, "count": {"5"}, "language": {"zh"}, "format": {"json"},
+		}.Encode()
+		var geoPayload struct {
+			Results []weatherPlace `json:"results"`
+		}
+		if err := getResearchJSON(ctx, adapter.client, geoEndpoint, nil, &geoPayload); err != nil {
+			return nil, fmt.Errorf("地点解析失败: %w", err)
+		}
+		if len(geoPayload.Results) > 0 {
+			place = geoPayload.Results[0]
+			resolvedQuery = location
+			break
+		}
 	}
-	if len(geoPayload.Results) == 0 {
-		return nil, fmt.Errorf("没有找到地点 %q", location)
+	if resolvedQuery == "" {
+		return nil, fmt.Errorf("没有找到地点候选 %q", strings.Join(locations, "、"))
 	}
-	place := geoPayload.Results[0]
 	days := weatherForecastDays(query)
 	forecastEndpoint := adapter.forecastURL + "?" + url.Values{
 		"latitude":      {strconv.FormatFloat(place.Latitude, 'f', 6, 64)},
@@ -170,7 +187,7 @@ func (adapter *weatherResearchAdapter) Research(ctx context.Context, query strin
 	}
 	content := map[string]any{
 		"resolved_location": map[string]any{
-			"query": location, "name": place.Name, "admin1": place.Admin1, "country": place.Country,
+			"query": resolvedQuery, "name": place.Name, "admin1": place.Admin1, "country": place.Country,
 			"latitude": place.Latitude, "longitude": place.Longitude,
 		},
 		"timezone": forecast.Timezone,
@@ -224,19 +241,87 @@ func buildWeatherForecast(daily weatherDaily) []map[string]any {
 }
 
 func weatherLocation(query string) string {
-	value := strings.ToLower(strings.TrimSpace(httpURLPattern.ReplaceAllString(query, " ")))
+	candidates := weatherLocationCandidates(query)
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0]
+}
+
+// weatherLocationCandidates keeps location parsing deterministic while tolerating
+// small models that append requested fields or answer instructions to the query.
+// A prefix before the first weather/time marker is usually the cleanest location;
+// the fully cleaned query remains a fallback for forms such as "weather in New York".
+func weatherLocationCandidates(query string) []string {
+	raw := strings.ToLower(strings.TrimSpace(httpURLPattern.ReplaceAllString(query, " ")))
+	if raw == "" {
+		return nil
+	}
+	values := make([]string, 0, 4)
+	if index := firstWeatherIntentIndex(raw); index > 0 {
+		values = append(values, raw[:index])
+	}
+	values = append(values, raw)
+
+	candidates := make([]string, 0, len(values)*2)
+	for _, value := range values {
+		candidate := cleanWeatherLocation(value)
+		if candidate == "" {
+			continue
+		}
+		candidates = append(candidates, candidate)
+		// Geocoders are generally better at a city token than a conversational
+		// phrase. Keep the final whitespace-delimited token as a last fallback.
+		fields := strings.Fields(candidate)
+		if len(fields) > 1 {
+			candidates = append(candidates, fields[len(fields)-1])
+		}
+	}
+	return uniqueStrings(candidates)
+}
+
+func firstWeatherIntentIndex(value string) int {
+	index := -1
+	for _, marker := range weatherIntentMarkers {
+		if found := strings.Index(value, marker); found >= 0 && (index < 0 || found < index) {
+			index = found
+		}
+	}
+	if match := weatherDaysPattern.FindStringIndex(value); match != nil && (index < 0 || match[0] < index) {
+		index = match[0]
+	}
+	return index
+}
+
+func cleanWeatherLocation(value string) string {
 	replacer := strings.NewReplacer(
 		"未来一周", " ", "未来7天", " ", "未来七天", " ", "接下来一周", " ",
 		"今天和明天", " ", "今天明天", " ", "今天", " ", "明天", " ", "后天", " ",
-		"天气预报", " ", "天气", " ", "气温", " ", "温度", " ", "预报", " ",
-		"怎么样", " ", "如何", " ", "多少", " ", "查询", " ", "请问", " ",
+		"现在", " ", "当前", " ", "实时", " ", "天气预报", " ", "天气", " ",
+		"最高气温", " ", "最低气温", " ", "体感温度", " ", "气温", " ", "温度", " ", "预报", " ",
+		"降水概率", " ", "降雨概率", " ", "下雨概率", " ", "降水", " ", "降雨", " ",
+		"风力", " ", "风速", " ", "湿度", " ", "日出", " ", "日落", " ",
+		"出行建议", " ", "穿衣建议", " ", "出行", " ", "建议", " ",
+		"怎么样", " ", "如何", " ", "多少", " ", "帮我查一下", " ", "查一下", " ",
+		"请帮我", " ", "告诉我", " ", "我想知道", " ", "查询", " ", "查看", " ", "请问", " ", "请", " ",
 		"weather", " ", "forecast", " ", "temperature", " ", "today", " ", "tomorrow", " ",
-		"next week", " ", "next 7 days", " ", " in ", " ",
+		"current", " ", "precipitation probability", " ", "chance of rain", " ",
+		"travel advice", " ", "next week", " ", "next 7 days", " ", " in ", " ",
 	)
 	value = replacer.Replace(value)
 	value = weatherDaysPattern.ReplaceAllString(value, " ")
-	value = strings.Trim(value, " \t\r\n,.;:!?，。；：！？的")
+	value = strings.Trim(value, " \t\r\n,.;:!?，。；：！？、的")
 	value = compactWhitespace(value)
+	for previous := ""; value != previous; {
+		previous = value
+		for _, prefix := range []string{"what is the", "what's the", "whats the", "tell me the", "tell me", "show me", "please"} {
+			if value == prefix {
+				value = ""
+			} else if strings.HasPrefix(value, prefix+" ") {
+				value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+			}
+		}
+	}
 	if len([]rune(value)) == 0 || len([]rune(value)) > 80 {
 		return ""
 	}
@@ -256,8 +341,15 @@ func weatherForecastDays(query string) int {
 	if strings.Contains(query, "今天") && strings.Contains(query, "明天") {
 		return 2
 	}
-	if strings.Contains(query, "今天") || strings.Contains(lower, "today") {
-		return 1
+	if strings.Contains(query, "后天") {
+		return 3
+	}
+	if strings.Contains(query, "今天") || strings.Contains(query, "明天") ||
+		strings.Contains(query, "现在") || strings.Contains(query, "当前") || strings.Contains(query, "实时") ||
+		strings.Contains(lower, "today") || strings.Contains(lower, "tomorrow") || strings.Contains(lower, "current") {
+		// Include tomorrow even if a small model accidentally shortens “today and
+		// tomorrow” to “today”. The extra day is bounded and avoids a second call.
+		return 2
 	}
 	return 7
 }

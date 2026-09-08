@@ -20,7 +20,7 @@ export function MessageView({ message, relatedCall }: { message: Session['messag
 }
 
 type ResearchSource = { id?: string; title?: string; url?: string; domain?: string; provider?: string; kind?: string; content?: string }
-type ResearchResult = { ok?: boolean; depth?: string; evidence_status?: string; source_count?: number; sources?: ResearchSource[]; limitations?: string[] }
+type ResearchResult = { ok?: boolean; depth?: string; evidence_status?: string; independent_domain_count?: number; source_count?: number; sources?: ResearchSource[]; limitations?: string[] }
 
 function ToolResult({ name, value }: { name: string; value: string }) {
   if (name !== 'web_research') return <Payload value={value} />
@@ -28,14 +28,21 @@ function ToolResult({ name, value }: { name: string; value: string }) {
   try { research = JSON.parse(value) as ResearchResult } catch { return <Payload value={value} /> }
   if (!research.ok || !Array.isArray(research.sources)) return <Payload value={value} />
   return <div className="research-result">
-    <div className="research-result-head"><strong>{research.source_count ?? research.sources.length} 个已读取来源</strong><span>{research.depth || 'normal'} · {research.evidence_status === 'multiple_sources_retrieved' ? '多源证据' : '单一来源'}</span></div>
+    <div className="research-result-head"><strong>{research.source_count ?? research.sources.length} 个已读取来源</strong><span>{research.depth || 'normal'} · {researchEvidenceLabel(research)} · S=来源编号</span></div>
     <div className="research-source-list">{research.sources.map((source, index) => <details className="research-source" key={`${source.id || index}-${source.url || ''}`}>
-      <summary><b>{source.id || `S${index + 1}`}</b><span>{source.title || source.domain || '来源'}</span><small>{source.provider || source.kind || ''}</small></summary>
+      <summary><b title="本次研究的来源编号，不代表质量或可信度排名">{source.id || `S${index + 1}`}</b><span>{source.title || source.domain || '来源'}</span><small>{source.provider || source.kind || ''}</small></summary>
       {safeResearchLink(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.domain || source.url}</a>}
       {source.content && <pre>{source.content}</pre>}
     </details>)}</div>
     {Array.isArray(research.limitations) && research.limitations.length > 0 && <p className="research-limitations">{research.limitations.join('；')}</p>}
   </div>
+}
+
+function researchEvidenceLabel(research: ResearchResult) {
+  if (research.evidence_status === 'multiple_independent_sources_retrieved') return `${research.independent_domain_count || 2} 个独立网站`
+  if (research.evidence_status === 'multiple_sources_same_domain') return '同站多页面'
+  if (research.evidence_status === 'multiple_sources_retrieved') return '多源证据'
+  return '单一来源'
 }
 
 function safeResearchLink(value?: string) { return !!value && /^https?:\/\//i.test(value) }
