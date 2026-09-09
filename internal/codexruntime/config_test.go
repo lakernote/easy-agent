@@ -96,3 +96,18 @@ func TestSyncMCPServersDocumentPreservesUnmanagedAndKeepsSecretsInEnvironment(t 
 		t.Fatalf("MCP 密钥应通过进程环境传递: %+v", environment)
 	}
 }
+
+func TestSyncMCPServersDocumentTreatsTokenAsBearerAuthentication(t *testing.T) {
+	document := configDocument{}
+	environment := syncMCPServersDocument(document, []MCPServerConfig{{
+		ID: "token-mcp", Transport: "http", Endpoint: "https://mcp.example/mcp", AuthType: "token", Token: "secret-token",
+	}})
+	servers := providerDocumentMap(document, "mcp_servers")
+	entry, ok := servers["easyagent_token-mcp"].(map[string]any)
+	if !ok || entry["bearer_token_env_var"] != "EASYAGENT_TOKEN_MCP_TOKEN" {
+		t.Fatalf("token authentication should use Codex bearer token env var: %+v", entry)
+	}
+	if environment["EASYAGENT_TOKEN_MCP_TOKEN"] != "secret-token" {
+		t.Fatalf("token authentication should be passed through the process environment: %+v", environment)
+	}
+}

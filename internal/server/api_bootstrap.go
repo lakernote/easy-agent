@@ -39,6 +39,9 @@ type runtimeInfoPayload struct {
 
 type modelRulesPayload struct {
 	DefaultMaxOutputTokens             int `json:"defaultMaxOutputTokens"`
+	DefaultMaxSteps                    int `json:"defaultMaxSteps"`
+	MinMaxSteps                        int `json:"minMaxSteps"`
+	MaxMaxSteps                        int `json:"maxMaxSteps"`
 	DefaultRequestTimeoutSeconds       int `json:"defaultRequestTimeoutSeconds"`
 	MinRequestTimeoutSeconds           int `json:"minRequestTimeoutSeconds"`
 	MaxRequestTimeoutSeconds           int `json:"maxRequestTimeoutSeconds"`

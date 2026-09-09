@@ -19,6 +19,9 @@ const (
 	DefaultSSEHeartbeatSeconds = 20
 	MinSSEHeartbeatSeconds     = 5
 	MaxSSEHeartbeatSeconds     = 60
+	DefaultRetentionDays       = 30
+	MinRetentionDays           = 1
+	MaxRetentionDays           = 3650
 )
 
 func DefaultRuntimeSettings() RuntimeSettings {
@@ -27,6 +30,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		TurnTimeoutSeconds:  DefaultTurnTimeoutSeconds,
 		SSEHeartbeatSeconds: DefaultSSEHeartbeatSeconds,
 		GitWorktrees:        true,
+		RetentionDays:       DefaultRetentionDays,
 	}
 }
 
@@ -75,6 +79,12 @@ func normalizeRuntimeSettings(value RuntimeSettings) RuntimeSettings {
 	}
 	if value.SSEHeartbeatSeconds > MaxSSEHeartbeatSeconds {
 		value.SSEHeartbeatSeconds = MaxSSEHeartbeatSeconds
+	}
+	if value.RetentionDays < MinRetentionDays {
+		value.RetentionDays = DefaultRetentionDays
+	}
+	if value.RetentionDays > MaxRetentionDays {
+		value.RetentionDays = MaxRetentionDays
 	}
 	return value
 }

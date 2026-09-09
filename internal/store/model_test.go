@@ -11,7 +11,7 @@ func TestDefaultModelDoesNotGuessInstalledModel(t *testing.T) {
 	if value.Model != "" {
 		t.Fatalf("默认配置不应猜测本机已安装模型: %q", value.Model)
 	}
-	if value.BaseURL != DefaultOllamaBaseURL || value.RequestTimeoutSeconds != DefaultRequestTimeoutSeconds || value.TurnTimeoutSeconds != 0 || value.CompressionThresholdPercent != DefaultCompressionThresholdPercent {
+	if value.BaseURL != DefaultOllamaBaseURL || value.RequestTimeoutSeconds != DefaultRequestTimeoutSeconds || value.TurnTimeoutSeconds != 0 || value.CompressionThresholdPercent != DefaultCompressionThresholdPercent || value.MaxOutputTokens != DefaultMaxOutputTokens || value.MaxSteps != DefaultMaxSteps {
 		t.Fatalf("默认配置没有使用集中常量: %+v", value)
 	}
 }

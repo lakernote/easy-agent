@@ -18,6 +18,9 @@ func (server *Server) saveRuntimeSettings(response http.ResponseWriter, request 
 	if input.SSEHeartbeatSeconds == 0 {
 		input.SSEHeartbeatSeconds = store.DefaultSSEHeartbeatSeconds
 	}
+	if input.RetentionDays == 0 {
+		input.RetentionDays = store.DefaultRetentionDays
+	}
 	if input.MaxConcurrentTasks < store.MinMaxConcurrentTasks || input.MaxConcurrentTasks > store.MaxMaxConcurrentTasks {
 		writeError(response, http.StatusBadRequest, "并发任务数必须在 1 到 16 之间")
 		return
@@ -30,11 +33,16 @@ func (server *Server) saveRuntimeSettings(response http.ResponseWriter, request 
 		writeError(response, http.StatusBadRequest, "实时连接心跳必须在 5 到 60 秒之间")
 		return
 	}
+	if input.RetentionDays < store.MinRetentionDays || input.RetentionDays > store.MaxRetentionDays {
+		writeError(response, http.StatusBadRequest, "数据保留天数必须在 1 到 3650 天之间")
+		return
+	}
 	saved, err := server.store.SaveRuntimeSettings(input)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
 	server.scheduler.setLimit(saved.MaxConcurrentTasks)
+	server.triggerRetentionCleanup()
 	writeJSON(response, http.StatusOK, saved)
 }

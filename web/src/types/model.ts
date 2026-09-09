@@ -10,6 +10,7 @@ export type ModelSettings = {
   apiKeyEnv?: string
   thinking?: string
   maxOutputTokens: number
+  maxSteps: number
   requestTimeoutSeconds: number
   turnTimeoutSeconds: number
   contextWindowTokens: number
@@ -25,6 +26,9 @@ export type ModelProfile = {
 
 export type ModelRules = {
   defaultMaxOutputTokens: number
+  defaultMaxSteps: number
+  minMaxSteps: number
+  maxMaxSteps: number
   defaultRequestTimeoutSeconds: number
   minRequestTimeoutSeconds: number
   maxRequestTimeoutSeconds: number

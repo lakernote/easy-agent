@@ -15,7 +15,10 @@ const (
 	ChannelAutomation                  = "automation"
 	DefaultModelProtocol               = "chat_completions"
 	DefaultOllamaBaseURL               = "http://127.0.0.1:11434/v1"
-	DefaultMaxOutputTokens             = 1600
+	DefaultMaxOutputTokens             = 4096
+	DefaultMaxSteps                    = 32
+	MinMaxSteps                        = 4
+	MaxMaxSteps                        = 64
 	DefaultRequestTimeoutSeconds       = 300
 	MinRequestTimeoutSeconds           = 30
 	MaxRequestTimeoutSeconds           = 600
@@ -40,6 +43,7 @@ type ModelSettings struct {
 	APIKeyEnv       string `json:"apiKeyEnv,omitempty"`
 	Thinking        string `json:"thinking,omitempty"`
 	MaxOutputTokens int    `json:"maxOutputTokens,omitempty"`
+	MaxSteps        int    `json:"maxSteps,omitempty"`
 	// RequestTimeoutSeconds is the timeout for one provider request in EasyAgent.
 	// Codex uses its own TurnTimeoutSeconds because app-server owns the inner
 	// model/tool requests.
@@ -68,6 +72,7 @@ func DefaultModelSettings() ModelSettings {
 		BaseURL:                     DefaultOllamaBaseURL,
 		Thinking:                    "disabled",
 		MaxOutputTokens:             DefaultMaxOutputTokens,
+		MaxSteps:                    DefaultMaxSteps,
 		RequestTimeoutSeconds:       DefaultRequestTimeoutSeconds,
 		CompressionThresholdPercent: DefaultCompressionThresholdPercent,
 	}
@@ -84,6 +89,9 @@ func (value ModelSettings) WithDefaults() ModelSettings {
 	}
 	if value.MaxOutputTokens == 0 {
 		value.MaxOutputTokens = DefaultMaxOutputTokens
+	}
+	if value.MaxSteps <= 0 {
+		value.MaxSteps = DefaultMaxSteps
 	}
 	if value.RequestTimeoutSeconds == 0 {
 		value.RequestTimeoutSeconds = DefaultRequestTimeoutSeconds

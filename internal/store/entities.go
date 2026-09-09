@@ -228,6 +228,7 @@ type RuntimeSettings struct {
 	TurnTimeoutSeconds  int  `json:"turnTimeoutSeconds"`
 	SSEHeartbeatSeconds int  `json:"sseHeartbeatSeconds"`
 	GitWorktrees        bool `json:"gitWorktrees"`
+	RetentionDays       int  `json:"retentionDays"`
 }
 
 // WeixinSettings controls the shared WeChat remote channel. IgnoreBefore keeps

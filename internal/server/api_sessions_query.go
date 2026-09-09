@@ -53,6 +53,9 @@ func (server *Server) getOlderSessions(response http.ResponseWriter, request *ht
 func modelRules() modelRulesPayload {
 	return modelRulesPayload{
 		DefaultMaxOutputTokens:             store.DefaultMaxOutputTokens,
+		DefaultMaxSteps:                    store.DefaultMaxSteps,
+		MinMaxSteps:                        store.MinMaxSteps,
+		MaxMaxSteps:                        store.MaxMaxSteps,
 		DefaultRequestTimeoutSeconds:       store.DefaultRequestTimeoutSeconds,
 		MinRequestTimeoutSeconds:           store.MinRequestTimeoutSeconds,
 		MaxRequestTimeoutSeconds:           store.MaxRequestTimeoutSeconds,

@@ -94,6 +94,9 @@ func validateModel(value store.ModelSettings) error {
 	if value.MaxOutputTokens <= 0 {
 		return errors.New("最大输出 Token 必须大于 0")
 	}
+	if value.MaxSteps < store.MinMaxSteps || value.MaxSteps > store.MaxMaxSteps {
+		return errors.New("Agent 最大步骤数必须在 " + strconv.Itoa(store.MinMaxSteps) + " 到 " + strconv.Itoa(store.MaxMaxSteps) + " 之间")
+	}
 	if value.RequestTimeoutSeconds < store.MinRequestTimeoutSeconds || value.RequestTimeoutSeconds > store.MaxRequestTimeoutSeconds {
 		return errors.New("模型超时必须在 " + strconv.Itoa(store.MinRequestTimeoutSeconds) + " 到 " + strconv.Itoa(store.MaxRequestTimeoutSeconds) + " 秒之间")
 	}

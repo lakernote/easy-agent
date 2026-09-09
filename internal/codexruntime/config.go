@@ -263,7 +263,10 @@ func syncMCPServersDocument(document configDocument, configs []MCPServerConfig) 
 				environment[envName] = value
 				envHeaders[header] = envName
 			}
-			if config.AuthType == "bearer" && strings.TrimSpace(config.Token) != "" {
+			// EasyAgent historically accepted both names for the same MCP
+			// authentication mode. Normalize them here too, otherwise an MCP
+			// that works in EasyAgent Runtime loses its token in Codex Runtime.
+			if (strings.EqualFold(config.AuthType, "bearer") || strings.EqualFold(config.AuthType, "token")) && strings.TrimSpace(config.Token) != "" {
 				envName := managedMCPEnv(id, "token")
 				environment[envName] = config.Token
 				entry["bearer_token_env_var"] = envName

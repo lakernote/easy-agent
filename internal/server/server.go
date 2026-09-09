@@ -37,6 +37,7 @@ type Server struct {
 	runtimes    *runtimeRegistry
 	weixin      *weixinManager
 	codexEnvMu  sync.RWMutex
+	retentionMu sync.Mutex
 	codexEnv    map[string]string
 	codexEnvErr error
 	authMu      sync.Mutex
@@ -92,6 +93,7 @@ func newServer(database *store.Store, assets fs.FS, environment *appenv.Environm
 	server.weixin = newWeixinManager(server, weixin.NewHTTPGateway(nil))
 	server.weixin.start()
 	server.startAutomationScheduler()
+	server.startRetentionScheduler()
 	return server, nil
 }
 

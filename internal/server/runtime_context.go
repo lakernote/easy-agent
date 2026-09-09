@@ -99,7 +99,7 @@ func runtimeCompactionThreshold(settings store.ModelSettings) int {
 	threshold := settings.ContextWindowTokens * percent / 100
 	// 压缩由“输入是否接近窗口”决定，不为配置的最大输出固定占位。单次请求
 	// 真正剩余多少输出空间由 fitRuntimeOutputBudget 动态限制。否则 4K 模型会
-	// 因 1600 的理论输出上限，连一次普通工具调用都先触发摘要。
+	// 因较小的理论输出上限，连一次普通工具调用都先触发摘要。
 	safeThreshold := settings.ContextWindowTokens - runtimeMinOutputTokens - runtimeSafetyMargin(settings.ContextWindowTokens)
 	if safeThreshold > 0 && safeThreshold < threshold {
 		threshold = safeThreshold

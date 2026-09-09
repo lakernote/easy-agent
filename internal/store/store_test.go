@@ -407,16 +407,65 @@ func TestRuntimeSettingsDefaultsAndNormalization(t *testing.T) {
 	}
 	defer value.Close()
 	defaults, err := value.GetRuntimeSettings()
-	if err != nil || defaults.MaxConcurrentTasks != 4 || defaults.TurnTimeoutSeconds != 12*60*60 || defaults.SSEHeartbeatSeconds != 20 || !defaults.GitWorktrees {
+	if err != nil || defaults.MaxConcurrentTasks != 4 || defaults.TurnTimeoutSeconds != 12*60*60 || defaults.SSEHeartbeatSeconds != 20 || defaults.RetentionDays != DefaultRetentionDays || !defaults.GitWorktrees {
 		t.Fatalf("运行设置默认值异常: value=%+v err=%v", defaults, err)
 	}
 	saved, err := value.SaveRuntimeSettings(RuntimeSettings{MaxConcurrentTasks: 99})
-	if err != nil || saved.MaxConcurrentTasks != 16 || saved.TurnTimeoutSeconds != DefaultTurnTimeoutSeconds || saved.SSEHeartbeatSeconds != DefaultSSEHeartbeatSeconds || saved.GitWorktrees {
+	if err != nil || saved.MaxConcurrentTasks != 16 || saved.TurnTimeoutSeconds != DefaultTurnTimeoutSeconds || saved.SSEHeartbeatSeconds != DefaultSSEHeartbeatSeconds || saved.RetentionDays != DefaultRetentionDays || saved.GitWorktrees {
 		t.Fatalf("运行设置归一化异常: value=%+v err=%v", saved, err)
 	}
 	loaded, err := value.GetRuntimeSettings()
 	if err != nil || loaded != saved {
 		t.Fatalf("运行设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
+	}
+}
+
+func TestPurgeExpiredSessionsCascadesHistoryButKeepsActiveSessions(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	for _, session := range []CreateSessionParams{
+		{ID: "expired", Title: "过期", Model: "fixture", CreatedAt: now.Add(-40 * 24 * time.Hour)},
+		{ID: "active", Title: "运行中", Model: "fixture", CreatedAt: now.Add(-40 * 24 * time.Hour)},
+	} {
+		if _, err := value.CreateSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := value.TouchSession("expired", now.Add(-40*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.QueueSession("active", "fixture", now.Add(-40*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.AppendMessage("expired", Message{Role: "user", Content: "history", Attachments: []Attachment{{ID: "attachment-1", Name: "old.txt", MIMEType: "text/plain", Kind: "text", Size: 3, Data: []byte("old")}}, CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.AppendEvent("expired", Event{Kind: "trace", CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := value.PurgeExpiredSessions(now, 30)
+	if err != nil || deleted != 1 {
+		t.Fatalf("过期会话清理异常: deleted=%d err=%v", deleted, err)
+	}
+	if _, err := value.LoadSession("expired"); err == nil {
+		t.Fatal("过期会话应被删除")
+	}
+	if _, err := value.LoadSession("active"); err != nil {
+		t.Fatalf("活动会话不应被清理: %v", err)
+	}
+	var count int
+	if err := value.db.QueryRow(`SELECT COUNT(*) FROM ea_messages WHERE session_id='expired'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("过期会话消息未级联清理: count=%d err=%v", count, err)
+	}
+	if err := value.db.QueryRow(`SELECT COUNT(*) FROM ea_events WHERE session_id='expired'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("过期会话 Trace 未级联清理: count=%d err=%v", count, err)
+	}
+	if err := value.db.QueryRow(`SELECT COUNT(*) FROM ea_attachments WHERE message_id NOT IN (SELECT id FROM ea_messages)`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("过期会话附件未级联清理: count=%d err=%v", count, err)
 	}
 }
 

@@ -45,6 +45,13 @@ export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: 
         <div className="task-setting-heading"><span>04</span><div><strong>项目冲突控制</strong><small>让并发任务写入相互隔离的 Git 分支。</small></div></div>
         <label className="task-toggle"><span><strong>自动创建 Git worktree</strong><small>Git 项目使用 <code>easyagent/…</code> 分支；非 Git 目录仍按原目录串行。</small></span><input type="checkbox" checked={settings.gitWorktrees} onChange={(event) => setSettings({ ...settings, gitWorktrees: event.target.checked })} /></label>
       </section>
+      <section>
+        <div className="task-setting-heading"><span>05</span><div><strong>历史数据保留</strong><small>自动清理过期会话及其消息、Trace 和附件。</small></div></div>
+        <label>保留时间（天）
+          <input type="number" min="1" max="3650" value={settings.retentionDays} onChange={(event) => setSettings({ ...settings, retentionDays: Number(event.target.value) })} />
+          <small>默认 30 天；运行中的任务不会被清理，保存后后台执行一次。</small>
+        </label>
+      </section>
     </div>
     <div className="recovery-policy">
       <div><span className="service-dot" /><p><strong>服务重启恢复</strong><small>未开始的排队任务自动恢复；手动暂停的任务保持暂停。</small></p></div>
@@ -353,7 +360,8 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
           </select>
           <small>工具选择失败时，优先检查服务端是否支持原生 tool_calls。</small>
         </label>
-        <label>最大输出 Token<input type="number" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label>
+        <label>最大 Agent 步数<input type="number" min={data.modelRules.minMaxSteps} max={data.modelRules.maxMaxSteps} value={model.maxSteps} onChange={(event) => setModel({ ...model, maxSteps: Number(event.target.value) })} /><small>默认 {data.modelRules.defaultMaxSteps} 步；每一步可包含一次模型请求和工具链。</small></label>
+        <label>最大输出 Token<input type="number" min="256" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label>
         <label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /></label>
         <label>上下文窗口 Token
           <input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(event) => setModel({ ...model, contextWindowTokens: Number(event.target.value) })} />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { APIError, api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, sessionDisplayTitle, updateSessionSummary, type Page } from './sessionState'
@@ -6,10 +6,15 @@ import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } fro
 import { Logo } from './ui'
 import { Sidebar } from './Sidebar'
 import { Chat } from './Chat'
-import { TracePanel } from './TracePanel'
-import { SettingsShell } from './SettingsShell'
-import { AutomationPage } from './AutomationPage'
 import { LoginPage } from './LoginPage'
+
+const TracePanel = lazy(() => import('./TracePanel').then((module) => ({ default: module.TracePanel })))
+const SettingsShell = lazy(() => import('./SettingsShell').then((module) => ({ default: module.SettingsShell })))
+const AutomationPage = lazy(() => import('./AutomationPage').then((module) => ({ default: module.AutomationPage })))
+
+function PageLoading() {
+  return <div className="boot"><span className="spinner" />正在加载页面…</div>
+}
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
   const [session, setSession] = useState<Session | null>(null)
@@ -177,10 +182,12 @@ export default function App() {
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
       {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('models')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
-      {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
-      {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
+      <Suspense fallback={<PageLoading />}>
+        {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
+        {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
+      </Suspense>
     </main>
-    {traceOpen && session && <TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} />}
+    {traceOpen && session && <Suspense fallback={null}><TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} /></Suspense>}
     {forkOpen && <ForkDialog busy={forking} onCancel={() => setForkOpen(false)} onConfirm={(mode) => void forkSession(mode)} />}
     {worktreeOpen && session?.worktreeBranch && <WorktreeDialog session={session} busy={cleaningWorktree} onCancel={() => setWorktreeOpen(false)} onCleanup={() => void cleanupWorktree()} />}
     {session?.codexRequest && <CodexRequestPrompt request={session.codexRequest} onResolve={resolveCodexRequest} onCancel={stopSession} />}

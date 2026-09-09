@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultMaxSteps = 12
+	defaultMaxSteps = 32
 	// Shell 自己默认 60 秒、最多 300 秒。Runner 的外层上限必须允许 Shell 的
 	// 显式长任务，否则页面写 300 秒而实际 60 秒就会被提前取消。
 	defaultToolTimeout = 5 * time.Minute
@@ -42,7 +42,7 @@ func NewRunner(model Model, modelName string, tools []Tool) (*Runner, error) {
 	}
 	// Temperature 为 0 时适配器会省略该字段。OpenAI 的部分推理模型不接受
 	// temperature，而 Ollama/DeepSeek 也不需要 Runtime 强行覆盖模型默认值。
-	runner := &Runner{Model: model, ModelName: strings.TrimSpace(modelName), MaxOutputTokens: 1600}
+	runner := &Runner{Model: model, ModelName: strings.TrimSpace(modelName), MaxOutputTokens: 4096}
 	runner.toolsByName = make(map[string]Tool, len(tools))
 	runner.modelToolSpecs = make([]ToolSpec, 0, len(tools))
 	if err := runner.AddTools(tools); err != nil {

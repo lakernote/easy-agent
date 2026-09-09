@@ -103,6 +103,10 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	mcpLoader.SetRegister(runner.AddTools)
 	toolLoader.SetRegister(runner.AddTools)
 	runner.MaxOutputTokens = settings.MaxOutputTokens
+	maxSteps := settings.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = store.DefaultMaxSteps
+	}
 	var traceErr error
 	var traceMu sync.Mutex
 	recordTraceError := func(err error) {
@@ -132,6 +136,7 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	newMessages := []agent.Message{coreMessages[len(coreMessages)-1]}
 	result, err := runner.Run(ctx, agent.RunRequest{
 		Messages: coreMessages, NewMessages: newMessages, PreviousResponseID: previousID,
+		MaxSteps:          maxSteps,
 		RequiredToolNames: selectedToolNamesForTurn,
 		PromptCacheKey:    promptCacheKey(settings),
 		OnTextDelta:       func(delta string) { server.tasks.appendPartial(id, delta) },
