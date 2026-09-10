@@ -260,6 +260,9 @@ type RunRequest struct {
 	MaxSteps       int
 	ToolTimeout    time.Duration
 	OnTextDelta    func(string)
+	// OnToolApproval is called immediately before a tool that requires user
+	// confirmation runs. A non-nil error denies the call.
+	OnToolApproval func(context.Context, ToolCall) error
 	// OnTextReset 清除不应成为最终回答的临时流式正文，例如模型只看了搜索
 	// 摘要就提前作答、Runner 要求其继续读取原始来源时。
 	OnTextReset func()

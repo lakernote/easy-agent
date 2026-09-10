@@ -12,7 +12,7 @@ export function ChatComposer(model: ChatComposerModel) {
     session, draft, sending, attachments, attachmentError, dragging, setDragging,
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
-    composerRef, textareaRef, fileInputRef, isCodexRuntime, selectedRuntime, selectRuntime, workspace, projectOptions, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen, profileOptions, selectedProfileId,
+    composerRef, textareaRef, fileInputRef, isCodexRuntime, selectedRuntime, selectRuntime, selectedPermissionMode, selectPermissionMode, workspace, projectOptions, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen, profileOptions, selectedProfileId,
     displayedModel, readiness, onOpenSkills, onOpenCapabilities, onOpenModelSettings, addFiles, removeAttachment,
     closeCapabilityPicker, openCapabilityPicker, insertCapability, removeCapability, handleCapabilityKey, updateDraft, send,
     setSelectedProfileId, onStop, onPause, onResume, runActionBusy,
@@ -29,12 +29,14 @@ export function ChatComposer(model: ChatComposerModel) {
         {!session ? <>
           <button type="button" className="composer-workspace composer-project-select" title={workspace} aria-expanded={workspaceOpen} aria-controls="workspace-picker" onClick={() => setWorkspaceOpen(!workspaceOpen)}><span className="composer-field-label">项目</span><strong>{selectedProject?.name || workspaceLabel}</strong><span className="composer-field-chevron" aria-hidden="true">⌄</span></button>
           <label className="composer-select-field composer-runtime-select"><span>Runtime</span><select value={selectedRuntime} onChange={(event) => selectRuntime(event.target.value as typeof selectedRuntime)} disabled={sending} aria-label="选择新会话 Runtime"><option value="easyagent">EasyAgent</option><option value="codex">Codex</option></select></label>
+          <label className="composer-select-field composer-permission-select"><span>权限</span><select value={selectedPermissionMode} onChange={(event) => selectPermissionMode(event.target.value as typeof selectedPermissionMode)} disabled={sending} aria-label="选择新会话权限"><option value="read_only">只读</option><option value="workspace_write">工作区可写</option><option value="full_access">完全访问</option><option value="custom">自定义目录</option></select></label>
           <label className="composer-select-field composer-model-select"><span>模型</span>{profileOptions.length > 0 ? <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={sending} aria-label="选择新会话模型配置">
             {profileOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.settings.model ? ` · ${item.settings.model}` : ''}</option>)}
           </select> : <button type="button" className="composer-setup-link" onClick={onOpenModelSettings}>去设置创建</button>}</label>
         </> : <>
           <div className="composer-fixed-field composer-fixed-project" title={workspace}><span>项目</span><strong>{workspaceLabel}</strong></div>
           <div className="composer-fixed-field composer-fixed-runtime"><span>Runtime</span><strong className={`composer-runtime ${isCodexRuntime ? 'codex' : ''}`}>{isCodexRuntime ? 'Codex' : 'EasyAgent'}</strong></div>
+          <div className="composer-fixed-field composer-fixed-permission"><span>权限</span><strong>{session?.permissions?.mode === 'read_only' ? '只读' : session?.permissions?.mode === 'workspace_write' ? '工作区可写' : session?.permissions?.mode === 'custom' ? '自定义目录' : '完全访问'}</strong></div>
           <div className="composer-model composer-fixed-field"><span>模型</span><strong title={displayedModel}>{displayedModel}</strong></div>
         </>}
       </div>

@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/lakernote/easy-agent/internal/permissions"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -20,7 +21,8 @@ type messageRequest struct {
 	ProfileID   string              `json:"profileId,omitempty"`
 	ProjectID   string              `json:"projectId,omitempty"`
 	// Workspace 只在创建会话时使用；后续多轮对话始终沿用会话保存的工作区。
-	Workspace string `json:"workspace,omitempty"`
+	Workspace   string              `json:"workspace,omitempty"`
+	Permissions *permissions.Policy `json:"permissions,omitempty"`
 }
 
 type updateSessionRequest struct {
@@ -140,11 +142,19 @@ func (server *Server) createSession(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, "当前模型配置不可用："+err.Error())
 		return
 	}
+	policy := runtimeSettings.Permissions
+	if input.Permissions != nil {
+		policy = input.Permissions.Normalize()
+		if err := policy.Validate(); err != nil {
+			writeError(response, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	workspace := server.prepareSessionWorkspace(request.Context(), id, runEnvironment.Workspace(), runtimeSettings)
 	if _, err := server.store.CreateSession(store.CreateSessionParams{
 		ID: id, Title: attachmentTitle(input.Message, attachments), Runtime: model.Runtime,
 		ProfileID: model.ProfileID, Model: model.Model, ProjectID: projectID,
-		Workspace: workspace.Execution, CreatedAt: time.Now(),
+		Permissions: policy, Workspace: workspace.Execution, CreatedAt: time.Now(),
 	}); err != nil {
 		server.discardPreparedWorkspace(workspace)
 		writeError(response, http.StatusInternalServerError, err.Error())

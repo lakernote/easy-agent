@@ -89,19 +89,19 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	toolInfo := builtintools.InfoList(server.env, catalog)
-	for _, config := range mcps {
-		if config.Enabled {
-			toolInfo = append(toolInfo, builtintools.Info{Name: "search_mcp_tools", Description: "按任务语义搜索已启用的 MCP Server，一次只加载少量相关工具。", Source: "运行时"})
-			break
-		}
-	}
 	detectedModel := enrichOllamaContextWindow(request.Context(), model)
 	model = detectedModel
 	runtimeSettings, err := server.store.GetRuntimeSettings()
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
+	}
+	toolInfo := builtintools.InfoListWithPermissions(server.env, catalog, runtimeSettings.Permissions)
+	for _, config := range mcps {
+		if config.Enabled {
+			toolInfo = append(toolInfo, builtintools.Info{Name: "search_mcp_tools", Description: "按任务语义搜索已启用的 MCP Server，一次只加载少量相关工具。", Source: "运行时"})
+			break
+		}
 	}
 	researchSettings, err := server.store.GetResearchSettings()
 	if err != nil {

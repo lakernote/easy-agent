@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 func TestSessionRuntimeIsPinnedAtCreation(t *testing.T) {
@@ -25,5 +27,29 @@ func TestSessionRuntimeIsPinnedAtCreation(t *testing.T) {
 	}
 	if loaded.Runtime != RuntimeCodex {
 		t.Fatalf("loaded runtime = %q", loaded.Runtime)
+	}
+}
+
+func TestSessionPermissionsRoundTrip(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	writableRoot := filepath.Join(t.TempDir(), "workspace")
+	want := permissions.Policy{Mode: permissions.ModeCustom, Approval: permissions.ApprovalOnRequest, WritableRoots: []string{writableRoot}, NetworkAccess: false}
+	created, err := database.CreateSession(CreateSessionParams{ID: "permission-session", Title: "权限", Runtime: RuntimeEasyAgent, Model: "fixture", Permissions: want, CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Permissions.Mode != permissions.ModeCustom || created.Permissions.Approval != permissions.ApprovalOnRequest || created.Permissions.NetworkAccess {
+		t.Fatalf("created permissions = %+v", created.Permissions)
+	}
+	loaded, err := database.LoadSession("permission-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Permissions.WritableRoots) != 1 || loaded.Permissions.WritableRoots[0] != writableRoot {
+		t.Fatalf("loaded permissions = %+v", loaded.Permissions)
 	}
 }

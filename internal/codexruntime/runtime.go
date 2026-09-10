@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/permissions"
 	"github.com/lakernote/easy-agent/internal/tracevalue"
 )
 
@@ -113,6 +114,7 @@ type Config struct {
 	Env                   []string
 	Skills                []SkillRef
 	Attachments           []Attachment
+	Permissions           permissions.Policy
 	OnDelta               func(string)
 	OnEvent               func(Event)
 	OnUsage               func(Usage)
@@ -234,6 +236,10 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	}
 	if strings.TrimSpace(config.Workspace) == "" {
 		return Result{}, errors.New("Codex Runtime 缺少工作区")
+	}
+	config.Permissions = config.Permissions.Normalize()
+	if err := config.Permissions.Validate(); err != nil {
+		return Result{}, err
 	}
 	if strings.TrimSpace(userMessage) == "" && len(config.Attachments) == 0 {
 		return Result{}, errors.New("Codex Runtime 收到空消息")
@@ -432,12 +438,14 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if err := send("initialized", 0, map[string]any{}); err != nil {
 		return Result{}, err
 	}
+	policy := config.Permissions
+	workspaceRoots := append([]string{config.Workspace}, config.AdditionalDirectories...)
 	threadParams := map[string]any{
-		"cwd": config.Workspace, "approvalPolicy": "never",
+		"cwd": config.Workspace, "approvalPolicy": string(policy.Approval),
 		// thread/start 和 thread/resume 使用 SandboxMode 字符串；只有
 		// turn/start 使用 sandboxPolicy 对象。EasyAgent 的 Codex Runtime
 		// 默认按产品约定使用完全访问模式。
-		"sandbox": "danger-full-access",
+		"sandbox": codexSandboxMode(policy),
 	}
 	if config.Model != "" {
 		threadParams["model"] = config.Model
@@ -468,8 +476,8 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	}
 	turnResult, err := request("turn/start", 3, map[string]any{
 		"threadId": threadID, "input": input,
-		"cwd": config.Workspace, "approvalPolicy": "never",
-		"sandboxPolicy": map[string]any{"type": "dangerFullAccess"},
+		"cwd": config.Workspace, "approvalPolicy": string(policy.Approval),
+		"sandboxPolicy": codexSandboxPolicy(policy, workspaceRoots),
 	})
 	if err != nil {
 		return Result{}, err

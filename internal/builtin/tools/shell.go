@@ -12,6 +12,7 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 const (
@@ -23,6 +24,10 @@ const (
 // shellTool 是 EasyAgent 的通用本地执行底座。模型可以用它运行构建、测试、
 // 项目脚本和系统已有的 CLI。每次调用的命令、结果、耗时都会由 Runner 写入 Trace。
 func shellTool(environment *appenv.Environment) agent.Tool {
+	return shellToolWithPolicy(environment, permissions.Default())
+}
+
+func shellToolWithPolicy(environment *appenv.Environment, policy permissions.Policy) agent.Tool {
 	return agent.Tool{
 		Spec: agent.ToolSpec{
 			Name:        "shell",
@@ -38,12 +43,20 @@ func shellTool(environment *appenv.Environment) agent.Tool {
 			}, []string{"command"}),
 		},
 		Run: func(ctx context.Context, raw json.RawMessage) (string, error) {
-			return runShell(ctx, environment, raw)
+			return runShellWithPolicy(ctx, environment, policy, raw)
 		},
 	}
 }
 
 func runShell(parent context.Context, environment *appenv.Environment, raw json.RawMessage) (string, error) {
+	return runShellWithPolicy(parent, environment, permissions.Default(), raw)
+}
+
+func runShellWithPolicy(parent context.Context, environment *appenv.Environment, policy permissions.Policy, raw json.RawMessage) (string, error) {
+	policy = policy.Normalize()
+	if policy.IsReadOnly() {
+		return "", errors.New("当前权限模式为只读，EasyAgent 已禁用 Shell")
+	}
 	var arguments struct {
 		Command          string `json:"command"`
 		WorkingDirectory string `json:"working_directory"`
@@ -80,7 +93,11 @@ func runShell(parent context.Context, environment *appenv.Environment, raw json.
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	command := newShellCommand(ctx, arguments.Command)
+	roots := append([]string{environment.Workspace()}, environment.Directories()...)
+	command, err := newPermissionedShellCommand(ctx, arguments.Command, policy, policy.EffectiveWritableRoots(roots))
+	if err != nil {
+		return "", err
+	}
 	command.Dir = directory
 	command.Env = environment.Environ(nil)
 	command.WaitDelay = 2 * time.Second

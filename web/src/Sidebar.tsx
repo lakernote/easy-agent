@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import type { Bootstrap, Session } from './types'
@@ -16,7 +17,7 @@ function initialCollapsedProjects() {
   } catch { return new Set<string>() }
 }
 
-export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession, onRefresh, onLoadOlder, onError }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onSession: (value: Session) => void; onRefresh: () => Promise<Bootstrap>; onLoadOlder: (beforeUpdatedAt: string, beforeID: string) => Promise<void>; onError: (value: string) => void }) {
+export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession, onFork, onRefresh, onLoadOlder, onError }: { page: Page; data: Bootstrap; session: Session | null; onPage: (page: Page) => void; onOpen: (id: string) => void; onNew: () => void; onSession: (value: Session) => void; onFork: (value: Session) => void; onRefresh: () => Promise<Bootstrap>; onLoadOlder: (beforeUpdatedAt: string, beforeID: string) => Promise<void>; onError: (value: string) => void }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [managing, setManaging] = useState(false)
@@ -25,6 +26,8 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
   const [pendingDelete, setPendingDelete] = useState<Session[]>([])
   const [feedback, setFeedback] = useState('')
   const [editingSession, setEditingSession] = useState<Session | null>(null)
+  const [openSessionMenu, setOpenSessionMenu] = useState<string | null>(null)
+  const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null)
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [savingMetadata, setSavingMetadata] = useState(false)
@@ -64,6 +67,18 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
   }, [collapsedProjects])
 
   useEffect(() => {
+    if (!openSessionMenu) return
+    const closeWithEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpenSessionMenu(null); setSessionMenuPosition(null) } }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element) || (!target.closest('.session-action-menu') && !target.closest('.session-more'))) { setOpenSessionMenu(null); setSessionMenuPosition(null) }
+    }
+    document.addEventListener('keydown', closeWithEscape)
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => { document.removeEventListener('keydown', closeWithEscape); document.removeEventListener('pointerdown', closeOnOutsidePointer) }
+  }, [openSessionMenu])
+
+  useEffect(() => {
     const node = sessionListRef.current
     if (!node || !data.sessionsHasMore || query.trim() || sort !== 'newest') return
     const loadOlder = async () => {
@@ -79,6 +94,7 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
   }, [data.sessions, data.sessionsHasMore, query, sort, onLoadOlder, onError])
 
   const showFeedback = (value: string) => { setFeedback(value); window.setTimeout(() => setFeedback(''), 2400) }
+  const closeSessionMenu = () => { setOpenSessionMenu(null); setSessionMenuPosition(null) }
   const requestRemove = (item: Session) => setPendingDelete([item])
   const toggleSelected = (id: string) => setSelectedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
   const toggleAll = () => setSelectedIds((current) => { const next = new Set(current); if (allSelected) selectableSessions.forEach((item) => next.delete(item.id)); else selectableSessions.forEach((item) => next.add(item.id)); return next })
@@ -131,10 +147,11 @@ export function Sidebar({ page, data, session, onPage, onOpen, onNew, onSession,
     const automation = isAutomationSession(item)
     const weixin = item.channel === 'weixin'
     const title = sessionDisplayTitle(item)
-    return <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${automation ? 'automation-session' : ''} ${managing ? 'managing' : ''}`}>
+    const canFork = item.runtime === 'codex' && !isActive(item.status) && item.status !== 'paused'
+    return <div key={item.id} className={`session-row ${session?.id === item.id ? 'active' : ''} ${automation ? 'automation-session' : ''} ${managing ? 'managing' : ''} ${openSessionMenu === item.id ? 'menu-open' : ''}`}>
       {managing && <label className="session-select" title={isActive(item.status) ? '运行中的会话不能删除' : '选择会话'}><input type="checkbox" checked={selectedIds.has(item.id)} disabled={isActive(item.status)} onChange={() => toggleSelected(item.id)} aria-label={`选择会话 ${title}`} /></label>}
-      <button className="session-open" onClick={() => onOpen(item.id)} aria-current={session?.id === item.id ? 'page' : undefined} title={title}>{automation ? <span className={`session-type-icon automation ${item.status}`} aria-label="定时任务"><Icon name="automation" /></span> : weixin ? <span className={`session-type-icon weixin ${item.status}`} aria-label="微信会话"><WeixinIcon /></span> : <span className={`status ${item.status}`} />}<span className="session-copy"><strong>{title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
-      {!managing && <button className="session-delete session-more" aria-label={`编辑会话 ${title}`} title="编辑会话" onClick={() => setEditingSession(item)}><MoreIcon /></button>}
+      <button className="session-open" onClick={() => { closeSessionMenu(); onOpen(item.id) }} aria-current={session?.id === item.id ? 'page' : undefined} title={title}>{automation ? <span className={`session-type-icon automation ${item.status}`} aria-label="定时任务"><Icon name="automation" /></span> : weixin ? <span className={`session-type-icon weixin ${item.status}`} aria-label="微信会话"><WeixinIcon /></span> : <span className={`status ${item.status}`} />}<span className="session-copy"><strong>{title}</strong><small>{formatTime(item.updatedAt)} · {isActive(item.status) ? item.runProgress || '运行中' : `${statusLabel(item.status)} · ${item.runtime === 'codex' ? 'Codex' : 'EasyAgent'}${item.model ? ` · ${item.model}` : ''}`}</small></span></button>
+      {!managing && <><button className="session-more" aria-label={`会话操作 ${title}`} aria-expanded={openSessionMenu === item.id} aria-haspopup="menu" title="会话操作" onClick={(event) => { event.stopPropagation(); if (openSessionMenu === item.id) { closeSessionMenu(); return }; const rect = event.currentTarget.getBoundingClientRect(); const menuWidth = 142; const menuHeight = canFork ? 122 : 82; const preferredTop = rect.bottom + 4; const top = preferredTop + menuHeight <= window.innerHeight - 8 ? preferredTop : Math.max(8, rect.top - menuHeight - 4); const left = Math.min(Math.max(8, rect.right - menuWidth), Math.max(8, window.innerWidth - menuWidth - 8)); setOpenSessionMenu(item.id); setSessionMenuPosition({ top, left }) }}><MoreIcon /></button>{openSessionMenu === item.id && sessionMenuPosition && createPortal(<div className="session-action-menu" role="menu" aria-label={`${title} 的会话操作`} style={{ top: sessionMenuPosition.top, left: sessionMenuPosition.left }} onClick={(event) => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { closeSessionMenu(); setEditingSession(item) }}>编辑会话</button>{canFork && <button type="button" role="menuitem" onClick={() => { closeSessionMenu(); onFork(item) }}>创建对话分支</button>}<button className="danger" type="button" role="menuitem" disabled={isActive(item.status)} onClick={() => { closeSessionMenu(); requestRemove(item) }}>删除会话</button></div>, document.body)}</>}
     </div>
   }
 

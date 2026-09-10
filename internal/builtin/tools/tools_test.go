@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 func testEnvironment(t *testing.T, workspace string) *appenv.Environment {
@@ -181,6 +184,44 @@ func TestShellTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "已终止") || !strings.Contains(output, `"timed_out": true`) || time.Since(startedAt) > 3*time.Second {
 		t.Fatalf("Shell 没有按时终止: output=%s err=%v", output, err)
 	}
+}
+
+func TestReadOnlyCatalogDoesNotExposeMutationTools(t *testing.T) {
+	tools := CatalogWithResearchConfigAndPermissions(testEnvironment(t, t.TempDir()), nil, ResearchConfigFromEnvironment(), permissions.Policy{Mode: permissions.ModeReadOnly})
+	for _, tool := range tools {
+		if tool.Spec.Name == "shell" || tool.Spec.Name == "edit" || tool.Spec.Name == "write" {
+			t.Fatalf("只读目录不应暴露 %q", tool.Spec.Name)
+		}
+	}
+}
+
+func TestWorkspaceWriteShellUsesHostSandboxWhenAvailable(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("当前测试只覆盖 macOS sandbox-exec")
+	}
+	root := t.TempDir()
+	environment := testEnvironment(t, root)
+	raw := json.RawMessage(`{"command":"printf ok > allowed.txt"}`)
+	if _, err := shellToolWithPolicy(environment, permissions.Policy{Mode: permissions.ModeWorkspaceWrite}).Run(context.Background(), raw); err != nil {
+		t.Fatalf("工作区写入应能通过 macOS 沙盒: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "allowed.txt"))
+	if err != nil || string(content) != "ok" {
+		t.Fatalf("沙盒内文件没有正确写入: content=%q err=%v", content, err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	command := fmt.Sprintf("printf blocked > %q", outside)
+	if _, err := shellToolWithPolicy(environment, permissions.Policy{Mode: permissions.ModeWorkspaceWrite}).Run(context.Background(), mustJSON(map[string]string{"command": command})); err == nil {
+		t.Fatal("工作区沙盒不应允许写入工作区外文件")
+	}
+}
+
+func mustJSON(value any) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return raw
 }
 
 func TestOutputCaptureKeepsHeadAndTail(t *testing.T) {

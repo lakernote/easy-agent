@@ -10,6 +10,7 @@ import (
 
 	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/appenv"
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 type SkillSource interface {
@@ -63,7 +64,11 @@ func Catalog(environment *appenv.Environment, skills SkillSource) []agent.Tool {
 }
 
 func CatalogWithResearchConfig(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig) []agent.Tool {
-	entries := catalogEntries(environment, skills, researchConfig)
+	return CatalogWithResearchConfigAndPermissions(environment, skills, researchConfig, permissions.Default())
+}
+
+func CatalogWithResearchConfigAndPermissions(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig, policy permissions.Policy) []agent.Tool {
+	entries := catalogEntries(environment, skills, researchConfig, policy)
 	result := make([]agent.Tool, 0, len(entries))
 	for _, item := range entries {
 		tool := item.tool
@@ -81,10 +86,14 @@ func CatalogWithResearchConfig(environment *appenv.Environment, skills SkillSour
 	return result
 }
 
-func catalogEntries(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig) []entry {
+func catalogEntries(environment *appenv.Environment, skills SkillSource, researchConfig ResearchConfig, policy ...permissions.Policy) []entry {
+	permissionPolicy := permissions.Default()
+	if len(policy) > 0 {
+		permissionPolicy = policy[0]
+	}
 	// 文件工具共享同一个工作区和“已读取版本”记录。这样 write 可以阻止模型在
 	// 没看过现有文件时直接覆盖，同时整套能力仍然只属于本轮 Agent。
-	files := newFileWorkspace(environment.Workspace(), environment.Directories())
+	files := newFileWorkspaceWithPolicy(environment.Workspace(), environment.Directories(), permissionPolicy)
 	result := []entry{
 		{tool: currentTimeTool(), category: categoryInformation, group: groupInformation},
 		{tool: calculateTool(), category: categoryExecution, group: groupExecution},
@@ -93,7 +102,9 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource, researc
 	for _, tool := range files.tools() {
 		result = append(result, entry{tool: tool, category: categoryFile, group: groupFiles})
 	}
-	result = append(result, entry{tool: shellTool(environment), category: categoryExecution, group: groupExecution})
+	if !permissionPolicy.IsReadOnly() {
+		result = append(result, entry{tool: shellToolWithPolicy(environment, permissionPolicy), category: categoryExecution, group: groupExecution})
+	}
 	if skills != nil {
 		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension, group: groupSkills})
 	}
@@ -101,7 +112,11 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource, researc
 }
 
 func InfoList(environment *appenv.Environment, skills SkillSource) []Info {
-	entries := catalogEntries(environment, skills, ResearchConfigFromEnvironment())
+	return InfoListWithPermissions(environment, skills, permissions.Default())
+}
+
+func InfoListWithPermissions(environment *appenv.Environment, skills SkillSource, policy permissions.Policy) []Info {
+	entries := catalogEntries(environment, skills, ResearchConfigFromEnvironment(), policy)
 	result := make([]Info, 0, len(entries))
 	for _, item := range entries {
 		result = append(result, Info{

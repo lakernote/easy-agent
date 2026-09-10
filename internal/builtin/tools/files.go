@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lakernote/easy-agent/internal/agent"
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 const (
@@ -31,16 +32,26 @@ const (
 // fileWorkspace 是一轮 Agent 共享的文件工作区。所有返回路径都相对工作区，
 // 既减少 Token，也避免 Trace 把服务器用户名和绝对目录暴露到截图中。
 type fileWorkspace struct {
-	root  string
-	roots []string
-	mu    sync.Mutex
-	reads map[string][sha256.Size]byte
+	root       string
+	roots      []string
+	writeRoots []string
+	policy     permissions.Policy
+	mu         sync.Mutex
+	reads      map[string][sha256.Size]byte
 }
 
 func newFileWorkspace(root string, additional ...[]string) *fileWorkspace {
+	var directories []string
+	if len(additional) > 0 {
+		directories = additional[0]
+	}
+	return newFileWorkspaceWithPolicy(root, directories, permissions.Default())
+}
+
+func newFileWorkspaceWithPolicy(root string, additional []string, policy permissions.Policy) *fileWorkspace {
 	values := []string{root}
 	if len(additional) > 0 {
-		values = append(values, additional[0]...)
+		values = append(values, additional...)
 	}
 	roots := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
@@ -56,13 +67,16 @@ func newFileWorkspace(root string, additional ...[]string) *fileWorkspace {
 		seen[value] = struct{}{}
 		roots = append(roots, value)
 	}
-	return &fileWorkspace{root: roots[0], roots: roots, reads: map[string][sha256.Size]byte{}}
+	policy = policy.Normalize()
+	return &fileWorkspace{root: roots[0], roots: roots, writeRoots: policy.EffectiveWritableRoots(roots), policy: policy, reads: map[string][sha256.Size]byte{}}
 }
 
 func (workspace *fileWorkspace) tools() []agent.Tool {
-	return []agent.Tool{
-		workspace.readTool(), workspace.grepTool(), workspace.findTool(), workspace.listTool(), workspace.editTool(), workspace.writeTool(),
+	result := []agent.Tool{workspace.readTool(), workspace.grepTool(), workspace.findTool(), workspace.listTool()}
+	if !workspace.policy.IsReadOnly() {
+		result = append(result, workspace.editTool(), workspace.writeTool())
 	}
+	return result
 }
 
 func (workspace *fileWorkspace) readTool() agent.Tool {
@@ -382,6 +396,9 @@ func (workspace *fileWorkspace) grep(ctx context.Context, raw json.RawMessage) (
 }
 
 func (workspace *fileWorkspace) edit(_ context.Context, raw json.RawMessage) (string, error) {
+	if workspace.policy.IsReadOnly() {
+		return "", errors.New("当前权限模式为只读，不能修改文件")
+	}
 	var input struct {
 		Path       string `json:"path"`
 		OldText    string `json:"old_text"`
@@ -427,6 +444,9 @@ func (workspace *fileWorkspace) edit(_ context.Context, raw json.RawMessage) (st
 }
 
 func (workspace *fileWorkspace) write(_ context.Context, raw json.RawMessage) (string, error) {
+	if workspace.policy.IsReadOnly() {
+		return "", errors.New("当前权限模式为只读，不能写入文件")
+	}
 	var input struct {
 		Path      string `json:"path"`
 		Content   string `json:"content"`
@@ -444,6 +464,9 @@ func (workspace *fileWorkspace) write(_ context.Context, raw json.RawMessage) (s
 	absolute, relative, exists, err := workspace.resolveForWrite(input.Path)
 	if err != nil {
 		return "", err
+	}
+	if !workspace.canWrite(absolute) {
+		return "", errors.New("写入路径超出当前权限允许的目录")
 	}
 	if exists {
 		if !input.Overwrite {
@@ -504,6 +527,9 @@ func (workspace *fileWorkspace) resolveForWrite(input string) (string, string, b
 			return "", "", false, resolveErr
 		}
 		relative, relativeErr := workspace.relative(resolved)
+		if relativeErr != nil && workspace.canWrite(resolved) {
+			relative, relativeErr = filepath.ToSlash(resolved), nil
+		}
 		return resolved, relative, true, relativeErr
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", "", false, err
@@ -514,6 +540,9 @@ func (workspace *fileWorkspace) resolveForWrite(input string) (string, string, b
 	}
 	absolute = filepath.Join(parent, filepath.Base(absolute))
 	relative, err := workspace.relative(absolute)
+	if err != nil && workspace.canWrite(absolute) {
+		relative, err = filepath.ToSlash(absolute), nil
+	}
 	return absolute, relative, false, err
 }
 
@@ -533,6 +562,23 @@ func (workspace *fileWorkspace) relative(absolute string) (string, error) {
 		return filepath.ToSlash(absolute), nil
 	}
 	return "", errors.New("路径超出当前项目的源文件夹")
+}
+
+func (workspace *fileWorkspace) canWrite(absolute string) bool {
+	roots := workspace.writeRoots
+	if len(roots) == 0 {
+		roots = workspace.roots
+		if len(roots) == 0 && workspace.root != "" {
+			roots = []string{workspace.root}
+		}
+	}
+	for _, root := range roots {
+		relative, err := filepath.Rel(root, absolute)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (workspace *fileWorkspace) rememberRead(path string, content []byte) {

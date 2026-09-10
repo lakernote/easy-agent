@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { writeClipboardText } from '../clipboard'
-import type { Bootstrap, CodexProviderConfig, MCPConfig, ModelSettings } from '../types'
+import type { Bootstrap, CodexProviderConfig, MCPConfig, ModelSettings, RuntimePermissionSettings } from '../types'
 
 export type Notice = { ready: boolean; title: string; message: string }
 
 export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void }) {
-  const [settings, setSettings] = useState({ ...data.runtimeSettings })
+  const defaultPermissions: RuntimePermissionSettings = { mode: 'full_access', approval: 'never', writableRoots: [], networkAccess: true }
+  const normalizeSettings = () => ({ ...data.runtimeSettings, permissions: { ...defaultPermissions, ...(data.runtimeSettings.permissions || {}) } })
+  const [settings, setSettings] = useState(normalizeSettings)
   const [saving, setSaving] = useState(false)
-  useEffect(() => setSettings({ ...data.runtimeSettings }), [data.runtimeSettings])
+  useEffect(() => setSettings(normalizeSettings()), [data.runtimeSettings])
   const save = async () => {
     setSaving(true); onError('')
     try { await api.saveRuntimeSettings(settings); await onRefresh() }
@@ -41,12 +43,36 @@ export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: 
           <small>默认 20 秒；通常无需调小。</small>
         </label>
       </section>
+      <section className="task-setting-permissions">
+        <div className="task-setting-heading"><span>04</span><div><strong>Runtime 权限</strong><small>同时作用于 EasyAgent Runtime 和 Codex Runtime；新任务读取，已运行任务不改变。</small></div></div>
+        <label>执行权限
+          <select value={settings.permissions.mode} onChange={(event) => { const mode = event.target.value as RuntimePermissionSettings['mode']; setSettings({ ...settings, permissions: { ...settings.permissions, mode, writableRoots: mode === 'read_only' ? [] : settings.permissions.writableRoots } }) }}>
+            <option value="read_only">只读</option>
+            <option value="workspace_write">工作区写入</option>
+            <option value="full_access">完全访问</option>
+            <option value="custom">自定义</option>
+          </select>
+          <small>{permissionModeDescription(settings.permissions.mode)}</small>
+        </label>
+        <label>审批策略（Codex）
+          <select value={settings.permissions.approval} onChange={(event) => setSettings({ ...settings, permissions: { ...settings.permissions, approval: event.target.value as RuntimePermissionSettings['approval'] } })}>
+            <option value="on-request">需要时询问</option>
+            <option value="never">从不询问</option>
+          </select>
+          <small>EasyAgent 的文件权限由工具和系统沙盒执行；审批策略由 Codex app-server 执行。</small>
+        </label>
+        {settings.permissions.mode === 'custom' && <label className="wide">可写目录（每行一个绝对路径）
+          <textarea value={settings.permissions.writableRoots.join('\n')} onChange={(event) => setSettings({ ...settings, permissions: { ...settings.permissions, writableRoots: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) } })} placeholder="留空：使用当前会话工作区" />
+          <small>自定义模式在 EasyAgent 上需要宿主机提供 bwrap 或 sandbox-exec。</small>
+        </label>}
+        {settings.permissions.mode !== 'read_only' && <label className="task-toggle"><span><strong>允许命令联网</strong><small>只控制 Runtime 执行的命令；MCP、网页研究等连接仍有自己的配置。</small></span><input type="checkbox" checked={settings.permissions.networkAccess} onChange={(event) => setSettings({ ...settings, permissions: { ...settings.permissions, networkAccess: event.target.checked } })} /></label>}
+      </section>
       <section>
-        <div className="task-setting-heading"><span>04</span><div><strong>项目冲突控制</strong><small>让并发任务写入相互隔离的 Git 分支。</small></div></div>
+        <div className="task-setting-heading"><span>05</span><div><strong>项目冲突控制</strong><small>让并发任务写入相互隔离的 Git 分支。</small></div></div>
         <label className="task-toggle"><span><strong>自动创建 Git worktree</strong><small>Git 项目使用 <code>easyagent/…</code> 分支；非 Git 目录仍按原目录串行。</small></span><input type="checkbox" checked={settings.gitWorktrees} onChange={(event) => setSettings({ ...settings, gitWorktrees: event.target.checked })} /></label>
       </section>
       <section>
-        <div className="task-setting-heading"><span>05</span><div><strong>历史数据保留</strong><small>自动清理过期会话及其消息、Trace 和附件。</small></div></div>
+        <div className="task-setting-heading"><span>06</span><div><strong>历史数据保留</strong><small>自动清理过期会话及其消息、Trace 和附件。</small></div></div>
         <label>保留时间（天）
           <input type="number" min="1" max="3650" value={settings.retentionDays} onChange={(event) => setSettings({ ...settings, retentionDays: Number(event.target.value) })} />
           <small>默认 30 天；运行中的任务不会被清理，保存后后台执行一次。</small>
@@ -59,6 +85,15 @@ export function RuntimeOperationsSettings({ data, onRefresh, onError }: { data: 
     </div>
     <div className="form-actions"><button className="primary-button" type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? '保存中…' : '保存任务设置'}</button></div>
   </div>
+}
+
+function permissionModeDescription(mode: RuntimePermissionSettings['mode']) {
+  switch (mode) {
+    case 'read_only': return '只能读取和搜索；EasyAgent 禁用写文件和 Shell。'
+    case 'workspace_write': return '允许修改当前工作区；命令执行需要宿主机沙盒。'
+    case 'custom': return '只允许写入指定目录；命令执行需要宿主机沙盒。'
+    default: return '关闭本地沙盒限制，保持现有 EasyAgent 默认行为。'
+  }
 }
 
 type CodexStatusProps = {

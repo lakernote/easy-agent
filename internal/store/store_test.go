@@ -415,7 +415,7 @@ func TestRuntimeSettingsDefaultsAndNormalization(t *testing.T) {
 		t.Fatalf("运行设置归一化异常: value=%+v err=%v", saved, err)
 	}
 	loaded, err := value.GetRuntimeSettings()
-	if err != nil || loaded != saved {
+	if err != nil || !reflect.DeepEqual(loaded, saved) {
 		t.Fatalf("运行设置未持久化: value=%+v want=%+v err=%v", loaded, saved, err)
 	}
 }

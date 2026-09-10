@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import { api } from '../api'
-import type { Bootstrap, ModelSettings, Session } from '../types'
+import type { Bootstrap, ModelSettings, RuntimePermissionSettings, Session } from '../types'
 import { isActive, mergeSessionSnapshot } from '../sessionState'
 import { encodeAttachment, supportedAttachment, type PendingAttachment } from '../attachments'
 import { capabilityKindLabel, capabilityMention, capabilityOptions, hasCapabilityToken, type CapabilityOption } from '../capabilities'
@@ -31,6 +31,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   const [capabilityIndex, setCapabilityIndex] = useState(0)
   const [capabilityRange, setCapabilityRange] = useState<{ start: number; end: number } | null>(null)
   const [selectedRuntime, setSelectedRuntime] = useState<ModelSettings['runtime']>(() => data.model.runtime)
+  const [selectedPermissionMode, setSelectedPermissionMode] = useState<RuntimePermissionSettings['mode']>(() => data.runtimeSettings.permissions.mode)
   const [selectedProfileId, setSelectedProfileId] = useState(data.activeModelProfileId)
   const defaultProject = data.projects.find((item) => item.default) || data.projects[0]
   const [selectedProjectId, setSelectedProjectId] = useState(() => window.localStorage.getItem('easyagent.project') || defaultProject?.id || '')
@@ -86,6 +87,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setSelectedProfileId(defaultProfile?.id || '')
   }, [data.activeModelProfileId, data.modelProfiles, selectedProfileId, selectedRuntime, session])
   useEffect(() => { if (!session) setSelectedRuntime(data.model.runtime) }, [data.model.runtime, session])
+  useEffect(() => { if (!session) setSelectedPermissionMode(data.runtimeSettings.permissions.mode) }, [data.runtimeSettings.permissions.mode, session])
   useEffect(() => {
     if (session || data.projects.some((item) => item.id === selectedProjectId)) return
     setSelectedProjectId(defaultProject?.id || '')
@@ -215,7 +217,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setSending(true); onError(''); setAttachmentError('')
     try {
       const payload = await Promise.all(attachments.map(encodeAttachment))
-      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, '', selectedProfileId, selectedProjectId)
+      const permissions = { ...data.runtimeSettings.permissions, mode: selectedPermissionMode }
+      const next = session ? await api.sendMessage(session.id, message, payload) : await api.createSession(message, payload, '', selectedProfileId, selectedProjectId, permissions)
       onSession(session ? mergeSessionSnapshot(session, next) : next); setDraft(''); setWorkspaceOpen(false); closeCapabilityPicker(); attachments.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)); setAttachments([]); await onRefresh()
     } catch (reason) {
       const message = (reason as Error).message
@@ -246,6 +249,11 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     setCapabilityOpen(false)
   }
 
+  const selectPermissionMode = (value: RuntimePermissionSettings['mode']) => {
+    if (session) return
+    setSelectedPermissionMode(value)
+  }
+
   return {
     session, data, onOpenSkills, onOpenCapabilities,
     draft, setDraft, sending, attachments, attachmentError, dragging, setDragging,
@@ -254,7 +262,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
     workspace: session?.workspace || selectedProject?.directories[0] || data.runtime.workspace,
     projectOptions: data.projects, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen,
-    profileOptions, selectedRuntime, selectRuntime, selectedProfileId, setSelectedProfileId, displayedModel, readiness,
+    profileOptions, selectedRuntime, selectRuntime, selectedPermissionMode, selectPermissionMode, selectedProfileId, setSelectedProfileId, displayedModel, readiness,
     onOpenModelSettings,
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,

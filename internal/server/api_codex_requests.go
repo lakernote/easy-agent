@@ -31,6 +31,6 @@ func (server *Server) resolveCodexRequest(response http.ResponseWriter, request 
 		writeError(response, http.StatusConflict, "该 Codex 请求已处理或已失效")
 		return
 	}
-	_ = server.store.AppendEvent(id, store.Event{Kind: "codex_request", Status: "resolved", Name: input.RequestID, Detail: "EasyAgent UI -> Codex app-server，反向请求已回复", Protocol: "codex_app_server"})
+	_ = server.store.AppendEvent(id, store.Event{Kind: "codex_request", Status: "resolved", Name: input.RequestID, Detail: "EasyAgent UI -> Runtime，执行确认已回复", Protocol: "runtime"})
 	response.WriteHeader(http.StatusNoContent)
 }

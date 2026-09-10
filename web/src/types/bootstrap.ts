@@ -4,6 +4,13 @@ import type { Session } from './session'
 
 export type Project = { id: string; name: string; directories: string[]; default: boolean; createdAt: string; updatedAt: string }
 
+export type RuntimePermissionSettings = {
+  mode: 'read_only' | 'workspace_write' | 'full_access' | 'custom'
+  approval: 'on-request' | 'never'
+  writableRoots: string[]
+  networkAccess: boolean
+}
+
 export type ResearchProvider = {
   id: string
   name: string
@@ -49,6 +56,6 @@ export type Bootstrap = {
   codex: CodexRuntimeStatus
   codexConfig: CodexProviderConfig
   runtime: { home: string; workspace: string; runtime: string }
-  runtimeSettings: { maxConcurrentTasks: number; turnTimeoutSeconds: number; sseHeartbeatSeconds: number; gitWorktrees: boolean; retentionDays: number }
+  runtimeSettings: { maxConcurrentTasks: number; turnTimeoutSeconds: number; sseHeartbeatSeconds: number; gitWorktrees: boolean; retentionDays: number; permissions: RuntimePermissionSettings }
   researchSettings: ResearchSettings
 }

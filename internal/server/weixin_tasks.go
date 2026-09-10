@@ -155,7 +155,7 @@ func (manager *weixinManager) submit(account store.WeixinAccount, message weixin
 			ID: sessionID, Title: makeTitle(text), Runtime: model.Runtime,
 			Channel:   store.ChannelWeixin,
 			ProfileID: model.ProfileID, Model: model.Model, ProjectID: project.ID,
-			Workspace: workspace.Execution, CreatedAt: now,
+			Permissions: runtimeSettings.Permissions, Workspace: workspace.Execution, CreatedAt: now,
 		}); err != nil {
 			manager.server.discardPreparedWorkspace(workspace)
 			return "", err

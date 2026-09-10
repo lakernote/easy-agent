@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Session, TraceEvent } from './types'
-import { formatDuration, formatTokens, historyModeLabel } from './format'
+import { formatDuration, historyModeLabel } from './format'
 import { writeClipboardText } from './clipboard'
 import { Payload } from './chat/Payload'
 import { Metric } from './chat/Metrics'
@@ -28,12 +28,13 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
     })
   }, [events, filter, query])
   const groups = useMemo(() => groupEventsByTurn(visibleEvents), [visibleEvents])
-  const cacheRate = session.usage.cacheReported && session.usage.cacheInputTokens ? Math.round(session.usage.cachedTokens / session.usage.cacheInputTokens * 100) : 0
-  const context = session.context
   const isCodexRuntime = session.runtime === 'codex'
   const runtimeName = isCodexRuntime ? 'Codex app-server' : 'EasyAgent Runtime'
-  const tokenValue = session.usage.totalTokens > 0 ? session.usage.totalTokens.toLocaleString() : '未上报'
-  const tokenSub = session.usage.totalTokens > 0 ? `入 ${session.usage.inputTokens} · 出 ${session.usage.outputTokens}` : isCodexRuntime ? 'Codex 未提供 thread/tokenUsage' : 'Provider 未返回 usage'
+  const totalTokenValue = formatTokenCount(session.usage.totalTokens)
+  const inputTokenValue = formatTokenCount(session.usage.inputTokens)
+  const outputTokenValue = formatTokenCount(session.usage.outputTokens)
+  const cacheRate = session.usage.cacheReported && session.usage.cacheInputTokens > 0 ? `${Math.round(session.usage.cachedTokens / session.usage.cacheInputTokens * 100)}%` : '未上报'
+  const compressionValue = session.context.compressionMode === 'auto' ? `自动 ${session.context.compressionThresholdPercent}%` : '未启用'
   const loadOlder = async () => {
     const first = session.events[0]
     if (!first || loadingOlder) return
@@ -42,14 +43,14 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
     finally { setLoadingOlder(false) }
   }
   return <aside className="trace-panel" aria-label="Agent 轨迹">
-    <div className="trace-head"><div><p className="eyebrow">运行记录 · {events.length} 个步骤</p><h2>Agent 轨迹</h2><span>从请求到回答，查看每一步真实发生了什么</span></div><button type="button" aria-label="关闭 Agent 轨迹" onClick={onClose}>×</button></div>
+    <div className="trace-head"><div><p className="eyebrow">运行记录</p><div className="trace-title-row"><h2>Agent 轨迹</h2><span>{formatTraceCount(events.length)} 步</span></div></div><button type="button" aria-label="关闭 Agent 轨迹" onClick={onClose}>×</button></div>
     <div className="trace-runtime-banner"><span className={`trace-live-dot ${session.status}`} aria-hidden="true" /><strong>{runtimeName}</strong><span>{traceStatusLabel(session.status, session.runProgress)}</span></div>
-    <div className="metrics"><Metric label="模型调用" value={`${session.usage.modelCalls} 次`} sub={formatDuration(session.usage.modelDurationMs)} /><Metric label="工具调用" value={`${session.usage.toolCalls} 次`} sub={formatDuration(session.usage.toolDurationMs)} /><Metric label="Token" value={tokenValue} sub={tokenSub} /><Metric label="缓存" value={session.usage.cacheReported ? `${cacheRate}%` : isCodexRuntime ? 'Codex 未提供' : '未上报'} sub={session.usage.cacheReported ? `命中 ${session.usage.cachedTokens} · 写入 ${session.usage.cacheWriteTokens}` : isCodexRuntime ? '等待 thread/tokenUsage/updated' : 'Provider 未返回缓存字段'} /></div>
-    <details className="trace-context"><summary>运行上下文 <span>{context.userTurns} 轮 · {context.historyMessages} 条消息</span></summary><div className="context-ledger"><div><span>最近上下文</span><strong>{context.lastInputTokens ? formatTokens(context.lastInputTokens) : isCodexRuntime ? 'Codex 未上报' : session.status === 'failed' ? '未上报' : '—'}{context.contextWindowTokens ? ` / ${formatTokens(context.contextWindowTokens)}` : ''}</strong></div><div><span>会话历史</span><strong>{isCodexRuntime ? `Codex thread · ${context.userTurns} 个用户轮次` : `${context.userTurns} 个用户轮次 · ${context.historyMessages} 条消息${session.messagesTruncated ? ' · 历史窗口' : ''}`}</strong></div><div><span>发送方式</span><strong>{isCodexRuntime ? 'Codex thread/resume' : historyModeLabel(context.historyMode)}</strong></div><div><span>压缩</span><strong>{isCodexRuntime ? 'Codex 管理' : context.compressionCount > 0 ? `${context.compressionCount} 次 · ${context.compressedMessages} 条` : context.compressionMode === 'auto' ? `自动 ${context.compressionThresholdPercent}%` : '已停用'}</strong></div></div></details>
-    <div className="trace-toolbar"><div className="trace-filters" role="group" aria-label="筛选轨迹">{([['all', '全部'], ['work', '执行'], ['model', '模型'], ['protocol', '协议'], ['error', '失败']] as [TraceFilter, string][]).map(([value, label]) => <button type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)} key={value}>{label}<span>{counts[value]}</span></button>)}</div><label className="trace-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="搜索轨迹" placeholder="搜索命令、方法或输出" /></label></div>
+    <div className="trace-metric-group"><span className="trace-metric-group-label">用量</span><div className="metrics metrics-usage"><Metric label="总 Token" value={totalTokenValue} className="metric-primary" /><Metric label="输入" value={inputTokenValue} /><Metric label="输出" value={outputTokenValue} /><Metric label="缓存率" value={cacheRate} /><Metric label="压缩阈值" value={compressionValue} /></div></div>
+    <div className="trace-metric-group"><span className="trace-metric-group-label">运行</span><div className="metrics metrics-runtime"><Metric label="模型调用" value={`${session.usage.modelCalls} 次`} className="metric-primary" /><Metric label="工具调用" value={`${session.usage.toolCalls} 次`} /><Metric label="模型耗时" value={formatDuration(session.usage.modelDurationMs)} /><Metric label="工具耗时" value={formatDuration(session.usage.toolDurationMs)} /></div></div>
+    <div className="trace-toolbar"><div className="trace-filters" role="group" aria-label="筛选轨迹">{([['all', '全部'], ['work', '执行'], ['model', '模型'], ['protocol', '协议'], ['error', '失败']] as [TraceFilter, string][]).map(([value, label]) => <button type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)} key={value}>{label}<span title={`${counts[value].toLocaleString()} 条记录`}>{formatTraceCount(counts[value])}</span></button>)}</div><label className="trace-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="搜索轨迹" placeholder="搜索命令、方法或输出" /></label></div>
     {session.eventsTruncated && <div className="trace-history-note">当前展示最近的运行记录，更早记录仍保存在 SQLite 中。</div>}
     {session.eventsHasMore && session.events.length > 0 && <button className="history-load-more" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? '加载中…' : '加载更早记录'}</button>}
-    <div className="trace-events">{groups.length === 0 && <div className="trace-empty">{query || filter !== 'all' ? '没有匹配的运行记录' : '还没有运行记录'}</div>}{groups.map((group) => <section className="trace-turn" key={group.key}><div className="trace-turn-head"><strong>{group.label}</strong><span>{group.events.length} 个步骤</span></div>{group.events.map((event) => <TraceRow key={event.id} event={event} />)}</section>)}</div>
+    <div className="trace-events">{groups.length === 0 && <div className="trace-empty">{query || filter !== 'all' ? '没有匹配的运行记录' : '还没有运行记录'}</div>}{groups.map((group) => <section className="trace-turn" key={group.key}><div className="trace-turn-head"><strong>{group.label}</strong><span>{formatTraceCount(group.events.length)} 步</span></div>{group.events.map((event) => <TraceRow key={event.id} event={event} />)}</section>)}</div>
   </aside>
 }
 
@@ -65,12 +66,12 @@ export function TraceRow({ event }: { event: TraceEvent }) {
   const isTurnRequest = event.kind === 'codex_rpc' && event.protocolMethod === 'turn/start'
   const hasDetails = Boolean(event.detail || event.input || event.output || event.rawPayload || showsUsage || event.protocolMethod)
   return <details className={`trace-row ${event.status} ${event.activityKind || ''}`} open={event.status === 'error'}>
-    <summary aria-label={`${title}，${eventStatusLabel(event.status)}`}><span className="trace-node" /><div className="trace-summary-copy"><div><span className={`trace-kind ${category}`}>{traceCategoryLabel(category)}</span><strong>{title}</strong></div><small>{summaryDetail ? `${summaryDetail} · ` : ''}{location}{eventDurationLabel(event)}{event.totalTokens ? ` · ${event.totalTokens.toLocaleString()} tokens` : tokenMissing ? ' · Token 未上报' : ''}</small></div><div className="trace-summary-state"><time>{formatTraceTime(event.createdAt)}</time><em>{eventStatusLabel(event.status)}</em>{hasDetails && <span className="trace-chevron" aria-hidden="true" />}</div></summary>
+    <summary aria-label={`${title}，${eventStatusLabel(event.status)}`}><span className="trace-node" /><div className="trace-summary-copy"><div><span className={`trace-kind ${category}`}>{traceCategoryLabel(category)}</span><strong>{title}</strong></div><small>{summaryDetail ? `${summaryDetail} · ` : ''}{location}{eventDurationLabel(event)}{event.totalTokens ? ` · ${formatTokenCount(event.totalTokens)} Token` : tokenMissing ? ' · Token 未上报' : ''}</small></div><div className="trace-summary-state"><time>{formatTraceTime(event.createdAt)}</time><em>{eventStatusLabel(event.status)}</em>{hasDetails && <span className="trace-chevron" aria-hidden="true" />}</div></summary>
     <div className="trace-row-body">
       <dl className="trace-meta"><div><dt>事件类型</dt><dd>{event.kind}</dd></div>{event.protocolMethod && <div><dt>JSON-RPC 方法</dt><dd><code>{event.protocolMethod}</code></dd></div>}{event.activityId && <div><dt>活动 ID</dt><dd><code>{event.activityId}</code></dd></div>}{event.protocol && <div><dt>协议</dt><dd><code>{event.protocol}</code></dd></div>}{event.statusCode ? <div><dt>HTTP 状态</dt><dd>{event.statusCode}</dd></div> : null}</dl>
       {isTurnRequest ? <CodexTurnRequestDetails event={event} /> : <>
         {event.detail && <p className={event.status === 'error' ? 'event-error' : 'event-detail'}>{event.detail}</p>}
-        {showsUsage && <div className="event-usage"><span>输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>历史 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span><span>缓存率 <b>{event.cacheReported ? `${cacheRate}%` : '未上报'}</b></span></div>}
+        {showsUsage && <div className="event-usage"><span>本次输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>本次输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>请求消息 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span><span>缓存率 <b>{event.cacheReported ? `${cacheRate}%` : '未上报'}</b></span></div>}
         {(event.input || event.output) && <div className={`trace-io ${event.input && event.output ? 'split' : ''}`}>{event.input && <TracePayload label={event.kind === 'codex_rpc' ? '请求参数' : isModelResult ? '模型请求 · 实际发送' : '输入'} value={event.input} />}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <TracePayload label={event.kind === 'codex_rpc' ? '响应结果' : '输出'} value={event.output} />)}</div>}
         {event.rawPayload && <details className="trace-raw"><summary><span>{event.kind === 'codex_rpc' ? '原始 JSONL 请求' : '原始 JSONL 事件'}</span><code>{event.protocolMethod || event.kind}</code></summary><TracePayload value={event.rawPayload} copyLabel={event.kind === 'codex_rpc' ? '复制请求' : '复制事件'} /></details>}
       </>}
@@ -324,6 +325,22 @@ function eventDurationLabel(event: TraceEvent) {
 function formatTraceTime(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date)
+}
+
+function formatTraceCount(value: number) {
+  if (value < 1000) return value.toLocaleString()
+  return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function formatTokenCount(value: number) {
+  if (value <= 0) return '未上报'
+  if (value < 10_000) return value.toLocaleString()
+  if (value < 100_000_000) return `${trimUnitValue(value / 10_000)}万`
+  return `${trimUnitValue(value / 100_000_000)}亿`
+}
+
+function trimUnitValue(value: number) {
+  return value.toFixed(1).replace(/\.0$/, '')
 }
 
 function codexItemLabel(value: string) {

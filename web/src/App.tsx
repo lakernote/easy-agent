@@ -3,7 +3,7 @@ import { APIError, api } from './api'
 import type { Bootstrap, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, sessionDisplayTitle, updateSessionSummary, type Page } from './sessionState'
 import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } from './dialogs'
-import { Logo } from './ui'
+import { Logo, TraceIcon } from './ui'
 import { Sidebar } from './Sidebar'
 import { Chat } from './Chat'
 import { LoginPage } from './LoginPage'
@@ -169,15 +169,14 @@ export default function App() {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">跳到主要内容</a>
-    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
+    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onFork={(value) => { setCurrentSession(value); setForkOpen(true) }} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
     <main id="main-content" className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
         <div className="topbar-title">{page === 'chat' ? (session ? sessionDisplayTitle(session) : '新会话') : page === 'automations' ? '定时任务' : '设置'}</div>
         <div className="topbar-actions">
           {page === 'chat' && session?.worktreeBranch && <button className="ghost-button" onClick={() => setWorktreeOpen(true)}>工作树</button>}
-          {page === 'chat' && session?.runtime === 'codex' && !isActive(session.status) && session.status !== 'paused' && <button className="ghost-button" onClick={() => setForkOpen(true)}>对话分支</button>}
-          {page === 'chat' && session && <button className="ghost-button trace-button" onClick={() => setTraceOpen(!traceOpen)}>Trace · {session.events.length}</button>}
+          {page === 'chat' && session && <button type="button" className={`ghost-button trace-button ${traceOpen ? 'active' : ''}`} onClick={() => setTraceOpen(!traceOpen)} aria-label={traceOpen ? '关闭运行轨迹' : '查看运行轨迹'} title={traceOpen ? '关闭运行轨迹' : '查看运行轨迹'}><TraceIcon /></button>}
         </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}

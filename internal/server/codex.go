@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lakernote/easy-agent/internal/agent"
 	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -32,6 +33,14 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	if !status.AppServerAvailable {
 		return errors.New(status.Message)
+	}
+	runtimeSettings, err := server.store.GetRuntimeSettings()
+	if err != nil {
+		return err
+	}
+	policy := session.Permissions
+	if policy.Mode == "" {
+		policy = runtimeSettings.Permissions
 	}
 	message := ""
 	var attachments []store.Attachment
@@ -83,6 +92,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, ThreadID: session.ResponseID,
 		Timeout:     time.Duration(turnTimeoutSeconds) * time.Second,
+		Permissions: policy,
 		Env:         environment,
 		Skills:      selectedSkillsForTurn,
 		Attachments: codexAttachments,
@@ -191,6 +201,25 @@ func (server *Server) awaitCodexRequest(ctx context.Context, sessionID string, r
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func (server *Server) awaitEasyAgentApproval(ctx context.Context, sessionID string, call agent.ToolCall, workspace string) error {
+	requestID, _ := json.Marshal(fmt.Sprintf("easyagent-approval-%d", time.Now().UnixNano()))
+	params, _ := json.Marshal(map[string]any{
+		"sessionId": sessionID, "tool": call.Name, "command": string(call.Arguments), "cwd": workspace,
+	})
+	value, err := server.awaitCodexRequest(ctx, sessionID, codexruntime.ServerRequest{
+		ID: requestID, Method: "item/commandExecution/requestApproval", Params: params,
+	})
+	if err != nil {
+		return err
+	}
+	response, ok := value.(map[string]any)
+	decision, _ := response["decision"].(string)
+	if !ok || (decision != "accept" && decision != "acceptForSession") {
+		return errors.New("用户拒绝了这次工具执行")
+	}
+	return nil
 }
 
 func codexProgress(event codexruntime.Event) string {

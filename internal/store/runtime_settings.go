@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
 const runtimeSettingsKey = "runtime_settings"
@@ -31,6 +33,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		SSEHeartbeatSeconds: DefaultSSEHeartbeatSeconds,
 		GitWorktrees:        true,
 		RetentionDays:       DefaultRetentionDays,
+		Permissions:         permissions.Default(),
 	}
 }
 
@@ -62,6 +65,10 @@ func (store *Store) SaveRuntimeSettings(value RuntimeSettings) (RuntimeSettings,
 }
 
 func normalizeRuntimeSettings(value RuntimeSettings) RuntimeSettings {
+	value.Permissions = value.Permissions.Normalize()
+	if err := value.Permissions.Validate(); err != nil {
+		value.Permissions = permissions.Default()
+	}
 	if value.MaxConcurrentTasks < MinMaxConcurrentTasks {
 		value.MaxConcurrentTasks = MinMaxConcurrentTasks
 	}

@@ -315,7 +315,18 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 				output = toolErrorOutput(toolErr)
 				duration = time.Since(startedAt)
 			} else {
-				output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+				if input.OnToolApproval != nil {
+					approvalStartedAt := time.Now()
+					toolErr = input.OnToolApproval(ctx, call)
+					duration = time.Since(approvalStartedAt)
+					if toolErr != nil {
+						output = toolErrorOutput(toolErr)
+					} else {
+						output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+					}
+				} else {
+					output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+				}
 			}
 			if toolErr != nil {
 				failedToolCalls++

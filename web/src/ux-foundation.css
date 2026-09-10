@@ -227,7 +227,6 @@ button { touch-action: manipulation; }
 .selected-capabilities > span { font-size: var(--type-caption); }
 .capability-picker-foot button { min-height: 36px; font-size: var(--type-caption); }
 .selected-capabilities button { width: 32px; height: 32px; }
-.trace-context > summary,
 .trace-toolbar input,
 .trace-filters button,
 .trace-turn-head strong,

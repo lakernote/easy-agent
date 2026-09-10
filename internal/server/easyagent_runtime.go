@@ -14,11 +14,20 @@ import (
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
 	"github.com/lakernote/easy-agent/internal/mcpclient"
+	"github.com/lakernote/easy-agent/internal/permissions"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
 func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session store.Session, settings store.ModelSettings, runEnvironment *appenv.Environment, usage *store.Usage) error {
+	runtimeSettings, err := server.store.GetRuntimeSettings()
+	if err != nil {
+		return err
+	}
 	settings = enrichOllamaContextWindow(ctx, settings)
+	policy := session.Permissions
+	if policy.Mode == "" {
+		policy = runtimeSettings.Permissions
+	}
 	turn := session.UserTurnCount
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
@@ -39,7 +48,7 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	if err != nil {
 		return err
 	}
-	toolCatalog := builtintools.CatalogWithResearchConfig(runEnvironment, catalog, effectiveResearchConfig(researchSettings))
+	toolCatalog := builtintools.CatalogWithResearchConfigAndPermissions(runEnvironment, catalog, effectiveResearchConfig(researchSettings), policy)
 	toolLoader, err := builtintools.NewLoader(toolCatalog)
 	if err != nil {
 		return err
@@ -151,6 +160,12 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		PrepareRequest: func(ctx context.Context, request agent.Request, force bool) (agent.Request, bool, error) {
 			return server.prepareRuntimeRequest(ctx, id, settings, systemPrompt, turn, usage, client, runner, request, force)
 		},
+		OnToolApproval: func(ctx context.Context, call agent.ToolCall) error {
+			if policy.Approval != permissions.ApprovalOnRequest || !easyAgentToolNeedsApproval(call.Name) {
+				return nil
+			}
+			return server.awaitEasyAgentApproval(ctx, id, call, runEnvironment.Workspace())
+		},
 		IsContextError: isContextLengthError,
 	})
 	if err != nil {
@@ -163,6 +178,10 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		return fmt.Errorf("保存 Agent Trace 失败: %w", savedTraceErr)
 	}
 	return server.store.FinishSession(id, result.ResponseID, providerKey, *usage, time.Now())
+}
+
+func easyAgentToolNeedsApproval(name string) bool {
+	return name == "shell" || name == "edit" || name == "write" || strings.HasPrefix(name, "mcp__")
 }
 
 func coreMessagesForSession(session store.Session, systemPrompt string) []agent.Message {

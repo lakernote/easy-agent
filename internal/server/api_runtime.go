@@ -11,6 +11,16 @@ func (server *Server) saveRuntimeSettings(response http.ResponseWriter, request 
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	// Older clients submit only scheduling fields. Preserve the existing
+	// permission policy instead of silently reverting it to full access.
+	if input.Permissions.Mode == "" {
+		current, err := server.store.GetRuntimeSettings()
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, err.Error())
+			return
+		}
+		input.Permissions = current.Permissions
+	}
 	// 兼容只包含早期两个字段的客户端；新页面始终会提交完整设置。
 	if input.TurnTimeoutSeconds == 0 {
 		input.TurnTimeoutSeconds = store.DefaultTurnTimeoutSeconds
@@ -20,6 +30,11 @@ func (server *Server) saveRuntimeSettings(response http.ResponseWriter, request 
 	}
 	if input.RetentionDays == 0 {
 		input.RetentionDays = store.DefaultRetentionDays
+	}
+	input.Permissions = input.Permissions.Normalize()
+	if err := input.Permissions.Validate(); err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
 	}
 	if input.MaxConcurrentTasks < store.MinMaxConcurrentTasks || input.MaxConcurrentTasks > store.MaxMaxConcurrentTasks {
 		writeError(response, http.StatusBadRequest, "并发任务数必须在 1 到 16 之间")

@@ -279,15 +279,15 @@ body { overflow: hidden; background: #f7f7f5; }
 .session-project-sessions .session-copy strong { color: #303832; font-size: 10.5px; font-weight: 580; }
 .session-project-sessions .session-copy small { margin-top: 4px; color: #8a958e; }
 .session-project-sessions .session-copy { padding-top: 1px; }
-.session-project-sessions .session-delete { width: 34px; height: 40px; flex-basis: 34px; margin-right: 1px; opacity: 0; transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease; }
-.session-project-sessions .session-row:hover .session-delete, .session-project-sessions .session-row:focus-within .session-delete { opacity: 1; }
+.session-project-sessions .session-more { width: 34px; height: 40px; flex-basis: 34px; margin-right: 1px; opacity: 0; transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease; }
+.session-project-sessions .session-row:hover .session-more, .session-project-sessions .session-row:focus-within .session-more, .session-project-sessions .session-row.menu-open .session-more { opacity: 1; }
 .session-project.collapsed { margin-bottom: 2px; }
 .session-more:hover { color: #3f7555; background: #e8f0ea; }
 @media (hover: none) {
-  .session-project-edit, .session-project-sessions .session-delete { opacity: 1; }
+  .session-project-edit, .session-project-sessions .session-more { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .session-project-chevron, .session-project-edit, .session-project-sessions .session-delete { transition: none; }
+  .session-project-chevron, .session-project-edit, .session-project-sessions .session-more { transition: none; }
 }
 .project-picker > .project-picker-list { display: grid; max-height: 210px; grid-template-columns: 1fr; gap: 5px; overflow: auto; }
 .project-picker-list > button { display: grid; gap: 3px; min-height: 48px; padding: 8px 10px; border: 1px solid #dde4df; border-radius: 8px; color: #3e4c43; background: #fff; cursor: pointer; text-align: left; }
@@ -375,7 +375,9 @@ body { overflow: hidden; background: #f7f7f5; }
 .sidebar-settings { margin-bottom: 0; }
 .sidebar-settings:focus-visible { outline: 2px solid #d8ded8; outline-offset: -2px; box-shadow: none; }
 .sidebar-foot { padding-top: 13px; }
-.trace-button { min-height: 36px; padding: 0 13px; }
+.trace-button { width: 36px; height: 36px; min-height: 36px; padding: 0; border-color: #dfe3df; color: #66736a; background: #fff; }
+.trace-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
+.trace-button:hover, .trace-button.active { border-color: #b9cdbc; color: #2e704b; background: #f1f7f2; }
 
 /* 首页场景是快捷入口，三列能让首屏更接近工具工作台，而不是纵向卡片墙。 */
 .suggestion-heading, .suggestions { max-width: 900px; }
@@ -409,7 +411,7 @@ body { overflow: hidden; background: #f7f7f5; }
   .topbar { height: 58px; padding: 0 15px; }
   .mobile-brand { padding: 0; border: 0; background: transparent; cursor: pointer; }
   .mobile-brand:focus-visible { border-radius: 8px; outline: 2px solid #6e9d80; outline-offset: 2px; }
-  .topbar-actions { max-width: 62%; gap: 4px; }.topbar-actions .ghost-button { min-width: 44px; padding: 0 7px; font-size: 9px; }
+  .topbar-actions { max-width: 62%; gap: 4px; }.topbar-actions .ghost-button { min-width: 44px; padding: 0 7px; font-size: 9px; }.topbar-actions .trace-button { min-width: 36px; padding: 0; }
   .chat-page { height: calc(100vh - 120px); }
   .settings-canvas { height: calc(100vh - 62px); }
   .settings-hub { width: calc(100% - 28px); padding: 27px 0 42px; }
@@ -1388,6 +1390,7 @@ body { background: #f7f9fd; }
 .composer-project-select:hover { color: #1d4ed8; background: #f1f6ff; }
 .composer-project-select:focus-visible { outline: 2px solid #9bb8e8; outline-offset: -2px; }
 .composer-runtime-select { width: 146px; flex-basis: 146px; border-left: 1px solid #e2e8f0; }
+.composer-permission-select { width: 154px; flex: 0 0 154px; }
 .composer-model-select { flex-grow: 1; }
 .composer-fixed-field {
   display: grid;
@@ -1401,6 +1404,7 @@ body { background: #f7f9fd; }
 .composer-fixed-field > strong { overflow: hidden; color: #596b83; font-family: var(--mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .session-context .composer-fixed-project { width: 188px; max-width: none; flex: 0 0 188px; padding-left: 11px; border-left: 0; }
 .session-context .composer-fixed-runtime { width: 146px; flex: 0 0 146px; }
+.session-context .composer-fixed-permission { width: 154px; flex: 0 0 154px; }
 .session-context .composer-fixed-runtime .composer-runtime { padding-left: 0; color: #3d5a48; }
 .session-context .composer-fixed-runtime .composer-runtime::before { display: none; }
 .session-context .composer-model { flex: 1 1 auto; padding-top: 1px; border-top: 0; }
@@ -1418,11 +1422,13 @@ body { background: #f7f9fd; }
   .new-session-context { min-height: 92px; flex-wrap: wrap; gap: 0; padding: 5px 4px 7px; }
   .composer-project-select { width: 60%; flex-basis: 60%; min-height: 42px; }
   .composer-runtime-select { width: 40%; flex-basis: 40%; }
-  .composer-model-select { width: 100%; flex-basis: 100%; border-top: 1px solid #edf0f3; border-left: 0; }
+  .composer-permission-select { width: 50%; flex-basis: 50%; border-left: 0; border-top: 1px solid #edf0f3; }
+  .composer-model-select { width: 50%; flex-basis: 50%; border-top: 1px solid #edf0f3; }
   .new-session-context > em { width: 70px; padding-inline: 8px 2px; text-align: right; }
   .session-context { flex-wrap: wrap; gap: 4px 0; padding-bottom: 7px; }
   .session-context .composer-fixed-project { width: 60%; max-width: none; flex-basis: 60%; }
   .session-context .composer-fixed-runtime { width: 40%; flex-basis: 40%; }
+  .session-context .composer-fixed-permission { width: 50%; flex-basis: 50%; margin-left: 6px; padding-left: 6px; border-top: 1px solid #edf0f3; border-left: 0; }
   .session-context .composer-model { width: calc(100% - 6px); flex-basis: calc(100% - 6px); margin: 1px 0 0 6px; padding-top: 5px; border-top: 1px solid #edf0f3; border-left: 0; }
   .session-context > em { display: none; }
 }

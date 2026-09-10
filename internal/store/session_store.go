@@ -1,22 +1,26 @@
 package store
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
-const sessionSelectColumns = `id,title,project_id,status,error,runtime,channel,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at`
+const sessionSelectColumns = `id,title,project_id,status,error,runtime,channel,profile_id,model,permissions_json,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at`
 
 type CreateSessionParams struct {
-	ID        string
-	Title     string
-	Runtime   string
-	Channel   string
-	ProfileID string
-	Model     string
-	ProjectID string
-	Workspace string
-	CreatedAt time.Time
+	ID          string
+	Title       string
+	Runtime     string
+	Channel     string
+	ProfileID   string
+	Model       string
+	Permissions permissions.Policy
+	ProjectID   string
+	Workspace   string
+	CreatedAt   time.Time
 }
 
 func (store *Store) CreateSession(params CreateSessionParams) (Session, error) {
@@ -26,8 +30,16 @@ func (store *Store) CreateSession(params CreateSessionParams) (Session, error) {
 	if params.Channel == "" {
 		params.Channel = ChannelWeb
 	}
-	_, err := store.db.Exec(`INSERT INTO ea_sessions(id,title,project_id,status,error,runtime,channel,profile_id,model,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,created_at,updated_at) VALUES(?,?,?,'idle','',?,?,?,?,?,?,'','','','',?,?)`,
-		params.ID, params.Title, params.ProjectID, params.Runtime, params.Channel, params.ProfileID, params.Model, params.Workspace, params.Workspace, formatTime(params.CreatedAt), formatTime(params.CreatedAt))
+	policy := params.Permissions.Normalize()
+	if err := policy.Validate(); err != nil {
+		return Session{}, err
+	}
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return Session{}, err
+	}
+	_, err = store.db.Exec(`INSERT INTO ea_sessions(id,title,project_id,status,error,runtime,channel,profile_id,model,permissions_json,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,created_at,updated_at) VALUES(?,?,?,'idle','',?,?,?,?,?,?,?,'','','','',?,?)`,
+		params.ID, params.Title, params.ProjectID, params.Runtime, params.Channel, params.ProfileID, params.Model, policyJSON, params.Workspace, params.Workspace, formatTime(params.CreatedAt), formatTime(params.CreatedAt))
 	if err != nil {
 		return Session{}, err
 	}
@@ -81,12 +93,19 @@ type rowScanner interface{ Scan(...any) error }
 func scanSession(row rowScanner) (Session, error) {
 	var value Session
 	var created, updated string
-	err := row.Scan(&value.ID, &value.Title, &value.ProjectID, &value.Status, &value.Error, &value.Runtime, &value.Channel, &value.ProfileID, &value.Model, &value.Workspace, &value.SourceWorkspace, &value.WorktreeBranch, &value.WorkspaceNotice, &value.ResponseID, &value.ProviderKey,
+	var permissionsJSON []byte
+	err := row.Scan(&value.ID, &value.Title, &value.ProjectID, &value.Status, &value.Error, &value.Runtime, &value.Channel, &value.ProfileID, &value.Model, &permissionsJSON, &value.Workspace, &value.SourceWorkspace, &value.WorktreeBranch, &value.WorkspaceNotice, &value.ResponseID, &value.ProviderKey,
 		&value.Usage.InputTokens, &value.Usage.OutputTokens, &value.Usage.CachedTokens, &value.Usage.CacheWriteTokens, &value.Usage.TotalTokens,
 		&value.Usage.ModelDurationMS, &value.Usage.ToolDurationMS, &value.Usage.ModelCalls, &value.Usage.ToolCalls, &created, &updated)
 	if err != nil {
 		return Session{}, err
 	}
+	if len(permissionsJSON) > 0 && string(permissionsJSON) != "{}" {
+		if err := json.Unmarshal(permissionsJSON, &value.Permissions); err != nil {
+			return Session{}, err
+		}
+	}
+	value.Permissions = value.Permissions.Normalize()
 	value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	value.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 	return value, nil
