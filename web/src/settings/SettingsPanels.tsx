@@ -335,14 +335,20 @@ export function CodexSettings({ config, setConfig, notice, savingConfig, deletin
         <label>默认模型
           <input value={config.model} onChange={(event) => update({ model: event.target.value })} placeholder="openai/gpt-oss-20b" />
         </label>
-        <label>推理强度
-          <select value={config.reasoningEffort} onChange={(event) => update({ reasoningEffort: event.target.value })}>
-            <option value="">Provider 默认</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option>
-          </select>
-        </label>
         <label className="codex-env-key-field wide">env_key（服务器变量名）
           <input value={config.envKey} onChange={(event) => update({ envKey: event.target.value })} placeholder="例如 GROQ_API_KEY；这里不填真实 Key" />
+          <small>真实 Key 由运行 EasyAgent 的服务器进程提供；这里只写变量名。无需认证的 Provider 可留空。</small>
         </label>
+        <details className="model-advanced wide">
+          <summary><span><strong>高级设置</strong><small>仅在 Provider 要求时修改推理强度</small></span><b aria-hidden="true">展开</b></summary>
+          <div className="form-grid">
+            <label>推理强度
+              <select value={config.reasoningEffort} onChange={(event) => update({ reasoningEffort: event.target.value })}>
+                <option value="">Provider 默认</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option>
+              </select>
+            </label>
+          </div>
+        </details>
       </div>
       <ModelNotice notice={notice} />
       <div className="form-actions codex-form-actions">
@@ -375,7 +381,7 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
         <div><h2>模型连接</h2><p>EasyAgent 支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div>
         <span className="tag">{model.protocol}</span>
       </div>
-      <OllamaModelCatalog data={data} saving={saving} onActivate={onActivateOllama} />
+      {model.provider.trim().toLocaleLowerCase() === 'ollama' && <OllamaModelCatalog data={data} saving={saving} onActivate={onActivateOllama} />}
       <div className="form-grid">
         <label>提供方<input value={model.provider} onChange={(event) => setModel({ ...model, provider: event.target.value })} /></label>
         <label>协议
@@ -385,20 +391,6 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
         </label>
         <label className="wide">Base URL<input value={model.baseUrl} onChange={(event) => setModel({ ...model, baseUrl: event.target.value })} /></label>
         <label>模型名称<input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} /></label>
-        <label>推理模式
-          <select value={model.thinking || ''} onChange={(event) => setModel({ ...model, thinking: event.target.value })}>
-            <option value="">模型默认</option><option value="disabled">尝试关闭推理</option>
-          </select>
-          <small>工具选择失败时，优先检查服务端是否支持原生 tool_calls。</small>
-        </label>
-        <label>最大 Agent 步数<input type="number" min={data.modelRules.minMaxSteps} max={data.modelRules.maxMaxSteps} value={model.maxSteps} onChange={(event) => setModel({ ...model, maxSteps: Number(event.target.value) })} /><small>默认 {data.modelRules.defaultMaxSteps} 步；每一步可包含一次模型请求和工具链。</small></label>
-        <label>最大输出 Token<input type="number" min="256" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label>
-        <label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /></label>
-        <label>上下文窗口 Token
-          <input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(event) => setModel({ ...model, contextWindowTokens: Number(event.target.value) })} />
-          <small>0 表示未知；Ollama 运行后会读取实际窗口。</small>
-        </label>
-        <label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label>
         <ApiKeyFields
           apiKey={model.apiKey || ''}
           apiKeyConfigured={model.secretConfigured}
@@ -408,6 +400,25 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
           onApiKeyChange={(value) => { setClearAPIKey(false); setModel({ ...model, apiKey: value }) }}
           onClearApiKeyChange={(value) => { setClearAPIKey(value); if (value) setModel({ ...model, apiKey: '' }) }}
         />
+        <details className="model-advanced wide">
+          <summary><span><strong>高级设置</strong><small>步数、Token、超时与上下文压缩</small></span><b aria-hidden="true">展开</b></summary>
+          <div className="form-grid">
+            <label>推理模式
+              <select value={model.thinking || ''} onChange={(event) => setModel({ ...model, thinking: event.target.value })}>
+                <option value="">模型默认</option><option value="disabled">尝试关闭推理</option>
+              </select>
+              <small>工具选择失败时，优先检查服务端是否支持原生 tool_calls。</small>
+            </label>
+            <label>最大 Agent 步数<input type="number" min={data.modelRules.minMaxSteps} max={data.modelRules.maxMaxSteps} value={model.maxSteps} onChange={(event) => setModel({ ...model, maxSteps: Number(event.target.value) })} /><small>默认 {data.modelRules.defaultMaxSteps} 步。</small></label>
+            <label>最大输出 Token<input type="number" min="256" value={model.maxOutputTokens} onChange={(event) => setModel({ ...model, maxOutputTokens: Number(event.target.value) })} /></label>
+            <label>模型超时（秒）<input type="number" min={data.modelRules.minRequestTimeoutSeconds} max={data.modelRules.maxRequestTimeoutSeconds} value={model.requestTimeoutSeconds} onChange={(event) => setModel({ ...model, requestTimeoutSeconds: Number(event.target.value) })} /></label>
+            <label>上下文窗口 Token
+              <input type="number" min="0" value={model.contextWindowTokens || 0} onChange={(event) => setModel({ ...model, contextWindowTokens: Number(event.target.value) })} />
+              <small>0 表示未知；Ollama 运行后会读取实际窗口。</small>
+            </label>
+            <label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label>
+          </div>
+        </details>
       </div>
       <ModelNotice notice={notice} />
       <div className="form-actions">

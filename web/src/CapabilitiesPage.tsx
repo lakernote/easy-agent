@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import type { Bootstrap, MCPConfig, ModelSettings } from './types'
 import { parseRecord, recordLines } from './format'
@@ -51,7 +51,7 @@ function CodexProviderDirectory({ config, profile, saving, onSelect, onEdit, onC
   </div>
 }
 
-export function Capabilities({ section, initialSection, data, onRefresh, onError, onSettingsSectionChange }: { section: CapabilitiesSection; initialSection?: SettingsSection; data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onSettingsSectionChange?: (section: SettingsSection) => void }) {
+export function Capabilities({ section, initialSection, initialModelRuntime, data, onRefresh, onError, onSettingsSectionChange }: { section: CapabilitiesSection; initialSection?: SettingsSection; initialModelRuntime?: ModelSettings['runtime']; data: Bootstrap; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onSettingsSectionChange?: (section: SettingsSection) => void }) {
   const [mcp, setMCP] = useState<MCPConfig | null>(null)
   const [installingPreset, setInstallingPreset] = useState('')
   const [checkingPreset, setCheckingPreset] = useState('')
@@ -64,7 +64,10 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
   const [confirmingModelDiscard, setConfirmingModelDiscard] = useState(false)
   const [mcpNotice, setMCPNotice] = useState<{ ready: boolean; title: string; message: string; tools: string[] } | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(initialSection || (section === 'tools' ? 'tools' : 'runtime'))
-  const [modelRuntimeFilter, setModelRuntimeFilter] = useState<ModelSettings['runtime']>(data.model.runtime)
+  const [modelRuntimeFilter, setModelRuntimeFilter] = useState<ModelSettings['runtime']>(initialModelRuntime || data.model.runtime)
+  const modelDrawerRef = useRef<HTMLElement>(null)
+  const modelEditorTriggerRef = useRef<HTMLElement | null>(null)
+  const modelEditorWasOpenRef = useRef(false)
 
   useEffect(() => setSettingsSection(initialSection || (section === 'tools' ? 'tools' : 'runtime')), [initialSection, section])
 
@@ -159,6 +162,42 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
     else closeModelEditor()
   }
 
+  useEffect(() => {
+    if (modelEditorOpen && !modelEditorWasOpenRef.current) {
+      modelEditorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      window.requestAnimationFrame(() => {
+        const firstField = modelDrawerRef.current?.querySelector<HTMLElement>('.model-drawer-body input:not([disabled]), .model-drawer-body select:not([disabled]), .model-drawer-body textarea:not([disabled]), .model-drawer-body button:not([disabled])')
+        ;(firstField || modelDrawerRef.current)?.focus()
+      })
+    } else if (!modelEditorOpen && modelEditorWasOpenRef.current) {
+      const trigger = modelEditorTriggerRef.current
+      window.requestAnimationFrame(() => trigger?.focus())
+      modelEditorTriggerRef.current = null
+    }
+    modelEditorWasOpenRef.current = modelEditorOpen
+  }, [modelEditorOpen])
+
+  useEffect(() => {
+    if (!modelEditorOpen || confirmingModelDiscard || confirmingCodexProviderDelete || confirmingProfileDelete) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        requestModelEditorClose()
+        return
+      }
+      if (event.key !== 'Tab' || !modelDrawerRef.current) return
+      const focusable = Array.from(modelDrawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), details > summary, [tabindex]:not([tabindex="-1"])'))
+        .filter((element) => element.getClientRects().length > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [modelEditorOpen, modelEditorDirty, savingModel, savingCodexConfig, deletingCodexProvider, confirmingModelDiscard, confirmingCodexProviderDelete, confirmingProfileDelete])
+
   return <section className={`settings-page capabilities ${codex ? 'codex' : 'easyagent'} ${section === 'tools' ? 'extensions-page' : 'runtime-page'}`}>
     <div className="page-intro runtime-intro"><p className="eyebrow">{section === 'tools' ? '扩展管理' : '设置中心'}</p><h1>{section === 'tools' ? '工具与连接' : section === 'settings' ? '设置' : '运行时与模型'}</h1><p>{section === 'tools' ? '管理共享 MCP 连接；EasyAgent 还提供内置工具，Codex 保留自己的原生工具。' : section === 'settings' ? '选择运行时，管理模型与能力，并查看已经发生的用量。' : '把执行引擎、模型、Skills、工具和用量分开管理；新会话创建时才会读取默认配置。'}</p></div>
     {(section === 'runtime' || section === 'settings') && <nav className="settings-section-nav" aria-label="设置分区" role="tablist">
@@ -206,7 +245,7 @@ export function Capabilities({ section, initialSection, data, onRefresh, onError
         </>}
       </div>
     </div>
-    {modelEditorOpen && <div className="model-drawer-backdrop" onMouseDown={requestModelEditorClose}><aside className="model-drawer" aria-label="模型配置编辑" onMouseDown={(event) => event.stopPropagation()}><header className="model-drawer-head"><div><p className="eyebrow">{codex ? (modelEditorMode === 'new' ? '新建 Provider' : '编辑 Provider') : `${modelEditorMode === 'new' ? '新建配置' : '编辑配置'} · EasyAgent`}</p><h2>{codex ? (modelEditorMode === 'new' ? '新建 Provider' : '编辑 Provider') : modelEditorMode === 'new' ? '新建模型配置' : '编辑模型配置'}</h2>{!codex && <p>保存后可在新会话输入区直接选择；需要作为默认配置时，再回到列表设为新会话默认。</p>}</div><button className="drawer-close" type="button" aria-label="关闭模型配置编辑" onClick={requestModelEditorClose}>×</button></header><div className="model-drawer-body">{!codex && <label className="model-drawer-name">配置名称<input value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="例如：本地 Ollama" /></label>}{codex ? <CodexSettings config={codexConfig} setConfig={setCodexConfig} notice={modelNotice} savingConfig={savingCodexConfig} deleting={deletingCodexProvider} onDelete={() => setConfirmingCodexProviderDelete(true)} onSaveConfig={saveCodexConfig} /> : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onActivateOllama={activateOllamaModel} />}{!codex && <div className="model-drawer-danger">{currentProfileSaved && <button className="ghost-button danger" type="button" disabled={data.modelProfiles.length <= 1 || deletingProfile} onClick={() => setConfirmingProfileDelete(true)}>{deletingProfile ? '删除中…' : '删除这套配置'}</button>}<span>{currentProfileSaved ? '删除不会影响已创建会话。' : '关闭抽屉会放弃这次未保存的配置。'}</span></div>}</div></aside></div>}
+    {modelEditorOpen && <div className="model-drawer-backdrop" onMouseDown={requestModelEditorClose}><aside ref={modelDrawerRef} className="model-drawer" role="dialog" aria-modal="true" aria-labelledby="model-editor-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}><header className="model-drawer-head"><div><p className="eyebrow">{codex ? (modelEditorMode === 'new' ? '新建 Provider' : '编辑 Provider') : `${modelEditorMode === 'new' ? '新建配置' : '编辑配置'} · EasyAgent`}</p><h2 id="model-editor-title">{codex ? (modelEditorMode === 'new' ? '新建 Provider' : '编辑 Provider') : modelEditorMode === 'new' ? '新建模型配置' : '编辑模型配置'}</h2>{!codex && <p>保存后可在新会话输入区直接选择；需要作为默认配置时，再回到列表设为新会话默认。</p>}</div><button className="drawer-close" type="button" aria-label="关闭模型配置编辑" onClick={requestModelEditorClose}>×</button></header><div className="model-drawer-body">{!codex && <label className="model-drawer-name">配置名称<input value={model.profileName || ''} onChange={(event) => setModel({ ...model, profileName: event.target.value })} placeholder="例如：本地 Ollama" /></label>}{codex ? <CodexSettings config={codexConfig} setConfig={setCodexConfig} notice={modelNotice} savingConfig={savingCodexConfig} deleting={deletingCodexProvider} onDelete={() => setConfirmingCodexProviderDelete(true)} onSaveConfig={saveCodexConfig} /> : <EasyAgentSettings data={data} model={model} setModel={setModel} notice={modelNotice} testing={testingModel} saving={savingModel} onTest={testModel} onSave={saveModel} onActivateOllama={activateOllamaModel} />}{!codex && <div className="model-drawer-danger">{currentProfileSaved && <button className="ghost-button danger" type="button" disabled={data.modelProfiles.length <= 1 || deletingProfile} onClick={() => setConfirmingProfileDelete(true)}>{deletingProfile ? '删除中…' : '删除这套配置'}</button>}<span>{currentProfileSaved ? '删除不会影响已创建会话。' : '关闭抽屉会放弃这次未保存的配置。'}</span></div>}</div></aside></div>}
     {mcp && <div className="modal-backdrop" onMouseDown={() => setMCP(null)}><div className="modal" onMouseDown={(event) => event.stopPropagation()}>
       <div className="modal-head"><div><p className="eyebrow">MCP 连接</p><h2>{mcp.name}</h2></div><button aria-label="关闭 MCP 配置" onClick={() => setMCP(null)}>×</button></div>
       <div className="form-grid"><label>ID<input value={mcp.id} disabled /></label><label>名称<input value={mcp.name} onChange={(event) => setMCP({ ...mcp, name: event.target.value })} /></label><label className="wide">用途描述<input value={mcp.description || ''} onChange={(event) => setMCP({ ...mcp, description: event.target.value })} placeholder="告诉 Agent 什么时候应该加载这个 MCP" /></label><label>Transport<select value={mcp.transport} onChange={(event) => setMCP({ ...mcp, transport: event.target.value as MCPConfig['transport'] })}><option value="stdio">stdio</option><option value="http">HTTP</option></select></label><label className="check-label"><input type="checkbox" checked={mcp.enabled} onChange={(event) => setMCP({ ...mcp, enabled: event.target.checked })} />启用</label>{mcp.transport === 'stdio' ? <><label>命令<input value={mcp.command || ''} onChange={(event) => setMCP({ ...mcp, command: event.target.value })} /></label><label className="wide">参数（每行一个）<textarea value={mcp.args.join('\n')} onChange={(event) => setMCP({ ...mcp, args: event.target.value.split('\n').filter(Boolean) })} /></label><label className="wide">环境变量（KEY=VALUE，每行一个）<textarea value={recordLines(mcp.environment)} onChange={(event) => setMCP({ ...mcp, environment: parseRecord(event.target.value) })} /></label></> : <><label className="wide">Endpoint<input value={mcp.endpoint || ''} onChange={(event) => setMCP({ ...mcp, endpoint: event.target.value })} /></label><label>认证<select value={mcp.authType || ''} onChange={(event) => setMCP({ ...mcp, authType: event.target.value })}><option value="">无</option><option value="bearer">Bearer Token</option><option value="basic">用户名密码</option></select></label>{mcp.authType === 'bearer' && <label>Token<input type="password" placeholder={mcp.secretConfigured ? '已配置，留空不修改' : ''} value={mcp.token || ''} onChange={(event) => setMCP({ ...mcp, token: event.target.value })} /></label>}{mcp.authType === 'basic' && <><label>用户名<input value={mcp.username || ''} onChange={(event) => setMCP({ ...mcp, username: event.target.value })} /></label><label>密码<input type="password" placeholder={mcp.secretConfigured ? '已配置，留空不修改' : ''} value={mcp.password || ''} onChange={(event) => setMCP({ ...mcp, password: event.target.value })} /></label></>}<label className="wide">自定义 Header（KEY=VALUE，每行一个）<textarea value={recordLines(mcp.headers)} onChange={(event) => setMCP({ ...mcp, headers: parseRecord(event.target.value) })} /></label></>}</div>

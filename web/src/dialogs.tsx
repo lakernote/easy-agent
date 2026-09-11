@@ -125,12 +125,12 @@ export function ProjectDialog({ project, projectCount, busy, onCancel, onSave, o
   </div>
 }
 
-export function RunError({ error, ollamaRunning, retrying, onRetry, onOpenCapabilities }: { error?: string; ollamaRunning: boolean; retrying: boolean; onRetry: () => void; onOpenCapabilities: () => void }) {
+export function RunError({ error, ollamaRunning, retrying, onRetry, onOpenModelSettings }: { error?: string; ollamaRunning: boolean; retrying: boolean; onRetry: () => void; onOpenModelSettings: () => void }) {
   const explanation = explainRunError(error, ollamaRunning)
   return <div className="run-error" role="alert">
     <div className="run-error-mark" aria-hidden="true">!</div>
     <div className="run-error-copy"><strong>{explanation.title}</strong><span>{explanation.message}</span>
-      <div className="run-error-actions"><button className="primary-button" disabled={retrying} onClick={onRetry}>{retrying ? '正在重试…' : '重新发送'}</button><button className="ghost-button" onClick={onOpenCapabilities}>检查模型配置</button></div>
+      <div className="run-error-actions"><button className="primary-button" disabled={retrying} onClick={onRetry}>{retrying ? '正在重试…' : '重新发送'}</button><button className="ghost-button" onClick={onOpenModelSettings}>检查模型配置</button></div>
       {error && <details><summary>查看技术详情</summary><code>{error}</code></details>}
     </div>
   </div>

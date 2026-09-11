@@ -28,6 +28,16 @@ func TestSessionRuntimeIsPinnedAtCreation(t *testing.T) {
 	if loaded.Runtime != RuntimeCodex {
 		t.Fatalf("loaded runtime = %q", loaded.Runtime)
 	}
+	if err := database.SetSessionModel(created.ID, "gpt-5.6-terra"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = database.LoadSessionWindow("codex-session", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Model != "gpt-5.6-terra" {
+		t.Fatalf("effective model = %q", loaded.Model)
+	}
 }
 
 func TestSessionPermissionsRoundTrip(t *testing.T) {

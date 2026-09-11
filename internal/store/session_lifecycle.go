@@ -127,6 +127,14 @@ func (store *Store) SetSessionContinuation(id, responseID string) error {
 	return err
 }
 
+// SetSessionModel pins the effective model reported by a Runtime without
+// changing recency ordering. This is needed when Codex resolves an omitted
+// model override from its layered configuration during thread/start.
+func (store *Store) SetSessionModel(id, model string) error {
+	_, err := store.db.Exec(`UPDATE ea_sessions SET model=? WHERE id=?`, model, id)
+	return err
+}
+
 // UpdateSessionMetadata 更新会话的管理信息，不改变 updated_at，避免仅重命名或
 // 整理文件夹就把旧会话移动到“最近”顶部。
 func (store *Store) UpdateSessionMetadata(id, title, projectID string) error {

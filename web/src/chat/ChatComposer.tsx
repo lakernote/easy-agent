@@ -3,9 +3,16 @@ import { capabilityKindLabel } from '../capabilities'
 import { CapabilityPicker } from '../CapabilityPicker'
 import { AttachIcon, CloseIcon, FileIcon, SendIcon, StopIcon } from '../ui'
 import { isActive } from '../sessionState'
+import type { ModelProfile } from '../types'
 import { useChatComposer } from './useChatComposer'
 
 type ChatComposerModel = ReturnType<typeof useChatComposer> & { onStop: () => Promise<void>; onPause: () => Promise<void>; onResume: () => Promise<void>; runActionBusy: boolean }
+
+function profileOptionLabel(profile: ModelProfile, codexDefaultModel: string) {
+  const name = profile.settings.runtime === 'codex' ? `Codex · ${profile.settings.provider || '官方登录'}` : profile.name
+  const model = profile.settings.model || (profile.settings.runtime === 'codex' ? codexDefaultModel : '')
+  return `${name}${model ? ` · ${model}` : ''}`
+}
 
 export function ChatComposer(model: ChatComposerModel) {
   const {
@@ -13,7 +20,7 @@ export function ChatComposer(model: ChatComposerModel) {
     capabilityOpen, capabilityQuery, setCapabilityQuery, capabilityIndex, capabilitySearchRef,
     visibleCapabilities, selectedCapabilities, capabilities, enabledCapabilityCount,
     composerRef, textareaRef, fileInputRef, isCodexRuntime, selectedRuntime, selectRuntime, selectedPermissionMode, selectPermissionMode, workspace, projectOptions, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen, profileOptions, selectedProfileId,
-    displayedModel, readiness, onOpenSkills, onOpenCapabilities, onOpenModelSettings, addFiles, removeAttachment,
+    codexDefaultModel, displayedModel, readiness, onOpenSkills, onOpenCapabilities, onOpenModelSettings, addFiles, removeAttachment,
     closeCapabilityPicker, openCapabilityPicker, insertCapability, removeCapability, handleCapabilityKey, updateDraft, send,
     setSelectedProfileId, onStop, onPause, onResume, runActionBusy,
   } = model
@@ -31,7 +38,7 @@ export function ChatComposer(model: ChatComposerModel) {
           <label className="composer-select-field composer-runtime-select"><span>Runtime</span><select value={selectedRuntime} onChange={(event) => selectRuntime(event.target.value as typeof selectedRuntime)} disabled={sending} aria-label="选择新会话 Runtime"><option value="easyagent">EasyAgent</option><option value="codex">Codex</option></select></label>
           <label className="composer-select-field composer-permission-select"><span>权限</span><select value={selectedPermissionMode} onChange={(event) => selectPermissionMode(event.target.value as typeof selectedPermissionMode)} disabled={sending} aria-label="选择新会话权限"><option value="read_only">只读</option><option value="workspace_write">工作区可写</option><option value="full_access">完全访问</option><option value="custom">自定义目录</option></select></label>
           <label className="composer-select-field composer-model-select"><span>模型</span>{profileOptions.length > 0 ? <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={sending} aria-label="选择新会话模型配置">
-            {profileOptions.map((item) => <option key={item.id} value={item.id}>{item.settings.runtime === 'codex' ? `Codex · ${item.settings.provider || '官方登录'}` : item.name}{item.settings.model ? ` · ${item.settings.model}` : ''}</option>)}
+            {profileOptions.map((item) => <option key={item.id} value={item.id}>{profileOptionLabel(item, codexDefaultModel)}</option>)}
           </select> : <button type="button" className="composer-setup-link" onClick={onOpenModelSettings}>去设置创建</button>}</label>
         </> : <>
           <div className="composer-fixed-field composer-fixed-project" title={workspace}><span>项目</span><strong>{workspaceLabel}</strong></div>

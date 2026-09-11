@@ -92,7 +92,7 @@ export function CodexActivityGroup({ events, onOpenTrace }: { events: TraceEvent
   return <details className={`conversation-activity-group ${failed ? 'error' : running ? 'running' : 'success'}`} open={failed > 0}>
     <summary><span className="activity-group-mark" aria-hidden="true"><i /></span><div><strong>{failed ? '执行过程有失败' : running ? '正在执行' : '执行过程'}</strong><small>{summary}</small></div><em>{failed ? `${failed} 项失败` : running ? '进行中' : '已完成'}</em><span className="activity-group-chevron" aria-hidden="true" /></summary>
     <div className="conversation-activity-list">{events.map((event) => <CodexActivity event={event} key={event.id} />)}</div>
-    <button type="button" className="activity-trace-link" onClick={onOpenTrace}>在 Trace 中查看请求、响应与 JSONL</button>
+    <button type="button" className="activity-trace-link" onClick={onOpenTrace}>查看完整时间线、调用统计和原始事件</button>
   </details>
 }
 

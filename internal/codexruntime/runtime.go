@@ -111,6 +111,7 @@ type Config struct {
 	AdditionalDirectories []string
 	Model                 string
 	Provider              string
+	DeveloperInstructions string
 	ThreadID              string
 	Timeout               time.Duration
 	Env                   []string
@@ -120,10 +121,20 @@ type Config struct {
 	OnDelta               func(string)
 	OnEvent               func(Event)
 	OnUsage               func(Usage)
+	OnThreadStarted       func(ThreadInfo)
 	// OnServerRequest 可选地处理 app-server 发起的反向 JSON-RPC 请求。
 	// 未设置时，RunMessage 会回复标准 JSON-RPC 方法未实现错误，避免把
 	// “服务器请求”误判成协议损坏并直接断开连接。
 	OnServerRequest func(ServerRequest) (any, error)
+}
+
+// ThreadInfo records the effective runtime selection returned by app-server.
+// Model and provider may come from config.toml even when EasyAgent did not send
+// an explicit override, so this response is the authoritative display value.
+type ThreadInfo struct {
+	ID       string
+	Model    string
+	Provider string
 }
 
 // Attachment is the narrow media contract between EasyAgent storage and the
@@ -181,6 +192,8 @@ type eventTimers struct {
 
 type Result struct {
 	ThreadID     string
+	Model        string
+	Provider     string
 	Answer       string
 	Usage        Usage
 	InputTokens  int
@@ -461,6 +474,9 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 	if config.Model != "" {
 		threadParams["model"] = config.Model
 	}
+	if instructions := strings.TrimSpace(config.DeveloperInstructions); instructions != "" {
+		threadParams["developerInstructions"] = instructions
+	}
 	method := "thread/start"
 	if config.ThreadID != "" {
 		method = "thread/resume"
@@ -474,11 +490,16 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
+		Model         string `json:"model"`
+		ModelProvider string `json:"modelProvider"`
 	}
 	if err := json.Unmarshal(threadResult, &thread); err != nil || thread.Thread.ID == "" {
 		return Result{}, errors.New("Codex app-server 没有返回 thread id")
 	}
 	threadID = thread.Thread.ID
+	if config.OnThreadStarted != nil {
+		config.OnThreadStarted(ThreadInfo{ID: threadID, Model: thread.Model, Provider: thread.ModelProvider})
+	}
 	for _, skill := range config.Skills {
 		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Path) == "" {
 			continue
@@ -544,7 +565,7 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			if strings.TrimSpace(answer.String()) == "" {
 				return Result{}, errors.New("Codex Runtime 未返回可用回答")
 			}
-			return Result{ThreadID: threadID, Answer: strings.TrimSpace(answer.String()), Usage: latestUsage, Duration: time.Since(startedAt)}, nil
+			return Result{ThreadID: threadID, Model: thread.Model, Provider: thread.ModelProvider, Answer: strings.TrimSpace(answer.String()), Usage: latestUsage, Duration: time.Since(startedAt)}, nil
 		}
 		consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
 	}

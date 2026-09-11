@@ -1,4 +1,4 @@
-import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, MCPConfig, MCPInstallResult, ModelSettings, ResearchProviderTest, ResearchSettings, ResearchSettingsInput, RuntimePermissionSettings, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
+import type { AttachmentInput, Bootstrap, CodexProviderConfig, CodexProviderConfigInput, CodexSessionLogPage, MCPConfig, MCPInstallResult, ModelSettings, ResearchProviderTest, ResearchSettings, ResearchSettingsInput, RuntimePermissionSettings, Session, SessionHistoryPage, Skill, UsageReport, WeixinLogin, WeixinState } from './types'
 import type { AutomationTask } from './types/automation'
 
 export class APIError extends Error {
@@ -59,6 +59,7 @@ export const api = {
   session: (id: string) => request<Session>(`/api/v1/sessions/${id}`),
   updateSession: (id: string, title: string, projectId: string) => request<Session>(`/api/v1/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title, projectId }) }),
   sessionHistory: (id: string, kind: 'messages' | 'events', before: number) => request<SessionHistoryPage>(`/api/v1/sessions/${id}/history?kind=${kind}&before=${before}`),
+  codexSessionLog: (id: string, cursor = 0, limit = 300) => request<CodexSessionLogPage>(`/api/v1/sessions/${encodeURIComponent(id)}/codex-session-log?cursor=${cursor}&limit=${limit}`),
   createSession: (message: string, attachments: AttachmentInput[] = [], workspace = '', profileId = '', projectId = '', permissions?: RuntimePermissionSettings) => request<Session>('/api/v1/sessions', { method: 'POST', body: JSON.stringify({ message, attachments, workspace, profileId, projectId, ...(permissions ? { permissions } : {}) }) }),
   createProject: (input: { name: string; directories: string[]; default: boolean }) => request<Bootstrap['projects'][number]>('/api/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
   updateProject: (id: string, input: { name: string; directories: string[]; default: boolean }) => request<Bootstrap['projects'][number]>(`/api/v1/projects/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),

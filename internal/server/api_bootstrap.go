@@ -59,7 +59,7 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	sessions, sessionsHasMore, err := server.store.ListSessionsBefore(100, "", "")
+	sessions, sessionsHasMore, err := server.store.ListSessionsBefore(30, "", "")
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return

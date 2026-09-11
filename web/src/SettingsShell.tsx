@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Bootstrap } from './types'
+import type { Bootstrap, ModelSettings } from './types'
 import { api } from './api'
 import type { Page } from './sessionState'
 import { Capabilities, type SettingsSection } from './CapabilitiesPage'
@@ -10,6 +10,7 @@ import { WeixinPage } from './WeixinPage'
 type SettingsShellProps = {
   page: Page
   data: Bootstrap
+  initialModelRuntime?: ModelSettings['runtime']
   onPage: (page: Page) => void
   onRefresh: () => Promise<Bootstrap>
   onError: (value: string) => void
@@ -37,7 +38,7 @@ function activeSection(page: Page): SettingsSection {
   return page === 'tasks' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'weixin' || page === 'security' ? page : 'runtime'
 }
 
-export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
+export function SettingsShell({ page, data, initialModelRuntime, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
   const selected = activeSection(page)
   const activeProfile = data.modelProfiles.find((profile) => profile.id === data.activeModelProfileId)
   const pageDescription: Record<SettingsSection, string> = {
@@ -114,7 +115,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
         {selected === 'skills' && <Skills data={data} onRefresh={onRefresh} onError={onError} />}
         {selected === 'usage' && <UsagePage data={data} />}
         {selected === 'weixin' && <WeixinPage onError={onError} onOpenSession={onOpenSession} />}
-        {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} data={data} onRefresh={onRefresh} onError={onError} onSettingsSectionChange={onPage} />}
+        {(selected === 'runtime' || selected === 'tasks' || selected === 'models' || selected === 'tools') && <Capabilities section="settings" initialSection={selected} initialModelRuntime={initialModelRuntime} data={data} onRefresh={onRefresh} onError={onError} onSettingsSectionChange={onPage} />}
         {selected === 'security' && <section className="account-panel account-security-page" aria-labelledby="account-title">
           <div><p className="settings-kicker">账户安全</p><h2 id="account-title">管理员账号</h2><p>当前登录用户：<code>admin</code>。服务重启、12 小时后或修改密码后需要重新登录。</p></div>
           <button className="ghost-button" type="button" onClick={() => { setShowPassword(!showPassword); setAccountError(''); setAccountMessage('') }}>{showPassword ? '收起改密' : '修改密码'}</button>

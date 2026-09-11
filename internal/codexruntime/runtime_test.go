@@ -40,8 +40,8 @@ printf '%s\n' "$@" > "$EASYAGENT_ARGS_FILE"
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) echo '{"id":1,"result":{"userAgent":"fake","codexHome":"/tmp","platformFamily":"unix","platformOs":"macos"}}' ;;
-    *'"method":"thread/start"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
-    *'"method":"thread/resume"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
+	*'"method":"thread/start"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"},"model":"gpt-5.6-sol","modelProvider":"openai"}}' ;;
+	*'"method":"thread/resume"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"},"model":"gpt-5.6-sol","modelProvider":"openai"}}' ;;
 	    *'"method":"turn/start"'*) echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'; echo '{"method":"item/completed","params":{"item":{"type":"userMessage","content":[{"type":"text","text":"say hello"}]}}}'; echo '{"method":"item/agentMessage/delta","params":{"delta":"hello"}}'; echo '{"method":"turn/completed","params":{"turn":{"status":"completed","error":null}}}' ;;
   esac
 done
@@ -54,11 +54,11 @@ done
 	t.Setenv("EASYAGENT_ARGS_FILE", argsFile)
 	var delta string
 	var events []Event
-	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, Timeout: time.Second, Skills: []SkillRef{{Name: "weather", Path: "/tmp/weather/SKILL.md"}}, OnDelta: func(value string) { delta += value }, OnEvent: func(event Event) { events = append(events, event) }}, "say hello")
+	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, DeveloperInstructions: "使用用户的语言回答。", Timeout: time.Second, Skills: []SkillRef{{Name: "weather", Path: "/tmp/weather/SKILL.md"}}, OnDelta: func(value string) { delta += value }, OnEvent: func(event Event) { events = append(events, event) }}, "say hello")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ThreadID != "thread-test" || result.Answer != "hello" || delta != "hello" {
+	if result.ThreadID != "thread-test" || result.Model != "gpt-5.6-sol" || result.Provider != "openai" || result.Answer != "hello" || delta != "hello" {
 		t.Fatalf("unexpected result: %+v, delta=%q", result, delta)
 	}
 	args, err := os.ReadFile(argsFile)
@@ -83,6 +83,10 @@ done
 	}
 	if strings.Contains(turnRequest.Input, `"tools"`) {
 		t.Fatalf("turn/start should leave built-in tool schemas to Codex app-server: %s", turnRequest.Input)
+	}
+	threadRequest := methods["thread/start"]
+	if !strings.Contains(threadRequest.Input, `"developerInstructions":"使用用户的语言回答。"`) {
+		t.Fatalf("thread/start should include EasyAgent developer instructions: %s", threadRequest.Input)
 	}
 	resumed, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, ThreadID: result.ThreadID, Timeout: time.Second}, "continue")
 	if err != nil {

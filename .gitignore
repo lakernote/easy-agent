@@ -3,6 +3,8 @@
 .vscode/
 
 bin/
+/easyagent
+*.pid
 web/dist/
 web/node_modules/
 

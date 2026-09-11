@@ -15,6 +15,8 @@ import (
 
 type codexRuntimeStatus = codexruntime.Status
 
+const codexDeveloperInstructions = "使用与用户最新请求相同的语言回答；用户使用中文时必须使用中文。不要在最终回答中输出内部计划、翻译提示或推理草稿。用户明确指定语言或格式时，遵循用户要求。"
+
 func (server *Server) detectCodex(ctx context.Context) codexRuntimeStatus {
 	status := codexruntime.Detect(server.env)
 	if status.Installed {
@@ -88,15 +90,23 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	var lastProgressAt time.Time
 	var lastProgressName string
+	effectiveModel := strings.TrimSpace(settings.Model)
 	completedActivities := make(map[string]struct{})
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, Provider: settings.Provider, ThreadID: session.ResponseID,
-		Timeout:     time.Duration(turnTimeoutSeconds) * time.Second,
-		Permissions: policy,
-		Env:         environment,
-		Skills:      selectedSkillsForTurn,
-		Attachments: codexAttachments,
-		OnDelta:     func(delta string) { server.tasks.appendPartial(session.ID, delta) },
+		DeveloperInstructions: codexDeveloperInstructions,
+		Timeout:               time.Duration(turnTimeoutSeconds) * time.Second,
+		Permissions:           policy,
+		Env:                   environment,
+		Skills:                selectedSkillsForTurn,
+		Attachments:           codexAttachments,
+		OnDelta:               func(delta string) { server.tasks.appendPartial(session.ID, delta) },
+		OnThreadStarted: func(info codexruntime.ThreadInfo) {
+			if model := strings.TrimSpace(info.Model); model != "" {
+				effectiveModel = model
+				_ = server.store.SetSessionModel(session.ID, model)
+			}
+		},
 		OnUsage: func(value codexruntime.Usage) {
 			server.tasks.setUsage(session.ID, store.Usage{
 				InputTokens: value.InputTokens, OutputTokens: value.OutputTokens,
@@ -144,8 +154,12 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		if errors.Is(runErr, context.DeadlineExceeded) {
 			runErr = fmt.Errorf("Codex 整轮任务超过 %d 秒上限: %w", turnTimeoutSeconds, runErr)
 		}
-		_ = server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "error", Name: settings.Model, Detail: runErr.Error(), DurationMS: time.Since(startedAt).Milliseconds(), CreatedAt: time.Now()})
+		_ = server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "error", Name: effectiveModel, Detail: runErr.Error(), DurationMS: time.Since(startedAt).Milliseconds(), CreatedAt: time.Now()})
 		return runErr
+	}
+	if model := strings.TrimSpace(result.Model); model != "" {
+		effectiveModel = model
+		_ = server.store.SetSessionModel(session.ID, model)
 	}
 	usage.ModelCalls++
 	usage.ModelDurationMS += result.Duration.Milliseconds()
@@ -158,7 +172,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	usage.ContextWindowTokens = result.Usage.ModelContextWindow
 	if result.Usage.Reported {
 		_ = server.store.AppendEvent(session.ID, store.Event{
-			Kind: "codex_usage", Turn: session.UserTurnCount, Status: "success", Name: settings.Model,
+			Kind: "codex_usage", Turn: session.UserTurnCount, Status: "success", Name: effectiveModel,
 			ProtocolMethod: "thread/tokenUsage/updated",
 			Detail:         "thread/tokenUsage/updated · 本轮用量", InputTokens: result.Usage.InputTokens,
 			OutputTokens: result.Usage.OutputTokens, CachedTokens: result.Usage.CachedInputTokens,
@@ -170,10 +184,10 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	if err := server.store.AppendMessage(session.ID, store.Message{Role: "assistant", Content: result.Answer, ToolCalls: []store.ToolCall{}, Attachments: []store.Attachment{}, CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex 回答: %w", err)
 	}
-	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", Name: settings.Model, Output: result.Answer, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
+	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", Name: effectiveModel, Output: result.Answer, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
 	}
-	providerKey := strings.Join([]string{"codex", settings.Model, status.Path}, "|")
+	providerKey := strings.Join([]string{"codex", effectiveModel, status.Path}, "|")
 	return server.store.FinishSession(session.ID, result.ThreadID, providerKey, *usage, time.Now())
 }
 

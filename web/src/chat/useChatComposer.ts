@@ -17,7 +17,7 @@ type ChatComposerOptions = {
   onError: (value: string) => void
   onOpenSkills: () => void
   onOpenCapabilities: () => void
-  onOpenModelSettings: () => void
+  onOpenModelSettings: (runtime: ModelSettings['runtime']) => void
 }
 
 export function useChatComposer({ session, data, onSession, onRefresh, onError, onOpenSkills, onOpenCapabilities, onOpenModelSettings }: ChatComposerOptions) {
@@ -56,7 +56,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }, [data.modelProfiles, runtime])
   const selectedProfile = profileOptions.find((item) => item.id === selectedProfileId)
   const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
-  const displayedModel = session?.model || selectedProfile?.settings.model || (isCodexRuntime ? '使用 config.toml' : data.model.model || '未配置模型')
+  const codexDefaultModel = data.codexConfig.model.trim() || 'Codex 默认模型'
+  const displayedModel = session?.model || selectedProfile?.settings.model || (isCodexRuntime ? codexDefaultModel : data.model.model || '未配置模型')
   const readiness = useMemo<ComposerReadiness>(() => {
     if (session) return { tone: 'ready', label: '会话已固定', detail: '继续使用创建时的项目、Runtime 与模型配置。', canSend: true }
     if (!selectedProject) return { tone: 'blocked', label: '缺少项目', detail: '请先添加一个服务器项目。', canSend: false }
@@ -71,7 +72,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     if (!settings.provider || !settings.baseUrl || !settings.model) return { tone: 'blocked', label: '配置不完整', detail: '请补全 Provider、服务地址和模型名称。', canSend: false }
     if (settings.provider.toLocaleLowerCase() === 'ollama' && !data.ollama.running) return { tone: 'blocked', label: 'Ollama 未连接', detail: data.ollama.message || '请先启动 Ollama，再重新选择模型。', canSend: false }
     if (settings.provider.toLocaleLowerCase() !== 'ollama' && !settings.secretConfigured) return { tone: 'warning', label: '建议先测试', detail: '当前配置没有已保存的 API Key；无需认证的兼容服务仍可直接使用。', canSend: true }
-    return { tone: 'ready', label: '运行环境可用', detail: `${settings.provider} · ${settings.model}`, canSend: true }
+    return { tone: 'warning', label: '配置已保存', detail: `${settings.provider} · ${settings.model}；发送时由 Provider 实际验证，建议先测试连接。`, canSend: true }
   }, [data.codex, data.ollama.message, data.ollama.running, isCodexRuntime, selectedProfile, selectedProject, session])
   useEffect(() => {
     if (!textareaRef.current) return
@@ -265,8 +266,8 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     composerRef, textareaRef, fileInputRef, runtime, isCodexRuntime,
     workspace: session?.workspace || selectedProject?.directories[0] || data.runtime.workspace,
     projectOptions: data.projects, selectedProject, selectedProjectId, selectProject, workspaceOpen, setWorkspaceOpen,
-    profileOptions, selectedRuntime, selectRuntime, selectedPermissionMode, selectPermissionMode, selectedProfileId, setSelectedProfileId, displayedModel, readiness,
-    onOpenModelSettings,
+    profileOptions, selectedRuntime, selectRuntime, selectedPermissionMode, selectPermissionMode, selectedProfileId, setSelectedProfileId, codexDefaultModel, displayedModel, readiness,
+    onOpenModelSettings: () => onOpenModelSettings(runtime),
     addFiles, removeAttachment, closeCapabilityPicker, openCapabilityPicker,
     insertCapability, removeCapability, handleCapabilityKey, updateDraft, send, startSuggestion,
   }

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { APIError, api } from './api'
-import type { Bootstrap, Session } from './types'
+import type { Bootstrap, ModelSettings, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, sessionDisplayTitle, updateSessionSummary, type Page } from './sessionState'
 import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } from './dialogs'
 import { Logo, TraceIcon } from './ui'
@@ -29,6 +29,7 @@ export default function App() {
   const [worktreeOpen, setWorktreeOpen] = useState(false)
   const [cleaningWorktree, setCleaningWorktree] = useState(false)
   const [updatingRunState, setUpdatingRunState] = useState(false)
+  const [settingsModelRuntime, setSettingsModelRuntime] = useState<ModelSettings['runtime']>()
 
   const refresh = useCallback(async () => {
     const next = await api.bootstrap()
@@ -169,7 +170,7 @@ export default function App() {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">跳到主要内容</a>
-    <Sidebar page={page} data={data} session={session} onPage={setPage} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onFork={(value) => { setCurrentSession(value); setForkOpen(true) }} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
+    <Sidebar page={page} data={data} session={session} onPage={(next) => { setSettingsModelRuntime(undefined); setPage(next) }} onOpen={openSession} onNew={newChat} onSession={setCurrentSession} onFork={(value) => { setCurrentSession(value); setForkOpen(true) }} onRefresh={refresh} onLoadOlder={loadOlderSessions} onError={setError} />
     <main id="main-content" className={`main-canvas ${page === 'chat' ? 'chat-canvas' : 'settings-canvas'}`}>
       <header className="topbar">
         <button type="button" className="mobile-brand" aria-label="新会话" title="新会话" onClick={newChat}><Logo /></button>
@@ -180,10 +181,10 @@ export default function App() {
         </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('runtime')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={(runtime) => { setSettingsModelRuntime(runtime); setPage('runtime') }} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
       <Suspense fallback={<PageLoading />}>
         {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
-        {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
+        {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} initialModelRuntime={settingsModelRuntime} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}
       </Suspense>
     </main>
     {traceOpen && session && <Suspense fallback={null}><TracePanel session={session} onLoadOlder={loadSessionHistory} onError={setError} onClose={() => setTraceOpen(false)} /></Suspense>}

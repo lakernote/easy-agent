@@ -11,7 +11,7 @@ import { CodexActivityGroup, ExecutionProgress, codexConversationActivities } fr
 type ConversationItem = { kind: 'message'; createdAt: string; id: number; message: Session['messages'][number] } | { kind: 'activity'; createdAt: string; id: number; event: TraceEvent }
 type GroupedConversationItem = ConversationItem | { kind: 'activity-group'; createdAt: string; id: number; events: TraceEvent[] }
 
-export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenModelSettings, onOpenTrace, onStop, onPause, onResume, runActionBusy }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenModelSettings: () => void; onOpenTrace: () => void; onStop: () => Promise<void>; onPause: () => Promise<void>; onResume: () => Promise<void>; runActionBusy: boolean }) {
+export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder, onOpenSkills, onOpenCapabilities, onOpenModelSettings, onOpenTrace, onStop, onPause, onResume, runActionBusy }: { session: Session | null; data: Bootstrap; onSession: (session: Session) => void; onRefresh: () => Promise<Bootstrap>; onError: (value: string) => void; onLoadOlder: (id: string, kind: 'messages' | 'events', before: number) => Promise<void>; onOpenSkills: () => void; onOpenCapabilities: () => void; onOpenModelSettings: (runtime: 'easyagent' | 'codex') => void; onOpenTrace: () => void; onStop: () => Promise<void>; onPause: () => Promise<void>; onResume: () => Promise<void>; runActionBusy: boolean }) {
   const endRef = useRef<HTMLDivElement>(null)
   const conversationRef = useRef<HTMLDivElement>(null)
   const loadingOlderRef = useRef(false)
@@ -95,7 +95,7 @@ export function Chat({ session, data, onSession, onRefresh, onError, onLoadOlder
       {session?.status === 'failed' && <RunError error={session.error} ollamaRunning={data.ollama.running} retrying={sending} onRetry={() => {
         const lastUserMessage = session.messages.slice().reverse().find((message) => message.role === 'user')
         if (lastUserMessage) send(lastUserMessage.attachments?.length ? '请重新完成上一条包含附件的请求。' : lastUserMessage.content)
-      }} onOpenCapabilities={onOpenCapabilities} />}
+      }} onOpenModelSettings={() => onOpenModelSettings(session.runtime)} />}
       {session?.status === 'canceled' && <div className="run-error canceled"><div className="run-error-mark" aria-hidden="true">■</div><div className="run-error-copy"><strong>任务已停止</strong><span>你可以继续发送新消息。</span></div></div>}
       <div ref={endRef} className="conversation-end-space" aria-hidden="true" />
       </div>

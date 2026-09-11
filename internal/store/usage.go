@@ -2,12 +2,13 @@ package store
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // UsageAggregate 是按时间桶和模型聚合的实际运行用量。数据来自已落库的
-// model_end/codex_usage/tool_end 事件，不根据会话标题或页面轮询结果估算。
+// model_end/codex_usage/codex_end/tool_end/codex_item 事件，不根据会话标题或页面轮询结果估算。
 type UsageAggregate struct {
 	PeriodStart      time.Time `json:"periodStart"`
 	Runtime          string    `json:"runtime"`
@@ -50,11 +51,17 @@ ORDER BY e.created_at`, formatTime(since), formatTime(until))
 	}
 	defer rows.Close()
 
-	type bucket struct {
-		UsageAggregate
-		sessions map[string]struct{}
+	type usageEventRow struct {
+		sessionID    string
+		createdAt    time.Time
+		runtime      string
+		sessionModel string
+		profileID    string
+		event        Event
 	}
-	buckets := map[usageAggregateKey]*bucket{}
+	eventRows := make([]usageEventRow, 0, 128)
+	sessionModels := map[string]string{}
+	codexUsageTurns := map[string]struct{}{}
 	for rows.Next() {
 		var sessionID, created, runtime, sessionModel, profileID string
 		var data []byte
@@ -69,28 +76,47 @@ ORDER BY e.created_at`, formatTime(since), formatTime(until))
 		if err != nil {
 			continue
 		}
+		eventRows = append(eventRows, usageEventRow{sessionID: sessionID, createdAt: createdAt, runtime: runtime, sessionModel: sessionModel, profileID: profileID, event: event})
+		if model := usageEventModel(event); strings.TrimSpace(sessionModel) == "" && model != "" {
+			sessionModels[sessionID] = model
+		}
+		if event.Kind == "codex_usage" {
+			codexUsageTurns[usageTurnKey(sessionID, event.Turn)] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	type bucket struct {
+		UsageAggregate
+		sessions map[string]struct{}
+	}
+	buckets := map[usageAggregateKey]*bucket{}
+	for _, row := range eventRows {
+		event := row.event
 		if !isUsageEvent(event.Kind) {
 			continue
 		}
-		localTime := createdAt.In(time.Local)
+		localTime := row.createdAt.In(time.Local)
 		start := usagePeriodStart(localTime, period)
-		model := strings.TrimSpace(sessionModel)
+		model := strings.TrimSpace(row.sessionModel)
 		if model == "" {
-			model = strings.TrimSpace(event.Name)
+			model = sessionModels[row.sessionID]
 		}
 		if model == "" {
 			model = "默认模型"
 		}
-		key := usageAggregateKey{PeriodStart: formatTime(start), Runtime: runtime, Model: model, ProfileID: profileID}
+		key := usageAggregateKey{PeriodStart: formatTime(start), Runtime: row.runtime, Model: model, ProfileID: row.profileID}
 		item := buckets[key]
 		if item == nil {
-			item = &bucket{UsageAggregate: UsageAggregate{PeriodStart: start, Runtime: runtime, Model: model, ProfileID: profileID}, sessions: map[string]struct{}{}}
+			item = &bucket{UsageAggregate: UsageAggregate{PeriodStart: start, Runtime: row.runtime, Model: model, ProfileID: row.profileID}, sessions: map[string]struct{}{}}
 			buckets[key] = item
 		}
-		item.sessions[sessionID] = struct{}{}
+		item.sessions[row.sessionID] = struct{}{}
 		item.Sessions = len(item.sessions)
 		switch event.Kind {
-		case "model_end", "compaction_end", "codex_usage":
+		case "model_end", "compaction_end":
 			item.ModelCalls++
 			item.InputTokens += event.InputTokens
 			item.OutputTokens += event.OutputTokens
@@ -99,15 +125,32 @@ ORDER BY e.created_at`, formatTime(since), formatTime(until))
 			item.TotalTokens += event.TotalTokens
 			item.ModelDurationMS += event.DurationMS
 			item.CacheReported = item.CacheReported || event.CacheReported
+		case "codex_usage":
+			item.ModelCalls++
+			item.InputTokens += event.InputTokens
+			item.OutputTokens += event.OutputTokens
+			item.CachedTokens += event.CachedTokens
+			item.CacheWriteTokens += event.CacheWriteTokens
+			item.TotalTokens += event.TotalTokens
+			item.CacheReported = item.CacheReported || event.CacheReported
+		case "codex_end":
+			item.ModelDurationMS += event.DurationMS
+			if event.Status == "success" {
+				if _, reported := codexUsageTurns[usageTurnKey(row.sessionID, event.Turn)]; !reported {
+					item.ModelCalls++
+				}
+			}
 		case "tool_end":
 			if isBusinessToolEvent(event) {
 				item.ToolCalls++
 				item.ToolDurationMS += event.DurationMS
 			}
+		case "codex_item":
+			if event.Status != "started" && (event.ActivityKind == "tool" || event.ActivityKind == "mcp") {
+				item.ToolCalls++
+				item.ToolDurationMS += event.DurationMS
+			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	result := make([]UsageAggregate, 0, len(buckets))
 	for _, item := range buckets {
@@ -133,7 +176,20 @@ func isBusinessToolEvent(event Event) bool {
 }
 
 func isUsageEvent(kind string) bool {
-	return kind == "model_end" || kind == "compaction_end" || kind == "codex_usage" || kind == "tool_end"
+	return kind == "model_end" || kind == "compaction_end" || kind == "codex_usage" || kind == "codex_end" || kind == "tool_end" || kind == "codex_item"
+}
+
+func usageEventModel(event Event) string {
+	switch event.Kind {
+	case "model_end", "compaction_end", "codex_usage", "codex_end":
+		return strings.TrimSpace(event.Name)
+	default:
+		return ""
+	}
+}
+
+func usageTurnKey(sessionID string, turn int) string {
+	return sessionID + ":" + strconv.Itoa(turn)
 }
 
 func usagePeriodStart(value time.Time, period string) time.Time {

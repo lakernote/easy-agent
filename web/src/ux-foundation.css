@@ -214,6 +214,35 @@ button { touch-action: manipulation; }
 }
 .automation-editor-actions button { min-height: var(--control-compact); }
 
+/* Keep the default model form short; uncommon tuning stays one click away. */
+.model-advanced {
+  overflow: hidden;
+  border: 1px solid #dce5f1;
+  border-radius: 10px;
+  background: #f8faff;
+}
+.model-advanced > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 12px;
+  color: #40516b;
+  cursor: pointer;
+  list-style: none;
+}
+.model-advanced > summary::-webkit-details-marker { display: none; }
+.model-advanced > summary span { min-width: 0; }
+.model-advanced > summary strong,
+.model-advanced > summary small { display: block; }
+.model-advanced > summary strong { font-size: var(--type-label); }
+.model-advanced > summary small { margin-top: 3px; color: #8491a4; font-size: var(--type-caption); font-weight: 400; }
+.model-advanced > summary b { color: #2563eb; font-size: var(--type-caption); font-weight: 600; }
+.model-advanced:not([open]) > :not(summary) { display: none; }
+.model-advanced[open] > summary { border-bottom: 1px solid #dce5f1; background: #f2f6fd; }
+.model-advanced > .form-grid { margin: 0; padding: 14px; }
+
 /* Large histories render cheaply while keeping native scrolling and semantics. */
 .session-row { content-visibility: auto; contain-intrinsic-size: 60px; }
 .session-copy small { font-size: 10px; }
@@ -353,8 +382,31 @@ button { touch-action: manipulation; }
     gap: 10px;
     padding-top: 10px;
   }
-  .settings-side-nav { overflow-x: auto; padding-bottom: 5px; }
+  .settings-side-nav {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: #9db0ca #edf2f8;
+  }
+  .settings-side-nav::-webkit-scrollbar { display: block; height: 5px; }
+  .settings-side-nav::-webkit-scrollbar-track { background: #edf2f8; }
+  .settings-side-nav::-webkit-scrollbar-thumb { border-radius: 999px; background: #9db0ca; }
   .settings-nav-groups { gap: 4px; }
   .settings-side-nav button { min-width: 116px; min-height: var(--control-touch); }
   .settings-hub-content { padding: 0 4px 40px 0; }
+  .mobile-brand { width: var(--control-touch); height: var(--control-touch); margin-right: 6px; }
+  .new-session-context { min-height: 110px; }
+  .composer-project-select { min-height: var(--control-touch); }
+  .composer-select-field { position: relative; min-height: 55px; padding-top: 10px; }
+  .composer-select-field > span { position: absolute; z-index: 1; top: 7px; left: 11px; pointer-events: none; }
+  .composer-select-field select { height: var(--control-touch); padding-top: 9px; }
+  .attach-button, .capability-button { min-height: var(--control-touch); }
+  .trace-filters {
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: #9db0ca #edf2f8;
+  }
+  .trace-filters::-webkit-scrollbar { height: 5px; }
+  .trace-filters::-webkit-scrollbar-track { background: #edf2f8; }
+  .trace-filters::-webkit-scrollbar-thumb { border-radius: 999px; background: #9db0ca; }
 }

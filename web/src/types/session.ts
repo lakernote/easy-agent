@@ -124,3 +124,26 @@ export type SessionHistoryPage = {
   messagesHasMore?: boolean
   eventsHasMore?: boolean
 }
+
+export type CodexSessionLogLine = {
+  line: number
+  timestamp?: string
+  type: string
+  subtype?: string
+  bytes: number
+  payload: string
+  truncated?: boolean
+}
+
+export type CodexSessionLogPage = {
+  available: boolean
+  threadId?: string
+  path?: string
+  model?: string
+  source?: string
+  lines: CodexSessionLogLine[]
+  totalLines: number
+  totalBytes: number
+  nextCursor?: number
+  message?: string
+}
