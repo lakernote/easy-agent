@@ -117,3 +117,24 @@ func TestModelProfileCannotBeDeletedWhileSessionUsesIt(t *testing.T) {
 		t.Fatal("仍被会话使用的 profile 不应删除")
 	}
 }
+
+func TestClearCodexProviderFallsBackToOfficial(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.SaveModelSettings(ModelSettings{ProfileID: "codex-main", ProfileName: "Codex", Runtime: RuntimeCodex, Provider: "groq", Protocol: "app_server"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ClearCodexProvider("groq"); err != nil {
+		t.Fatal(err)
+	}
+	value, err := database.GetModelSettingsByProfileID("codex-main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Provider != "" || value.Runtime != RuntimeCodex {
+		t.Fatalf("deleted Provider should fall back to official login: %+v", value)
+	}
+}

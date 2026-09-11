@@ -73,7 +73,6 @@ button { touch-action: manipulation; }
 .settings-hub .model-profile-select small,
 .settings-hub .model-drawer-head p:last-child,
 .settings-hub .model-drawer-body .form-grid label > small,
-.settings-hub .codex-profile-override label > small { font-size: var(--type-caption); }
 .settings-hub .eyebrow,
 .settings-hub .settings-kicker,
 .settings-hub label { font-size: var(--type-label); }

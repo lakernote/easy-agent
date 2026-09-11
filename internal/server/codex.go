@@ -90,7 +90,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	var lastProgressName string
 	completedActivities := make(map[string]struct{})
 	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
-		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, ThreadID: session.ResponseID,
+		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, Provider: settings.Provider, ThreadID: session.ResponseID,
 		Timeout:     time.Duration(turnTimeoutSeconds) * time.Second,
 		Permissions: policy,
 		Env:         environment,

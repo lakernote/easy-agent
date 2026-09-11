@@ -59,6 +59,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /api/v1/codex/threads/{id}", server.getCodexThread)
 	server.mux.HandleFunc("GET /api/v1/codex/config", server.getCodexConfig)
 	server.mux.HandleFunc("PUT /api/v1/codex/config", server.saveCodexConfig)
+	server.mux.HandleFunc("DELETE /api/v1/codex/config/{id}", server.deleteCodexProvider)
 	server.mux.HandleFunc("POST /api/v1/ollama/use", server.useOllama)
 	server.mux.HandleFunc("PUT /api/v1/skills/{name}", server.saveSkill)
 	server.mux.HandleFunc("DELETE /api/v1/skills/{name}", server.resetSkill)

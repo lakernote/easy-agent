@@ -3,7 +3,7 @@ import type { ChangeEvent, KeyboardEvent } from 'react'
 import { api } from '../api'
 import type { Bootstrap, ModelSettings, RuntimePermissionSettings, Session } from '../types'
 import { isActive, mergeSessionSnapshot } from '../sessionState'
-import { encodeAttachment, supportedAttachment, type PendingAttachment } from '../attachments'
+import { createAttachmentID, encodeAttachment, supportedAttachment, type PendingAttachment } from '../attachments'
 import { capabilityKindLabel, capabilityMention, capabilityOptions, hasCapabilityToken, type CapabilityOption } from '../capabilities'
 import type { StarterSuggestion } from '../suggestions'
 
@@ -50,7 +50,10 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
   }, [capabilities, capabilityQuery])
   const selectedCapabilities = useMemo(() => capabilities.filter((item) => hasCapabilityToken(draft, item.token)), [capabilities, draft])
   const enabledCapabilityCount = capabilities.filter((item) => item.enabled).length
-  const profileOptions = useMemo(() => data.modelProfiles.filter((item) => item.settings.runtime === runtime), [data.modelProfiles, runtime])
+  const profileOptions = useMemo(() => {
+    const profiles = data.modelProfiles.filter((item) => item.settings.runtime === runtime)
+    return runtime === 'codex' ? profiles.slice(0, 1) : profiles
+  }, [data.modelProfiles, runtime])
   const selectedProfile = profileOptions.find((item) => item.id === selectedProfileId)
   const selectedProject = data.projects.find((item) => item.id === selectedProjectId) || defaultProject
   const displayedModel = session?.model || selectedProfile?.settings.model || (isCodexRuntime ? '使用 config.toml' : data.model.model || '未配置模型')
@@ -67,7 +70,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     const settings = selectedProfile.settings
     if (!settings.provider || !settings.baseUrl || !settings.model) return { tone: 'blocked', label: '配置不完整', detail: '请补全 Provider、服务地址和模型名称。', canSend: false }
     if (settings.provider.toLocaleLowerCase() === 'ollama' && !data.ollama.running) return { tone: 'blocked', label: 'Ollama 未连接', detail: data.ollama.message || '请先启动 Ollama，再重新选择模型。', canSend: false }
-    if (settings.provider.toLocaleLowerCase() !== 'ollama' && !settings.secretConfigured && !settings.apiKeyEnv) return { tone: 'warning', label: '建议先测试', detail: '当前配置没有已保存的密钥；无需认证的兼容服务仍可直接使用。', canSend: true }
+    if (settings.provider.toLocaleLowerCase() !== 'ollama' && !settings.secretConfigured) return { tone: 'warning', label: '建议先测试', detail: '当前配置没有已保存的 API Key；无需认证的兼容服务仍可直接使用。', canSend: true }
     return { tone: 'ready', label: '运行环境可用', detail: `${settings.provider} · ${settings.model}`, canSend: true }
   }, [data.codex, data.ollama.message, data.ollama.running, isCodexRuntime, selectedProfile, selectedProject, session])
   useEffect(() => {
@@ -117,7 +120,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
         if (total + file.size > 10 * 1024 * 1024) { setAttachmentError('本条消息的附件总大小不能超过 10 MiB'); break }
         if (next.some((item) => item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified)) continue
         total += file.size
-        next.push({ id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : '' })
+        next.push({ id: `${file.name}-${file.lastModified}-${createAttachmentID()}`, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : '' })
       }
       return next
     })

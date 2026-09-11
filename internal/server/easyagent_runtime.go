@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -79,9 +78,6 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		activeTools = append(activeTools, mcpLoader.Tool())
 	}
 	apiKey := settings.APIKey
-	if settings.APIKeyEnv != "" {
-		apiKey = os.Getenv(settings.APIKeyEnv)
-	}
 	client, err := openai.New(openai.Config{
 		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
 		DisableThinking:      settings.Thinking == "disabled",

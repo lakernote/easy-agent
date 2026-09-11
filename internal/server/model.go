@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -34,8 +33,8 @@ func prepareModelInput(input, current store.ModelSettings, clearAPIKey bool) (st
 	}
 	if input.Runtime == store.RuntimeCodex {
 		// Codex app-server 自己读取 ~/.codex 配置并负责认证、Provider 和协议。
-		// 清掉 EasyAgent/Ollama 字段，避免切换 Runtime 后旧配置继续显示或被误用。
-		input.Provider = "codex"
+		// 当前 Codex 配置可以为空（跟随官方 ChatGPT 登录），也可以保存一个
+		// Provider ID，由 app-server 的 -c model_provider=... 在本次运行中覆盖。
 		input.Protocol = "app_server"
 		input.BaseURL = ""
 		input.APIKey = ""
@@ -43,6 +42,11 @@ func prepareModelInput(input, current store.ModelSettings, clearAPIKey bool) (st
 		input.Thinking = ""
 		input.ContextWindowTokens = 0
 		input.CompressionThresholdPercent = 0
+	}
+	if input.Runtime != store.RuntimeCodex {
+		// EasyAgent 只使用 DB 中的 APIKey；环境变量入口仅为旧版本兼容
+		// 保留在结构体中，不再接受或读取。
+		input.APIKeyEnv = ""
 	}
 	if input.Runtime != store.RuntimeCodex && input.APIKey == "" {
 		switch {
@@ -54,9 +58,6 @@ func prepareModelInput(input, current store.ModelSettings, clearAPIKey bool) (st
 		default:
 			return store.ModelSettings{}, errors.New("Provider 或 Base URL 已改变；请填写新 API Key，或勾选清除已保存的 API Key")
 		}
-	}
-	if input.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(input.APIKeyEnv)) == "" {
-		return store.ModelSettings{}, errors.New("环境变量 " + input.APIKeyEnv + " 不存在或为空")
 	}
 	if err := validateModel(input); err != nil {
 		return store.ModelSettings{}, err
@@ -105,7 +106,7 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 			return
 		}
 		result, runErr := codexruntime.RunMessage(request.Context(), codexruntime.Config{
-			Path: status.Path, Workspace: server.env.Workspace(), Model: settings.Model,
+			Path: status.Path, Workspace: server.env.Workspace(), Model: settings.Model, Provider: settings.Provider,
 			Timeout: time.Duration(turnTimeoutSeconds) * time.Second, Env: environment, Permissions: runtimeSettings.Permissions,
 		}, "只回复 CODEX_RUNTIME_TEST_OK，不要调用工具。")
 		if runErr != nil {
@@ -125,9 +126,6 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 
 func runModelTest(request *http.Request, settings store.ModelSettings) (modelTestResult, error) {
 	apiKey := settings.APIKey
-	if settings.APIKeyEnv != "" {
-		apiKey = os.Getenv(settings.APIKeyEnv)
-	}
 	client, err := openai.New(openai.Config{
 		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
 		DisableThinking: settings.Thinking == "disabled", KeepThinkingForTools: settings.IsOllama(),

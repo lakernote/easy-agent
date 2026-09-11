@@ -2,6 +2,21 @@ import type { AttachmentInput } from './types'
 export type PendingAttachment = { id: string; file: File; preview: string }
 export const attachmentAccept = 'image/png,image/jpeg,image/webp,image/gif,text/*,application/json,application/xml,application/pdf,.md,.log,.csv,.yaml,.yml,.go,.java,.py,.js,.ts,.tsx,.jsx,.css,.html,.sh,.sql,.properties,.toml,.ini,.conf'
 const textAttachmentExtensions = new Set(['txt', 'md', 'log', 'csv', 'json', 'xml', 'yaml', 'yml', 'go', 'java', 'py', 'js', 'ts', 'tsx', 'jsx', 'css', 'html', 'sh', 'sql', 'properties', 'toml', 'ini', 'conf'])
+let attachmentSequence = 0
+
+// crypto.randomUUID() is not exposed by some HTTP pages, older browsers and
+// embedded WebViews. Attachments only need a client-side list key, so keep a
+// secure path when available and degrade gracefully everywhere else.
+export function createAttachmentID() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    const values = new Uint32Array(3)
+    globalThis.crypto.getRandomValues(values)
+    return `attachment-${values[0].toString(36)}-${values[1].toString(36)}-${values[2].toString(36)}`
+  }
+  attachmentSequence += 1
+  return `attachment-${Date.now().toString(36)}-${attachmentSequence.toString(36)}-${Math.random().toString(36).slice(2)}`
+}
 
 export function supportedAttachment(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase() || ''

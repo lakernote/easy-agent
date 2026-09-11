@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,6 +110,7 @@ type Config struct {
 	Workspace             string
 	AdditionalDirectories []string
 	Model                 string
+	Provider              string
 	ThreadID              string
 	Timeout               time.Duration
 	Env                   []string
@@ -257,7 +259,16 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 
 	// 不使用 CommandContext 的自动 Kill：取消时先给 app-server 一个协议层
 	// turn/interrupt 机会，随后再用进程组终止作为兜底。
-	command := exec.Command(config.Path, "app-server")
+	args := []string{"app-server"}
+	provider := strings.TrimSpace(config.Provider)
+	if provider == "" || strings.EqualFold(provider, "official") || strings.EqualFold(provider, "codex") {
+		// 空 Provider 代表官方 ChatGPT 登录。显式覆盖 config.toml，避免
+		// 该文件此前选中过第三方 Provider 时，官方登录仍被旧默认值劫持。
+		args = append(args, "-c", "model_provider="+strconv.Quote("openai"))
+	} else {
+		args = append(args, "-c", "model_provider="+strconv.Quote(provider))
+	}
+	command := exec.Command(config.Path, args...)
 	command.Dir = config.Workspace
 	if len(config.Env) > 0 {
 		command.Env = config.Env

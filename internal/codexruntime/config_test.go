@@ -43,6 +43,56 @@ func TestSaveProviderConfigKeepsAPIKeyOutOfToml(t *testing.T) {
 	}
 }
 
+func TestSaveProviderConfigPreservesOtherProviders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDirectory := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	initial := `model = "custom-model"
+model_provider = "custom-responses"
+
+[model_providers.custom-responses]
+name = "Responses"
+base_url = "https://responses.example.com/v1"
+env_key = "RESPONSES_API_KEY"
+wire_api = "responses"
+
+[model_providers.groq]
+name = "Groq"
+base_url = "https://api.groq.com/openai/v1"
+env_key = "GROQ_API_KEY"
+wire_api = "responses"
+`
+	if err := os.WriteFile(filepath.Join(configDirectory, "config.toml"), []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := SaveProviderConfig(ProviderConfigInput{
+		Provider: "groq", ProviderName: "Groq Updated", BaseURL: "https://api.groq.com/openai/v1",
+		Model: "openai/gpt-oss-20b", EnvKey: "GROQ_API_KEY", APIKey: "gsk-test-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Providers) != 2 {
+		t.Fatalf("saving one Provider should preserve the directory: %+v", config.Providers)
+	}
+
+	data, err := os.ReadFile(filepath.Join(configDirectory, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "model_providers.custom-responses") || !strings.Contains(contents, "model_providers.groq") {
+		t.Fatalf("config.toml should retain both Provider entries: %s", contents)
+	}
+	if !strings.Contains(contents, `model_provider = "groq"`) || !strings.Contains(contents, `model = "openai/gpt-oss-20b"`) {
+		t.Fatalf("selected Provider should become the Codex default: %s", contents)
+	}
+}
+
 func TestProviderConfigRejectsSecretAsEnvironmentKey(t *testing.T) {
 	_, err := normalizeProviderInput(ProviderConfigInput{
 		Provider: "groq", BaseURL: "https://api.groq.com/openai/v1", Model: "openai/gpt-oss-20b", EnvKey: "gsk_test_secret",
@@ -69,6 +119,108 @@ func TestLoadProviderConfigDoesNotEchoMisplacedSecret(t *testing.T) {
 	}
 	if value.EnvKey != defaultEnvKey || strings.Contains(value.EnvKey, "gsk_") || !strings.Contains(value.Warning, "API Key") {
 		t.Fatalf("misplaced secret should be hidden and explained: %+v", value)
+	}
+	if len(value.Providers) != 1 || value.Providers[0].ID != "groq" {
+		t.Fatalf("nested TOML provider should be listed without exposing the secret: %+v", value.Providers)
+	}
+}
+
+func TestLoadProviderConfigTreatsOpenAIAsOfficialAndExcludesStaleEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDirectory := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := `model = "gpt-5.6-sol"
+model_provider = "openai"
+
+[model_providers.openai]
+name = "Groq"
+base_url = "https://api.groq.com/openai/v1"
+env_key = "GROQ_API_KEY"
+
+[model_providers.custom-responses]
+name = "Responses"
+base_url = "https://responses.example.com/v1"
+env_key = "RESPONSES_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(configDirectory, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := LoadProviderConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Provider != "" || value.ProviderName != "" || value.BaseURL != "" {
+		t.Fatalf("built-in openai should be represented as official login: %+v", value)
+	}
+	if len(value.Providers) != 1 || value.Providers[0].ID != "custom-responses" || value.Providers[0].Name != "Responses" || value.Providers[0].BaseURL != "https://responses.example.com/v1" {
+		t.Fatalf("stale built-in provider should not appear in directory: %+v", value.Providers)
+	}
+}
+
+func TestNormalizeProviderInputRejectsBuiltInOpenAI(t *testing.T) {
+	_, err := normalizeProviderInput(ProviderConfigInput{Provider: "openai"})
+	if err == nil || !strings.Contains(err.Error(), "官方内置") {
+		t.Fatalf("expected built-in provider validation, got %v", err)
+	}
+}
+
+func TestDeleteProviderConfigRemovesOnlyTargetAndFallsBackToOfficial(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDirectory := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := `model = "openai/gpt-oss-20b"
+model_provider = "groq"
+
+[model_providers.groq]
+name = "Groq"
+base_url = "https://api.groq.com/openai/v1"
+env_key = "GROQ_API_KEY"
+
+[model_providers.other]
+name = "Other"
+base_url = "https://other.example/v1"
+env_key = "OTHER_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(configDirectory, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSecrets(filepath.Join(configDirectory, secretsFile), map[string]string{"GROQ_API_KEY": "groq-secret", "OTHER_API_KEY": "other-secret"}); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := DeleteProviderConfig("groq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Provider != "" || len(value.Providers) != 1 || value.Providers[0].ID != "other" {
+		t.Fatalf("delete should preserve other providers and select official login: %+v", value)
+	}
+	data, err := os.ReadFile(filepath.Join(configDirectory, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "model_providers.groq") || !strings.Contains(string(data), `model_provider = "openai"`) || !strings.Contains(string(data), "model_providers.other") {
+		t.Fatalf("unexpected config after deletion: %s", data)
+	}
+	secrets, err := readSecrets(filepath.Join(configDirectory, secretsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := secrets["GROQ_API_KEY"]; exists || secrets["OTHER_API_KEY"] != "other-secret" {
+		t.Fatalf("only the unused managed secret should be removed: %+v", secrets)
+	}
+}
+
+func TestDeleteProviderConfigRejectsOfficialLogin(t *testing.T) {
+	if _, err := DeleteProviderConfig("openai"); err == nil || !strings.Contains(err.Error(), "不能删除") {
+		t.Fatalf("expected official login protection, got %v", err)
 	}
 }
 

@@ -23,6 +23,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const [codexConfig, setCodexConfig] = useState<CodexProviderConfig>({ ...data.codexConfig })
   const [codexConfigBaseline, setCodexConfigBaseline] = useState<CodexProviderConfig | null>(null)
   const [savingCodexConfig, setSavingCodexConfig] = useState(false)
+  const [deletingCodexProvider, setDeletingCodexProvider] = useState(false)
 
   useEffect(() => setModel({ ...data.model }), [data.model])
   useEffect(() => setCodexConfig({ ...data.codexConfig }), [data.codexConfig])
@@ -68,12 +69,11 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     }
     if (runtime === 'codex') {
       return {
-        ...common,
-        provider: 'codex',
+      ...common,
+      provider: '',
         protocol: 'app_server',
         baseUrl: '',
         model: '',
-        apiKeyEnv: '',
         thinking: '',
         contextWindowTokens: 0,
         compressionThresholdPercent: 0,
@@ -87,7 +87,6 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
       protocol: saved?.protocol && saved.protocol !== 'app_server' ? saved.protocol : 'chat_completions',
       baseUrl: saved?.baseUrl || (data.ollama.running ? `${ollamaBase}/v1` : ''),
       model: saved?.model || '',
-      apiKeyEnv: saved?.apiKeyEnv || '',
       thinking: saved?.thinking || '',
     }
   }
@@ -119,6 +118,36 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     setCodexConfigBaseline({ ...codexConfig })
     setModelEditorMode(profile ? 'edit' : 'new')
     setModelEditorOpen(true); setModelNotice(null); onError('')
+  }
+
+  const openCodexProviderEditor = (providerID = '') => {
+    const profile = data.modelProfiles.find((candidate) => candidate.settings.runtime === 'codex')
+    const next = profile
+      ? { ...profile.settings, profileId: profile.id, profileName: profile.name, provider: providerID === '__new__' ? '' : providerID }
+      : { ...draftProfile('codex'), provider: providerID === '__new__' ? '' : providerID }
+    const provider = data.codexConfig.providers?.find((candidate) => candidate.id === providerID)
+    const nextConfig = providerID === '__new__'
+      ? { ...data.codexConfig, provider: '', providerName: '', baseUrl: '', model: '', envKey: '', apiKeyConfigured: false, configured: false }
+      : provider
+      ? { ...data.codexConfig, provider: provider.id, providerName: provider.name || provider.id, baseUrl: provider.baseUrl, model: provider.model || data.codexConfig.model, envKey: provider.envKey, apiKeyConfigured: provider.apiKeyConfigured, configured: Boolean(provider.baseUrl && (provider.model || data.codexConfig.model) && provider.apiKeyConfigured) }
+      : { ...data.codexConfig }
+    setModelEditorSnapshot({ ...model })
+    setModel(next)
+    setModelEditorBaseline(next)
+    setCodexConfig(nextConfig)
+    setCodexConfigBaseline(nextConfig)
+    setModelEditorMode(providerID === '__new__' ? 'new' : 'edit')
+    setModelEditorOpen(true); setModelNotice(null); onError('')
+  }
+
+  const activateCodexProvider = async (providerID: string) => {
+    const profile = data.modelProfiles.find((candidate) => candidate.settings.runtime === 'codex')
+    if (!profile || savingModel) return
+    const next = { ...profile.settings, profileId: profile.id, profileName: profile.name, provider: providerID }
+    setModel(next); setSavingModel(true); setModelNotice(null); onError('')
+    try { await api.saveModel(next); await api.activateModelProfile(profile.id); await onRefresh() }
+    catch (reason) { onError((reason as Error).message) }
+    finally { setSavingModel(false) }
   }
 
   const closeModelEditor = () => {
@@ -177,16 +206,31 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     catch (reason) { onError((reason as Error).message) }
   }
 
-  const saveCodexConfig = async (input: CodexProviderConfig & { apiKey?: string; clearApiKey?: boolean }) => {
+  const saveCodexConfig = async (input: CodexProviderConfig) => {
     if (savingCodexConfig) return
     setSavingCodexConfig(true); setModelNotice(null); onError('')
     try {
-      const saved = await api.saveCodexConfig({ provider: input.provider, providerName: input.providerName, baseUrl: input.baseUrl, model: input.model, reasoningEffort: input.reasoningEffort, envKey: input.envKey, apiKey: input.apiKey, clearApiKey: input.clearApiKey })
+      const saved = await api.saveCodexConfig({ provider: input.provider, providerName: input.providerName, baseUrl: input.baseUrl, model: input.model, reasoningEffort: input.reasoningEffort, envKey: input.envKey })
       setCodexConfig(saved); setCodexConfigBaseline(saved)
     }
     catch (reason) { setModelNotice({ ready: false, title: 'Codex 配置保存失败', message: (reason as Error).message }) }
     finally { setSavingCodexConfig(false) }
   }
 
-  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, modelEditorOpen, setModelEditorOpen, modelEditorMode, modelEditorDirty, codexConfig, setCodexConfig, savingCodexConfig, currentProfileSaved, saveModel, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, closeModelEditor, removeProfile, activateProfile, activateOllamaModel, detectCodex, saveCodexConfig }
+  const removeCodexProvider = async () => {
+    const providerID = codexConfig.provider.trim()
+    if (!providerID || deletingCodexProvider) return false
+    setDeletingCodexProvider(true); setModelNotice(null); onError('')
+    try {
+      const saved = await api.deleteCodexProvider(providerID)
+      setCodexConfig(saved); setCodexConfigBaseline(null)
+      setModelEditorSnapshot(null); setModelEditorBaseline(null); setModelEditorOpen(false)
+      await onRefresh()
+      return true
+    }
+    catch (reason) { onError((reason as Error).message); return false }
+    finally { setDeletingCodexProvider(false) }
+  }
+
+  return { model, setModel, testingModel, savingModel, modelNotice, deletingProfile, deletingCodexProvider, modelEditorOpen, setModelEditorOpen, modelEditorMode, modelEditorDirty, codexConfig, setCodexConfig, savingCodexConfig, currentProfileSaved, saveModel, testModel, selectRuntime, selectProfile, createProfile, openProfileEditor, openCodexProviderEditor, activateCodexProvider, closeModelEditor, removeProfile, removeCodexProvider, activateProfile, activateOllamaModel, detectCodex, saveCodexConfig }
 }

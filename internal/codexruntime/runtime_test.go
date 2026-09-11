@@ -36,6 +36,7 @@ func TestRunMessageUsesAppServerThreadAndStreamsAnswer(t *testing.T) {
 	bin := t.TempDir()
 	path := filepath.Join(bin, "codex")
 	script := `#!/bin/sh
+printf '%s\n' "$@" > "$EASYAGENT_ARGS_FILE"
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) echo '{"id":1,"result":{"userAgent":"fake","codexHome":"/tmp","platformFamily":"unix","platformOs":"macos"}}' ;;
@@ -49,6 +50,8 @@ done
 		t.Fatal(err)
 	}
 	workspace := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("EASYAGENT_ARGS_FILE", argsFile)
 	var delta string
 	var events []Event
 	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: workspace, Timeout: time.Second, Skills: []SkillRef{{Name: "weather", Path: "/tmp/weather/SKILL.md"}}, OnDelta: func(value string) { delta += value }, OnEvent: func(event Event) { events = append(events, event) }}, "say hello")
@@ -57,6 +60,10 @@ done
 	}
 	if result.ThreadID != "thread-test" || result.Answer != "hello" || delta != "hello" {
 		t.Fatalf("unexpected result: %+v, delta=%q", result, delta)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil || !strings.Contains(string(args), "model_provider=\"openai\"") {
+		t.Fatalf("official Codex login should explicitly select the built-in openai provider: %q, err=%v", args, err)
 	}
 	methods := map[string]Event{}
 	for _, event := range events {

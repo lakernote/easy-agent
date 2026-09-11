@@ -7,7 +7,6 @@ export type ModelSettings = {
   baseUrl: string
   model: string
   apiKey?: string
-  apiKeyEnv?: string
   thinking?: string
   maxOutputTokens: number
   maxSteps: number
@@ -69,9 +68,16 @@ export type CodexProviderConfig = {
   apiKeyConfigured: boolean
   configured: boolean
   warning?: string
+  providers?: CodexProviderOption[]
 }
 
-export type CodexProviderConfigInput = Pick<CodexProviderConfig, 'provider' | 'providerName' | 'baseUrl' | 'model' | 'reasoningEffort' | 'envKey'> & {
-  apiKey?: string
-  clearApiKey?: boolean
+export type CodexProviderOption = {
+  id: string
+  name: string
+  baseUrl: string
+  model: string
+  envKey: string
+  apiKeyConfigured: boolean
 }
+
+export type CodexProviderConfigInput = Pick<CodexProviderConfig, 'provider' | 'providerName' | 'baseUrl' | 'model' | 'reasoningEffort' | 'envKey'>

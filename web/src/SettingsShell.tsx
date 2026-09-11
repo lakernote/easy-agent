@@ -19,8 +19,7 @@ type SettingsShellProps = {
 
 const sectionGroups: { label: string; sections: { id: SettingsSection; label: string }[] }[] = [
   { label: '运行与模型', sections: [
-    { id: 'runtime', label: '运行环境' },
-    { id: 'models', label: '模型配置' },
+    { id: 'runtime', label: '运行与模型' },
     { id: 'tasks', label: '任务设置' },
   ] },
   { label: '能力扩展', sections: [
@@ -35,15 +34,15 @@ const sectionGroups: { label: string; sections: { id: SettingsSection; label: st
 ]
 
 function activeSection(page: Page): SettingsSection {
-  return page === 'tasks' || page === 'models' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'weixin' || page === 'security' ? page : 'runtime'
+  return page === 'tasks' || page === 'skills' || page === 'tools' || page === 'usage' || page === 'weixin' || page === 'security' ? page : 'runtime'
 }
 
 export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout, onOpenSession }: SettingsShellProps) {
   const selected = activeSection(page)
   const activeProfile = data.modelProfiles.find((profile) => profile.id === data.activeModelProfileId)
   const pageDescription: Record<SettingsSection, string> = {
-    runtime: '检查 Runtime 状态',
-    models: '管理新会话默认配置',
+    runtime: '选择执行引擎并管理模型配置',
+    models: '选择执行引擎并管理模型配置',
     tasks: '调整并发、超时与恢复',
     skills: '管理按需加载的 Skills',
     tools: '管理内置工具与 MCP',
@@ -95,7 +94,7 @@ export function SettingsShell({ page, data, onPage, onRefresh, onError, onLogout
       </div>
       <div className="settings-hub-context">
         <span className="service-dot" />
-        <div><small>新会话默认</small><strong>{data.model.runtime === 'codex' ? 'Codex' : 'EasyAgent'} · {activeProfile?.name || '未命名配置'}</strong></div>
+        <div><small>新会话默认</small><strong>{data.model.runtime === 'codex' ? 'Codex · 一套配置' : `EasyAgent · ${activeProfile?.name || '未命名配置'}`}</strong></div>
         <button className="account-logout" type="button" onClick={() => void onLogout()}>退出</button>
       </div>
     </header>

@@ -83,6 +83,7 @@ export const api = {
   codexThread: (id: string) => request<unknown>(`/api/v1/codex/threads/${encodeURIComponent(id)}`),
   codexConfig: () => request<CodexProviderConfig>('/api/v1/codex/config'),
   saveCodexConfig: (config: CodexProviderConfigInput) => request<CodexProviderConfig>('/api/v1/codex/config', { method: 'PUT', body: JSON.stringify(config) }),
+  deleteCodexProvider: (id: string) => request<CodexProviderConfig>(`/api/v1/codex/config/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveSkill: (skill: Skill) => request<Skill>(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', body: JSON.stringify(skill) }),
   resetSkill: (name: string) => request<void>(`/api/v1/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   saveMCP: (mcp: MCPConfig) => request<MCPConfig>(`/api/v1/mcp/${encodeURIComponent(mcp.id)}`, { method: 'PUT', body: JSON.stringify(mcp) }),

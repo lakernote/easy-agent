@@ -46,16 +46,28 @@ type MCPServerConfig struct {
 // ProviderConfig 是 EasyAgent 能够管理的 Codex provider 配置。API Key 永远
 // 不放在这个结构体里返回；它只在 SaveProviderConfig 的入参中短暂出现。
 type ProviderConfig struct {
-	ConfigPath       string `json:"configPath"`
-	Provider         string `json:"provider"`
-	ProviderName     string `json:"providerName"`
+	ConfigPath       string           `json:"configPath"`
+	Provider         string           `json:"provider"`
+	ProviderName     string           `json:"providerName"`
+	BaseURL          string           `json:"baseUrl"`
+	Model            string           `json:"model"`
+	ReasoningEffort  string           `json:"reasoningEffort"`
+	EnvKey           string           `json:"envKey"`
+	APIKeyConfigured bool             `json:"apiKeyConfigured"`
+	Configured       bool             `json:"configured"`
+	Warning          string           `json:"warning,omitempty"`
+	Providers        []ProviderOption `json:"providers,omitempty"`
+}
+
+// ProviderOption 是 Codex config.toml 中可切换的第三方 Provider 摘要。
+// 密钥本身永远不返回，只返回连接信息和是否已经配置密钥。
+type ProviderOption struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
 	BaseURL          string `json:"baseUrl"`
 	Model            string `json:"model"`
-	ReasoningEffort  string `json:"reasoningEffort"`
 	EnvKey           string `json:"envKey"`
 	APIKeyConfigured bool   `json:"apiKeyConfigured"`
-	Configured       bool   `json:"configured"`
-	Warning          string `json:"warning,omitempty"`
 }
 
 // ProviderConfigInput 是浏览器提交的配置。APIKey 为空表示保留已有密钥，
@@ -100,25 +112,31 @@ func LoadProviderConfig() (ProviderConfig, error) {
 	if err != nil {
 		return ProviderConfig{}, err
 	}
+	// `openai` is Codex's built-in official connection. It may appear as the
+	// value of model_provider, but it is not a user-managed directory entry.
+	// Normalizing it to the empty UI value also prevents an old
+	// [model_providers.openai] table from leaking stale third-party fields into
+	// the official-login screen.
 	provider := stringValue(document, "model_provider")
-	if provider == "" {
-		provider = defaultProvider
+	if isBuiltInProvider(provider) {
+		provider = ""
 	}
 	providerValues := providerDocument(document, provider)
 	envKey := stringValue(providerValues, "env_key")
 	warning := ""
 	if _, exists := providerValues["api_key"]; exists {
-		warning = "检测到 config.toml 里直接保存了 API Key；请使用下方 API Key 输入框迁移到受保护的密钥文件。"
+		warning = "检测到 config.toml 里直接保存了 API Key；请删除密钥值，改为 env_key 环境变量名。"
 	}
 	if looksLikeSecret(envKey) {
 		envKey = defaultEnvKey
-		warning = "检测到旧配置把 API Key 填进了 env_key；请在下方 API Key 输入框重新保存。"
+		warning = "检测到旧配置把 API Key 填进了 env_key；请改为环境变量名。"
 	}
-	if envKey == "" && provider == defaultProvider {
+	if provider == defaultProvider && envKey == "" {
 		envKey = defaultEnvKey
 	}
 	secrets, _ := readSecrets(secretsPath)
 	configured := envKey != "" && (strings.TrimSpace(os.Getenv(envKey)) != "" || strings.TrimSpace(secrets[envKey]) != "")
+	providers := providerOptions(document, secrets)
 	return ProviderConfig{
 		ConfigPath:       configPath,
 		Provider:         provider,
@@ -130,7 +148,35 @@ func LoadProviderConfig() (ProviderConfig, error) {
 		APIKeyConfigured: configured,
 		Configured:       strings.TrimSpace(stringValue(document, "model")) != "" && strings.TrimSpace(stringValue(providerValues, "base_url")) != "" && configured,
 		Warning:          warning,
+		Providers:        providers,
 	}, nil
+}
+
+func providerOptions(document configDocument, secrets map[string]string) []ProviderOption {
+	providers := providerDocuments(document)
+	ids := make([]string, 0, len(providers))
+	for id := range providers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]ProviderOption, 0, len(ids))
+	for _, id := range ids {
+		// Never show Codex's built-in official connection as a third-party
+		// Provider, even if an old config.toml contains a stale openai table.
+		if isBuiltInProvider(id) {
+			continue
+		}
+		values := providerEntry(providers, id)
+		envKey := stringValue(values, "env_key")
+		if looksLikeSecret(envKey) {
+			envKey = ""
+		}
+		result = append(result, ProviderOption{
+			ID: id, Name: stringValue(values, "name"), BaseURL: stringValue(values, "base_url"), Model: stringValue(values, "model"),
+			EnvKey: envKey, APIKeyConfigured: envKey != "" && (strings.TrimSpace(os.Getenv(envKey)) != "" || strings.TrimSpace(secrets[envKey]) != ""),
+		})
+	}
+	return result
 }
 
 // LoadManagedEnvironment 读取 EasyAgent 自己保存的 Codex 密钥。文件只允许当前
@@ -203,6 +249,73 @@ func SaveProviderConfig(input ProviderConfigInput) (ProviderConfig, error) {
 		return ProviderConfig{}, err
 	}
 	return LoadProviderConfig()
+}
+
+// DeleteProviderConfig removes one user-managed Provider from config.toml.
+// The built-in openai connection is not a directory entry and cannot be
+// deleted. If the removed Provider is selected, Codex falls back to the
+// official connection.
+func DeleteProviderConfig(providerID string) (ProviderConfig, error) {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	providerID = strings.TrimSpace(providerID)
+	if isBuiltInProvider(providerID) {
+		return ProviderConfig{}, errors.New("官方 ChatGPT 登录不能删除")
+	}
+	if !providerIDPattern.MatchString(providerID) {
+		return ProviderConfig{}, errors.New("Provider ID 无效")
+	}
+	configPath, secretsPath, err := configPaths()
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	document, err := readDocument(configPath)
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	providers := providerDocuments(document)
+	removed, exists := providers[providerID]
+	if !exists {
+		return ProviderConfig{}, fmt.Errorf("Provider 不存在: %s", providerID)
+	}
+	removedValues := providerEntry(map[string]any{providerID: removed}, providerID)
+	removedEnvKey := stringValue(removedValues, "env_key")
+	delete(providers, providerID)
+	if len(providers) == 0 {
+		delete(document, "model_providers")
+	} else {
+		document["model_providers"] = providers
+	}
+	if strings.EqualFold(stringValue(document, "model_provider"), providerID) {
+		document["model_provider"] = "openai"
+	}
+	if err := writeDocument(configPath, document); err != nil {
+		return ProviderConfig{}, err
+	}
+
+	if removedEnvKey != "" && !providerEnvKeyInUse(providers, removedEnvKey) {
+		secrets, readErr := readSecrets(secretsPath)
+		if readErr != nil {
+			return ProviderConfig{}, readErr
+		}
+		if _, exists := secrets[removedEnvKey]; exists {
+			delete(secrets, removedEnvKey)
+			if err := writeSecrets(secretsPath, secrets); err != nil {
+				return ProviderConfig{}, err
+			}
+		}
+	}
+	return LoadProviderConfig()
+}
+
+func providerEnvKeyInUse(providers map[string]any, envKey string) bool {
+	for id := range providers {
+		if stringValue(providerEntry(providers, id), "env_key") == envKey {
+			return true
+		}
+	}
+	return false
 }
 
 // SyncMCPServers mirrors EasyAgent's enabled MCP catalog into a namespaced part
@@ -317,6 +430,9 @@ func normalizeProviderInput(input ProviderConfigInput) (ProviderConfigInput, err
 	if input.Provider == "" {
 		input.Provider = defaultProvider
 	}
+	if isBuiltInProvider(input.Provider) {
+		return ProviderConfigInput{}, errors.New("openai 是 Codex 官方内置连接，不需要在 Provider 目录中编辑")
+	}
 	if !providerIDPattern.MatchString(input.Provider) {
 		return ProviderConfigInput{}, errors.New("Provider ID 只能包含字母、数字、下划线或短横线")
 	}
@@ -351,6 +467,10 @@ func normalizeProviderInput(input ProviderConfigInput) (ProviderConfigInput, err
 	return input, nil
 }
 
+func isBuiltInProvider(provider string) bool {
+	return strings.EqualFold(strings.TrimSpace(provider), "openai")
+}
+
 func looksLikeSecret(value string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "gsk_") || len(strings.TrimSpace(value)) > 128
 }
@@ -379,18 +499,37 @@ func writeDocument(path string, document configDocument) error {
 }
 
 func providerDocuments(document configDocument) map[string]any {
-	value, ok := document["model_providers"].(map[string]any)
-	if ok {
+	switch value := document["model_providers"].(type) {
+	case map[string]any:
 		return value
+	case map[string]map[string]any:
+		result := make(map[string]any, len(value))
+		for key, item := range value {
+			result[key] = item
+		}
+		return result
 	}
 	return map[string]any{}
 }
 
 func providerDocument(document configDocument, provider string) map[string]any {
-	providers := providerDocuments(document)
-	value, ok := providers[provider].(map[string]any)
-	if ok {
-		return value
+	return providerEntry(providerDocuments(document), provider)
+}
+
+func providerEntry(providers map[string]any, provider string) map[string]any {
+	value, ok := providers[provider]
+	if !ok {
+		return map[string]any{}
+	}
+	if entry, ok := value.(map[string]any); ok {
+		return entry
+	}
+	if entry, ok := value.(map[string]string); ok {
+		result := make(map[string]any, len(entry))
+		for key, value := range entry {
+			result[key] = value
+		}
+		return result
 	}
 	return map[string]any{}
 }

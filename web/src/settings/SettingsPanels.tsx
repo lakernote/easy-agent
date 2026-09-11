@@ -186,10 +186,13 @@ function codexAccountSummary(value: unknown) {
   const account = record(root?.account)
   const type = typeof account?.type === 'string' ? account.type : ''
   const plan = typeof account?.planType === 'string' ? account.planType : ''
+  const identity = ['email', 'emailAddress', 'login', 'username', 'accountId', 'userId', 'id']
+    .map((key) => typeof account?.[key] === 'string' ? account[key] as string : '')
+    .find(Boolean) || ''
   const connected = Boolean(account)
   return {
     title: connected ? (type === 'chatgpt' ? 'ChatGPT 已连接' : 'Codex 账号已连接') : '未读取到账号',
-    detail: connected ? [plan ? plan[0].toUpperCase() + plan.slice(1) : '', '账号标识已隐藏'].filter(Boolean).join(' · ') : '请确认 Codex 登录状态',
+    detail: connected ? [plan ? plan[0].toUpperCase() + plan.slice(1) : '', identity || '账号信息未返回'].filter(Boolean).join(' · ') : '请确认 Codex 登录状态',
   }
 }
 
@@ -272,49 +275,56 @@ export function ModelNotice({ notice }: { notice: Notice | null }) {
 }
 
 type CodexSettingsProps = {
-  data: Bootstrap
   config: CodexProviderConfig
   setConfig: (value: CodexProviderConfig) => void
-  model: ModelSettings
-  setModel: (value: ModelSettings) => void
   notice: Notice | null
-  testing: boolean
-  saving: boolean
   savingConfig: boolean
-  onTest: () => void
-  onSave: () => void
-  onSaveConfig: (value: CodexProviderConfig & { apiKey?: string; clearApiKey?: boolean }) => void
+  deleting: boolean
+  onDelete: () => void
+  onSaveConfig: (value: CodexProviderConfig) => void
 }
 
-export function CodexSettings({ data, config, setConfig, model, setModel, notice, testing, saving, savingConfig, onTest, onSave, onSaveConfig }: CodexSettingsProps) {
-  const [apiKey, setAPIKey] = useState('')
-  const [clearAPIKey, setClearAPIKey] = useState(false)
+type ApiKeyFieldsProps = {
+  apiKey: string
+  apiKeyConfigured?: boolean
+  apiKeyEnv?: string
+  apiKeyPlaceholder: string
+  apiKeyEnvPlaceholder?: string
+  showEnvironment?: boolean
+  clearApiKey: boolean
+  onApiKeyChange: (value: string) => void
+  onApiKeyEnvChange?: (value: string) => void
+  onClearApiKeyChange: (value: boolean) => void
+}
+
+function ApiKeyFields({ apiKey, apiKeyConfigured, apiKeyEnv = '', apiKeyPlaceholder, apiKeyEnvPlaceholder = '', showEnvironment = true, clearApiKey, onApiKeyChange, onApiKeyEnvChange, onClearApiKeyChange }: ApiKeyFieldsProps) {
+  return <div className="api-key-section wide">
+    <div className="api-key-section-head"><strong>认证（可选）</strong><small>{showEnvironment ? 'API Key 和环境变量二选一，不需要同时填写。' : 'API Key 会保存在 EasyAgent 的本地 DB 中。'}</small></div>
+    <label>API Key
+      <input type="password" autoComplete="new-password" disabled={clearApiKey} value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={apiKeyPlaceholder} />
+      <small>密钥值会保持隐藏；无需认证的兼容服务可以留空。</small>
+    </label>
+    {showEnvironment && <details className="api-key-advanced">
+      <summary>高级：使用环境变量</summary>
+      <label>环境变量名
+        <input value={apiKeyEnv} onChange={(event) => onApiKeyEnvChange?.(event.target.value)} placeholder={apiKeyEnvPlaceholder} />
+        <small>填写变量名，不是 API Key 本身；保存后由服务器读取。</small>
+      </label>
+    </details>}
+    {apiKeyConfigured && <label className="check-label api-key-clear"><input type="checkbox" checked={clearApiKey} onChange={(event) => onClearApiKeyChange(event.target.checked)} />清除已保存的 API Key</label>}
+  </div>
+}
+
+export function CodexSettings({ config, setConfig, notice, savingConfig, deleting, onDelete, onSaveConfig }: CodexSettingsProps) {
   const update = (value: Partial<CodexProviderConfig>) => setConfig({ ...config, ...value })
+  const editingExisting = Boolean(config.provider && config.providers?.some((provider) => provider.id === config.provider))
 
   return (
-    <div className="section-block codex-config">
-      <div className="section-heading codex-provider-head">
-        <div>
-          <p className="eyebrow">全局连接</p>
-          <h2>Codex Provider</h2>
-          <p>这组连接由所有 Codex 模型配置共享，并写入服务器上的 <code>~/.codex/config.toml</code>。</p>
-        </div>
-        <span className="tag">共享</span>
-      </div>
-      <div className="runtime-boundary-note">
-        <strong>Provider 与配置分层</strong>
-        <span>先保存 Provider 连接，再为当前配置指定模型 override；留空时跟随 config.toml 的默认模型。</span>
-      </div>
-      <div className="codex-config-summary">
-        <span className={`service-dot ${config.configured ? '' : 'off'}`} />
-        <strong>{config.configured ? `${config.providerName || config.provider} 已配置` : '还没有完整配置'}</strong>
-        <small>{config.configPath || '~/.codex/config.toml'}{config.apiKeyConfigured ? ' · API Key 已配置' : ' · API Key 未配置'}</small>
-      </div>
+    <div className="section-block codex-config codex-config-simple">
       {config.warning && <div className="codex-config-warning" role="alert">{config.warning}</div>}
       <div className="form-grid codex-provider-fields">
         <label>Provider ID
-          <input value={config.provider} onChange={(event) => update({ provider: event.target.value })} placeholder="groq" />
-          <small>例如 groq；不要填写 API Key。</small>
+          <input value={config.provider} disabled={editingExisting} onChange={(event) => update({ provider: event.target.value })} placeholder="groq" />
         </label>
         <label>显示名称
           <input value={config.providerName} onChange={(event) => update({ providerName: event.target.value })} placeholder="Groq" />
@@ -330,28 +340,14 @@ export function CodexSettings({ data, config, setConfig, model, setModel, notice
             <option value="">Provider 默认</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option>
           </select>
         </label>
-        <label>API Key 环境变量
-          <input value={config.envKey} onChange={(event) => update({ envKey: event.target.value })} placeholder="GROQ_API_KEY" />
-          <small>这里填变量名，不是 gsk_... 密钥。</small>
+        <label className="codex-env-key-field wide">env_key（服务器变量名）
+          <input value={config.envKey} onChange={(event) => update({ envKey: event.target.value })} placeholder="例如 GROQ_API_KEY；这里不填真实 Key" />
         </label>
-        <label className="wide">API Key
-          <input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => { setAPIKey(event.target.value); setClearAPIKey(false) }} placeholder={config.apiKeyConfigured ? '已配置，留空保持不变' : '粘贴 Groq API Key'} />
-          <small>只发送到当前 EasyAgent 服务器；不会写入 config.toml。</small>
-        </label>
-        {config.apiKeyConfigured && <label className="check-label wide"><input type="checkbox" checked={clearAPIKey} onChange={(event) => { setClearAPIKey(event.target.checked); if (event.target.checked) setAPIKey('') }} />清除已保存的 API Key</label>}
       </div>
-      <section className="codex-profile-override">
-        <div><p className="eyebrow">当前配置</p><h3>模型覆盖</h3><small>只影响“{model.profileName || '当前配置'}”，不会修改其他 Codex 配置。</small></div>
-        <label>模型 override（可选）
-          <input value={model.model} onChange={(event) => setModel({ ...model, model: event.target.value })} placeholder={`留空：跟随 ${config.model || 'config.toml 默认模型'}`} />
-          <small>需要同一 Provider 使用不同模型时再填写。</small>
-        </label>
-        <div className="codex-profile-policy"><strong>任务时限</strong><span>统一使用“任务设置”的整轮上限，当前为 {Number((data.runtimeSettings.turnTimeoutSeconds / 3600).toFixed(2))} 小时。</span></div>
-      </section>
       <ModelNotice notice={notice} />
       <div className="form-actions codex-form-actions">
-        <div><button className="ghost-button" type="button" disabled={savingConfig} onClick={() => onSaveConfig({ ...config, apiKey, clearApiKey: clearAPIKey })}>{savingConfig ? '保存 Provider 中…' : '保存 Provider'}</button><button className="ghost-button" type="button" disabled={testing || !config.configured} onClick={onTest}>{testing ? '正在测试连接…' : '测试连接'}</button></div>
-        <button className="primary-button" type="button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存当前配置'}</button>
+        {editingExisting && <button className="ghost-button danger" type="button" disabled={savingConfig || deleting} onClick={onDelete}>{deleting ? '删除中…' : '删除 Provider'}</button>}
+        <button className="primary-button" type="button" disabled={savingConfig} onClick={() => onSaveConfig(config)}>{savingConfig ? '保存中…' : '保存 Provider'}</button>
       </div>
     </div>
   )
@@ -403,9 +399,15 @@ export function EasyAgentSettings({ data, model, setModel, notice, testing, savi
           <small>0 表示未知；Ollama 运行后会读取实际窗口。</small>
         </label>
         <label>自动压缩阈值<input type="number" min={data.modelRules.minCompressionThresholdPercent} max={data.modelRules.maxCompressionThresholdPercent} value={model.compressionThresholdPercent} onChange={(event) => setModel({ ...model, compressionThresholdPercent: Number(event.target.value) })} /></label>
-        <label>API Key<input type="password" autoComplete="new-password" disabled={clearAPIKey} placeholder={model.secretConfigured ? '已配置，留空保持不变' : '可留空'} value={model.apiKey || ''} onChange={(event) => { setClearAPIKey(false); setModel({ ...model, apiKey: event.target.value }) }} /></label>
-        <label>API Key 环境变量<input placeholder="例如 OPENAI_API_KEY" value={model.apiKeyEnv || ''} onChange={(event) => setModel({ ...model, apiKeyEnv: event.target.value })} /></label>
-        {model.secretConfigured && <label className="check-label wide"><input type="checkbox" checked={clearAPIKey} onChange={(event) => { setClearAPIKey(event.target.checked); if (event.target.checked) setModel({ ...model, apiKey: '' }) }} />清除这套配置已保存的 API Key</label>}
+        <ApiKeyFields
+          apiKey={model.apiKey || ''}
+          apiKeyConfigured={model.secretConfigured}
+          apiKeyPlaceholder={model.secretConfigured ? '已配置，留空保持不变' : '可留空'}
+          showEnvironment={false}
+          clearApiKey={clearAPIKey}
+          onApiKeyChange={(value) => { setClearAPIKey(false); setModel({ ...model, apiKey: value }) }}
+          onClearApiKeyChange={(value) => { setClearAPIKey(value); if (value) setModel({ ...model, apiKey: '' }) }}
+        />
       </div>
       <ModelNotice notice={notice} />
       <div className="form-actions">

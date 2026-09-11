@@ -68,10 +68,10 @@ func (server *Server) modelSettingsForInput(input store.ModelSettings) store.Mod
 }
 
 func publicModel(value store.ModelSettings) store.ModelSettings {
-	// This flag belongs to the redacted direct-key field. APIKeyEnv is already
-	// visible by name and must not make the direct-key input claim a saved value.
+	// EasyAgent 只公开 DB 密钥是否已配置，不再把环境变量入口带回浏览器。
 	value.SecretConfigured = value.APIKey != ""
 	value.APIKey = ""
+	value.APIKeyEnv = ""
 	return value
 }
 

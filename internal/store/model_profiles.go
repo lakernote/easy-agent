@@ -176,6 +176,33 @@ func (store *Store) DeleteModelProfile(id string) error {
 	return store.saveModelProfiles(filtered, activeID, filteredModelSettings(filtered, activeID))
 }
 
+// ClearCodexProvider switches reusable Codex profiles away from a Provider
+// that has been removed from config.toml. Existing sessions keep their saved
+// execution metadata; only future runs using these profiles fall back to the
+// official Codex connection.
+func (store *Store) ClearCodexProvider(provider string) error {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return nil
+	}
+	profiles, activeID, err := store.ListModelProfiles()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for index := range profiles {
+		settings := &profiles[index].Settings
+		if settings.Runtime == RuntimeCodex && strings.EqualFold(strings.TrimSpace(settings.Provider), provider) {
+			settings.Provider = ""
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return store.saveModelProfiles(profiles, activeID, filteredModelSettings(profiles, activeID))
+}
+
 func (store *Store) legacyModelSettings() (ModelSettings, error) {
 	var data []byte
 	if err := store.db.QueryRow(`SELECT value_json FROM ea_settings WHERE key='model'`).Scan(&data); err != nil {

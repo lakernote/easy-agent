@@ -180,7 +180,7 @@ export default function App() {
         </div>
       </header>
       {error && <div className="toast" role="alert"><span>{friendlyError(error)}</span><button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('models')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
+      {page === 'chat' && <Chat session={session} data={data} onSession={setCurrentSession} onRefresh={refresh} onError={setError} onLoadOlder={loadSessionHistory} onOpenSkills={() => setPage('skills')} onOpenCapabilities={() => setPage('tools')} onOpenModelSettings={() => setPage('runtime')} onOpenTrace={() => setTraceOpen(true)} onStop={stopSession} onPause={pauseSession} onResume={resumeSession} runActionBusy={updatingRunState} />}
       <Suspense fallback={<PageLoading />}>
         {page === 'automations' && <AutomationPage data={data} onError={setError} onOpenSession={openSession} />}
         {page !== 'chat' && page !== 'automations' && <SettingsShell page={page} data={data} onPage={setPage} onRefresh={refresh} onError={setError} onLogout={logout} onOpenSession={openSession} />}

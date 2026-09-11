@@ -83,6 +83,13 @@ func DefaultModelSettings() ModelSettings {
 func (value ModelSettings) WithDefaults() ModelSettings {
 	if value.Runtime != RuntimeCodex {
 		value.Runtime = RuntimeEasyAgent
+		// EasyAgent 的认证只保存在自己的模型配置 DB 中；旧版本留下的
+		// APIKeyEnv 不再参与运行，避免环境变量和 DB 密钥产生歧义。
+		value.APIKeyEnv = ""
+	}
+	if value.Runtime == RuntimeCodex && strings.EqualFold(strings.TrimSpace(value.Provider), "codex") {
+		// 旧版本用 codex 表示“跟随官方登录”；空值是更清晰的持久化表示。
+		value.Provider = ""
 	}
 	if value.Protocol == "" {
 		value.Protocol = DefaultModelProtocol
