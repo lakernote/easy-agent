@@ -1250,13 +1250,15 @@ body { background: #f7f9fd; }
 .settings-hub .codex-provider-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 70px; padding: 12px 14px; border: 1px solid var(--settings-line); border-radius: 10px; background: #fff; }
 .settings-hub .codex-provider-row:hover { background: #f6f9ff; }
 .settings-hub .codex-provider-row.selected { border-color: #a8c5ee; background: #f3f7ff; }
-.settings-hub .codex-provider-main { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 4px; border: 0; color: #253650; background: transparent; text-align: left; cursor: pointer; }
-.settings-hub .codex-provider-main:disabled { cursor: wait; opacity: .7; }
+.settings-hub .codex-provider-main { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 4px; color: #253650; }
 .settings-hub .codex-provider-main > span:last-child { min-width: 0; }
 .settings-hub .codex-provider-main strong, .settings-hub .codex-provider-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-hub .codex-provider-main strong { font-size: 13px; }
 .settings-hub .codex-provider-main small { margin-top: 6px; color: var(--settings-text-muted); font-size: 10px; }
 .settings-hub .codex-provider-actions { display: flex; align-items: center; gap: 8px; }
+.settings-hub .provider-delete { min-height: 36px; padding: 0 12px; border: 1px solid #e3c5c1; border-radius: 8px; color: #a04d44; background: #fff; cursor: pointer; font-size: 10px; white-space: nowrap; }
+.settings-hub .provider-delete:hover:not(:disabled) { border-color: #cf918a; background: #fff1ef; }
+.settings-hub .provider-delete:disabled { cursor: wait; opacity: .55; }
 .settings-hub .codex-provider-empty { margin-top: 2px; }
 .profile-default-state { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 10px; border-radius: 8px; color: #315da8; background: #e8f0ff; font-size: 10px; font-weight: 650; white-space: nowrap; }
 .profile-default-state .service-dot { width: 7px; height: 7px; }
@@ -1312,7 +1314,7 @@ body { background: #f7f9fd; }
   .settings-hub .model-profile-row-actions { justify-content: flex-end; }
   .settings-hub .codex-provider-row { grid-template-columns: 1fr; align-items: stretch; }
   .settings-hub .codex-provider-actions { justify-content: flex-end; }
-  .settings-hub .profile-activate, .settings-hub .profile-edit { min-height: 44px; }
+  .settings-hub .profile-activate, .settings-hub .profile-edit, .settings-hub .provider-delete { min-height: 44px; }
   .model-empty-state { grid-template-columns: 9px minmax(0, 1fr); }
   .model-empty-state .ghost-button { grid-column: 2; width: 100%; min-height: 44px; }
   .settings-hub .model-drawer-head { padding: 20px 18px 17px; }

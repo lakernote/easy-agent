@@ -217,8 +217,8 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     finally { setSavingCodexConfig(false) }
   }
 
-  const removeCodexProvider = async () => {
-    const providerID = codexConfig.provider.trim()
+  const removeCodexProvider = async (provider = codexConfig.provider) => {
+    const providerID = provider.trim()
     if (!providerID || deletingCodexProvider) return false
     setDeletingCodexProvider(true); setModelNotice(null); onError('')
     try {
