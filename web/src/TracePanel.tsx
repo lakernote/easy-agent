@@ -35,10 +35,6 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
   const runtimeName = isCodexRuntime ? 'Codex app-server' : 'EasyAgent Runtime'
   const activeModel = session.model || persistedModel || (isCodexRuntime ? 'Codex 默认模型' : 'Runtime 默认模型')
   const rounds = useMemo(() => new Set(events.map((event) => event.turn).filter(Boolean)).size, [events])
-  const rawEventCount = session.eventCount || session.events.length
-  const eventCountLabel = rawEventCount === events.length
-    ? `${formatTraceCount(events.length)} 条事件`
-    : `${formatTraceCount(events.length)} 条可读事件 · ${formatTraceCount(rawEventCount)} 条 EasyAgent 记录`
   useEffect(() => {
     let cancelled = false
     setPersistedModel('')
@@ -55,8 +51,8 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
     try { await onLoadOlder(session.id, 'events', first.id) } catch (reason) { onError((reason as Error).message) }
     finally { setLoadingOlder(false) }
   }
-  return <aside className="trace-panel" aria-label="Agent 轨迹">
-    <div className="trace-head"><div className="trace-head-copy"><p className="eyebrow">执行记录</p><div className="trace-title-row"><h2>Agent 轨迹</h2><span>{rounds} 个回合 · {session.usage.modelCalls} 次模型处理 · {eventCountLabel}</span></div></div><div className="trace-head-actions"><div className="trace-mode-tabs" role="tablist" aria-label="轨迹视图">{([['timeline', '时序事件'], ['stats', '调用统计'], ['raw', '原始记录']] as [TraceMode, string][]).map(([value, label]) => <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'active' : ''} onClick={() => setMode(value)} key={value}>{label}</button>)}</div><button type="button" className="trace-close" aria-label="关闭 Agent 轨迹" onClick={onClose}>×</button></div></div>
+  return <aside className="trace-panel" aria-label="运行轨迹">
+    <div className="trace-head"><div className="trace-head-copy"><div className="trace-title-row"><h2>运行轨迹</h2><span>{rounds} 回合 · {formatTraceCount(events.length)} 事件</span></div></div><div className="trace-head-actions"><div className="trace-mode-tabs" role="tablist" aria-label="轨迹视图">{([['timeline', '事件'], ['stats', '统计'], ['raw', '原始']] as [TraceMode, string][]).map(([value, label]) => <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'active' : ''} onClick={() => setMode(value)} key={value}>{label}</button>)}</div><button type="button" className="trace-close" aria-label="关闭运行轨迹" onClick={onClose}>×</button></div></div>
     <div className="trace-overview"><div className="trace-runtime-banner"><span className={`trace-live-dot ${session.status}`} aria-hidden="true" /><strong>{runtimeName}</strong><span>{traceStatusLabel(session.status, session.runProgress)}</span></div><div className="trace-overview-model"><span>模型</span><strong>{activeModel}</strong></div></div>
     {mode === 'timeline' && <>
       <div className="trace-toolbar"><div className="trace-filters" role="group" aria-label="筛选轨迹">{([['all', '全部'], ['input', '输入'], ['llm', 'LLM'], ['tool', '工具'], ['usage', '用量'], ['status', '状态'], ['error', '失败']] as [TraceFilter, string][]).map(([value, label]) => <button type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)} key={value}>{label}<span title={`${counts[value].toLocaleString()} 条记录`}>{formatTraceCount(counts[value])}</span></button>)}</div></div>
