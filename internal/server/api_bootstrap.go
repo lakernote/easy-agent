@@ -15,7 +15,7 @@ type bootstrapPayload struct {
 	Projects             []store.Project             `json:"projects"`
 	SessionsHasMore      bool                        `json:"sessionsHasMore,omitempty"`
 	Model                store.ModelSettings         `json:"model"`
-	ModelProfiles        []store.ModelProfile        `json:"modelProfiles"`
+	ModelProfiles        []modelProfileView          `json:"modelProfiles"`
 	ActiveModelProfileID string                      `json:"activeModelProfileId"`
 	Skills               []store.SkillOverride       `json:"skills"`
 	BuiltinTools         []builtintools.Info         `json:"builtinTools"`
@@ -29,6 +29,13 @@ type bootstrapPayload struct {
 	Runtime              runtimeInfoPayload          `json:"runtime"`
 	RuntimeSettings      store.RuntimeSettings       `json:"runtimeSettings"`
 	ResearchSettings     researchSettingsView        `json:"researchSettings"`
+}
+
+type modelProfileView struct {
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
+	Settings store.ModelSettings `json:"settings"`
+	Verified bool                `json:"verified"`
 }
 
 type runtimeInfoPayload struct {
@@ -74,10 +81,10 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusInternalServerError, err.Error())
 		return
 	}
-	publicProfiles := make([]store.ModelProfile, 0, len(profiles))
-	for _, profile := range profiles {
-		profile.Settings = publicModel(profile.Settings)
-		publicProfiles = append(publicProfiles, profile)
+	publicProfiles, err := server.modelProfileViews(profiles)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
 	}
 	catalog, err := loadSkillCatalog(server.store)
 	if err != nil {
@@ -118,6 +125,24 @@ func (server *Server) bootstrap(response http.ResponseWriter, request *http.Requ
 		Codex:            server.detectCodex(request.Context()),
 		CodexConfig:      server.loadCodexConfig(),
 	})
+}
+
+func (server *Server) modelProfileViews(profiles []store.ModelProfile) ([]modelProfileView, error) {
+	views := make([]modelProfileView, 0, len(profiles))
+	for _, profile := range profiles {
+		verified := profile.Settings.Runtime == store.RuntimeCodex
+		if !verified {
+			var err error
+			verified, err = server.store.HasModelCapabilityTest(modelCapabilityFingerprint(profile.Settings))
+			if err != nil {
+				return nil, err
+			}
+		}
+		views = append(views, modelProfileView{
+			ID: profile.ID, Name: profile.Name, Settings: publicModel(profile.Settings), Verified: verified,
+		})
+	}
+	return views, nil
 }
 
 func (server *Server) loadCodexConfig() codexruntime.ProviderConfig {

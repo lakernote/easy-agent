@@ -3,6 +3,7 @@
 package store
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/permissions"
@@ -93,14 +94,17 @@ type Attachment struct {
 }
 
 type Message struct {
-	ID          int64        `json:"id"`
-	Role        string       `json:"role"`
-	Content     string       `json:"content,omitempty"`
-	Attachments []Attachment `json:"attachments"`
-	ToolCalls   []ToolCall   `json:"toolCalls"`
-	ToolCallID  string       `json:"toolCallId,omitempty"`
-	Name        string       `json:"name,omitempty"`
-	CreatedAt   time.Time    `json:"createdAt"`
+	ID      int64  `json:"id"`
+	Role    string `json:"role"`
+	Content string `json:"content,omitempty"`
+	// ToolResult keeps the provider-neutral structured result without making
+	// the storage package depend on the agent package. Legacy rows keep it nil.
+	ToolResult  json.RawMessage `json:"toolResult,omitempty"`
+	Attachments []Attachment    `json:"attachments"`
+	ToolCalls   []ToolCall      `json:"toolCalls"`
+	ToolCallID  string          `json:"toolCallId,omitempty"`
+	Name        string          `json:"name,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
 }
 
 type Usage struct {
@@ -132,6 +136,8 @@ type Event struct {
 	ActivitySource      string    `json:"activitySource,omitempty"`
 	DisplayName         string    `json:"displayName,omitempty"`
 	Status              string    `json:"status"`
+	StopReason          string    `json:"stopReason,omitempty"`
+	IncompleteReason    string    `json:"incompleteReason,omitempty"`
 	Detail              string    `json:"detail,omitempty"`
 	Input               string    `json:"input,omitempty"`
 	Output              string    `json:"output,omitempty"`
@@ -188,17 +194,21 @@ type ContextInfo struct {
 }
 
 type Session struct {
-	ID          string             `json:"id"`
-	Title       string             `json:"title"`
-	ProjectID   string             `json:"projectId,omitempty"`
-	Status      string             `json:"status"`
-	Error       string             `json:"error,omitempty"`
-	Runtime     string             `json:"runtime"`
-	Channel     string             `json:"channel,omitempty"`
-	ProfileID   string             `json:"profileId,omitempty"`
-	Model       string             `json:"model,omitempty"`
-	Permissions permissions.Policy `json:"permissions"`
-	Workspace   string             `json:"workspace"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	ProjectID string `json:"projectId,omitempty"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	Runtime   string `json:"runtime"`
+	Channel   string `json:"channel,omitempty"`
+	ProfileID string `json:"profileId,omitempty"`
+	Model     string `json:"model,omitempty"`
+	// PendingModel is an immutable snapshot for the currently queued/running
+	// turn. It is server-only and may contain the profile credential already
+	// stored in this permissions-restricted database.
+	PendingModel json.RawMessage    `json:"-"`
+	Permissions  permissions.Policy `json:"permissions"`
+	Workspace    string             `json:"workspace"`
 	// SourceWorkspace 是用户选择的原始目录。Git 隔离开启时 Workspace 指向
 	// EasyAgent 创建的 worktree，SourceWorkspace 仍用于展示和追踪来源。
 	SourceWorkspace   string      `json:"sourceWorkspace,omitempty"`

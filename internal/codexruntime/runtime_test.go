@@ -3,6 +3,7 @@ package codexruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ done
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ThreadID != "thread-test" || result.Model != "gpt-5.6-sol" || result.Provider != "openai" || result.Answer != "hello" || delta != "hello" {
+	if result.ThreadID != "thread-test" || result.Model != "gpt-5.6-sol" || result.Provider != "openai" || result.Answer != "hello" || result.StopReason != "stop" || delta != "hello" {
 		t.Fatalf("unexpected result: %+v, delta=%q", result, delta)
 	}
 	args, err := os.ReadFile(argsFile)
@@ -94,6 +95,43 @@ done
 	}
 	if resumed.ThreadID != result.ThreadID || resumed.Answer != "hello" {
 		t.Fatalf("unexpected resumed result: %+v", resumed)
+	}
+}
+
+func TestRunMessageRejectsInterruptedPartialAnswer(t *testing.T) {
+	bin := t.TempDir()
+	path := filepath.Join(bin, "codex")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) echo '{"id":1,"result":{}}' ;;
+    *'"method":"thread/start"'*) echo '{"id":2,"result":{"thread":{"id":"thread-test"}}}' ;;
+    *'"method":"turn/start"'*)
+      echo '{"id":3,"result":{"turn":{"id":"turn-test","status":"inProgress"}}}'
+      echo '{"method":"item/agentMessage/delta","params":{"delta":"partial answer"}}'
+      echo '{"method":"turn/completed","params":{"turn":{"status":"interrupted","error":null}}}'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunMessage(context.Background(), Config{Path: path, Workspace: t.TempDir(), Timeout: time.Second}, "continue")
+	var termination *TurnTerminationError
+	if !errors.As(err, &termination) || termination.StopReason != "interrupted" || result.Answer != "" {
+		t.Fatalf("Codex interrupted turn 不应接受部分回答: result=%+v err=%v termination=%+v", result, err, termination)
+	}
+}
+
+func TestCodexTurnTerminationDistinguishesFailureAndNonTerminalStatus(t *testing.T) {
+	stopReason, detail := codexTurnTermination("failed", json.RawMessage(`{"message":"provider failed"}`))
+	if stopReason != "error" || detail != "provider failed" {
+		t.Fatalf("failed turn 映射错误: stopReason=%q detail=%q", stopReason, detail)
+	}
+	stopReason, detail = codexTurnTermination("inProgress", nil)
+	if stopReason != "incomplete" || !strings.Contains(detail, "inProgress") {
+		t.Fatalf("非终态 turn 不应当成功: stopReason=%q detail=%q", stopReason, detail)
 	}
 }
 

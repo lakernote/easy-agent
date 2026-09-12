@@ -52,7 +52,7 @@ const (
 )
 
 var groupDescriptions = map[string]string{
-	groupInformation: "日期、时间和外部事实研究",
+	groupInformation: "日期和时间",
 	groupFiles:       "工作区文件的列出、查找、搜索、读取和修改",
 	groupExecution:   "数学计算、Shell、构建、测试和 CLI",
 	groupWeb:         "互联网研究、来源核验和引用",
@@ -105,7 +105,7 @@ func catalogEntries(environment *appenv.Environment, skills SkillSource, researc
 	if !permissionPolicy.IsReadOnly() {
 		result = append(result, entry{tool: shellToolWithPolicy(environment, permissionPolicy), category: categoryExecution, group: groupExecution})
 	}
-	if skills != nil {
+	if skills != nil && len(skills.EnabledSkills()) > 0 {
 		result = append(result, entry{tool: loadSkillTool(skills), category: categoryExtension, group: groupSkills})
 	}
 	return result

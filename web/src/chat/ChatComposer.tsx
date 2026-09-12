@@ -47,7 +47,7 @@ export function ChatComposer(model: ChatComposerModel) {
           <div className="composer-model composer-fixed-field"><span>模型</span><strong title={displayedModel}>{displayedModel}</strong></div>
         </>}
       </div>
-      {!session && <div className={`composer-readiness ${readiness.tone}`} role="status" title={readiness.detail}><span aria-hidden="true" /><div><strong>{readiness.label}</strong><small>{readiness.detail}</small></div>{readiness.tone !== 'ready' && <button type="button" onClick={onOpenModelSettings}>检查配置</button>}</div>}
+      {!session && !readiness.canSend && <div className="composer-readiness blocked" role="alert" title={readiness.detail}><span aria-hidden="true" /><div><strong>{readiness.label}</strong><small>{readiness.detail}</small></div><button type="button" onClick={onOpenModelSettings}>检查配置</button></div>}
       {!session && workspaceOpen && <div id="workspace-picker" className="workspace-picker project-picker" role="listbox" aria-label="选择项目">
         <div className="project-picker-list">{projectOptions.map((project) => <button key={project.id} type="button" role="option" aria-selected={project.id === selectedProjectId} className={project.id === selectedProjectId ? 'selected' : ''} onClick={() => selectProject(project.id)}><strong>{project.name}</strong><span>{project.directories[0] || '未配置目录'}</span></button>)}</div>
       </div>}

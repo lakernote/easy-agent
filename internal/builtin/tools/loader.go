@@ -11,7 +11,14 @@ import (
 	"github.com/lakernote/easy-agent/internal/agent"
 )
 
-var coreToolNames = []string{"current_time", "calculate", "shell", "read", "grep", "find", "ls", "web_research"}
+// PI 的默认 coding tools 只有 read/bash/edit/write。EasyAgent 保留同样的小核心，
+// 再直接暴露 load_skill，避免“先加载 Skill 工具、再加载 Skill 内容”的两次模型
+// 往返。时间、计算、搜索和额外文件检索继续通过 load_tools 渐进加载。
+var codingCoreToolNames = []string{"read", "shell", "edit", "write", "load_skill"}
+
+// 只读权限下没有 Shell 和写工具。此时直接提供结构化文件检索，避免只读审查在
+// 开始工作前必须先花一轮加载 grep/find/ls。
+var readOnlyCoreToolNames = []string{"read", "grep", "find", "ls", "load_skill"}
 
 // Loader 只把一个精简的工具组目录放进首轮请求。模型确认需要某类能力后，调用
 // load_tools 按组加载真实 Tool Schema；下一轮即可调用这些工具。
@@ -82,10 +89,13 @@ func (loader *Loader) Preload(names []string) []agent.Tool {
 	return result
 }
 
-// PreloadCore 常驻研发、测试和运维任务最高频的当前时间、Shell、只读文件检索和网页研究。
-// 写文件、Skill 和其他低频能力仍按需加载，兼顾首轮执行成功率与 Token。
+// PreloadCore 使用一个稳定的小核心。可写会话优先保证读、执行和修改代码一次可达；
+// 只读会话优先保证项目探索一次可达。联网、时间和计算等通用能力按需加载。
 func (loader *Loader) PreloadCore() []agent.Tool {
-	return loader.Preload(coreToolNames)
+	if _, hasShell := loader.catalog["shell"]; hasShell {
+		return loader.Preload(codingCoreToolNames)
+	}
+	return loader.Preload(readOnlyCoreToolNames)
 }
 
 // Tool 是常驻模型上下文的唯一内置工具入口。目录只提供少量能力组，不暴露组内
@@ -93,8 +103,13 @@ func (loader *Loader) PreloadCore() []agent.Tool {
 // 只在模型选择后加入下一轮请求。
 func (loader *Loader) Tool() agent.Tool {
 	groups := make([]string, 0, len(loader.groups))
-	for group := range loader.groups {
-		groups = append(groups, group)
+	for group, names := range loader.groups {
+		for _, name := range names {
+			if _, loaded := loader.loaded[name]; !loaded {
+				groups = append(groups, group)
+				break
+			}
+		}
 	}
 	sort.Strings(groups)
 	directory := make([]string, 0, len(groups))

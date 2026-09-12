@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS ea_sessions (
 	  channel TEXT NOT NULL DEFAULT 'web',
   profile_id TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL,
+  pending_model_json BLOB NOT NULL DEFAULT X'',
   permissions_json BLOB NOT NULL DEFAULT '{}',
   workspace TEXT NOT NULL DEFAULT '',
   source_workspace TEXT NOT NULL DEFAULT '',
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS ea_messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   tool_calls_json BLOB NOT NULL,
+	tool_result_json BLOB NOT NULL DEFAULT '',
   tool_call_id TEXT NOT NULL,
   name TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -125,6 +127,31 @@ CREATE TABLE IF NOT EXISTS ea_events (
   event_json BLOB NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(session_id, seq)
+);
+CREATE TABLE IF NOT EXISTS ea_tool_operations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES ea_sessions(id) ON DELETE CASCADE,
+  runtime TEXT NOT NULL,
+  turn INTEGER NOT NULL,
+  step INTEGER NOT NULL DEFAULT 0,
+  activity_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  activity_kind TEXT NOT NULL DEFAULT '',
+  activity_source TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  input TEXT NOT NULL DEFAULT '',
+  output TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  guarantee TEXT NOT NULL DEFAULT 'observed',
+  error TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  completed_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  UNIQUE(session_id, runtime, turn, activity_id)
+);
+CREATE TABLE IF NOT EXISTS ea_model_capability_tests (
+  fingerprint TEXT PRIMARY KEY,
+  tested_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS ea_compactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,6 +195,9 @@ CREATE INDEX IF NOT EXISTS idx_ea_automation_due ON ea_automation_tasks(enabled,
 	CREATE INDEX IF NOT EXISTS idx_ea_events_session ON ea_events(session_id, seq);
 	CREATE INDEX IF NOT EXISTS idx_ea_events_session_id ON ea_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_ea_events_created ON ea_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_ea_tool_operations_session ON ea_tool_operations(session_id, turn, id);
+CREATE INDEX IF NOT EXISTS idx_ea_tool_operations_status ON ea_tool_operations(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_ea_model_capability_tests_tested ON ea_model_capability_tests(tested_at);
 CREATE INDEX IF NOT EXISTS idx_ea_compactions_session ON ea_compactions(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(enabled, updated_at);
 `
@@ -184,6 +214,33 @@ CREATE INDEX IF NOT EXISTS idx_ea_weixin_accounts_enabled ON ea_weixin_accounts(
 	if splitTurnColumn == 0 {
 		if _, err := store.db.Exec(`ALTER TABLE ea_compactions ADD COLUMN split_turn INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("迁移 ea_compactions.split_turn: %w", err)
+		}
+	}
+	var toolResultColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_messages') WHERE name='tool_result_json'`).Scan(&toolResultColumn); err != nil {
+		return err
+	}
+	if toolResultColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_messages ADD COLUMN tool_result_json BLOB NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 ea_messages.tool_result_json: %w", err)
+		}
+	}
+	var pendingModelColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_sessions') WHERE name='pending_model_json'`).Scan(&pendingModelColumn); err != nil {
+		return err
+	}
+	if pendingModelColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_sessions ADD COLUMN pending_model_json BLOB NOT NULL DEFAULT X''`); err != nil {
+			return fmt.Errorf("迁移 ea_sessions.pending_model_json: %w", err)
+		}
+	}
+	var toolGuaranteeColumn int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ea_tool_operations') WHERE name='guarantee'`).Scan(&toolGuaranteeColumn); err != nil {
+		return err
+	}
+	if toolGuaranteeColumn == 0 {
+		if _, err := store.db.Exec(`ALTER TABLE ea_tool_operations ADD COLUMN guarantee TEXT NOT NULL DEFAULT 'observed'`); err != nil {
+			return fmt.Errorf("迁移 ea_tool_operations.guarantee: %w", err)
 		}
 	}
 	// 会话工作区是会话上下文的一部分。SQLite 的 IF NOT EXISTS 不会给已经存在的

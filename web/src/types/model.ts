@@ -3,7 +3,7 @@ export type ModelSettings = {
   profileName?: string
   runtime: 'easyagent' | 'codex'
   provider: string
-  protocol: 'chat_completions' | 'responses' | 'app_server'
+  protocol: 'chat_completions' | 'responses' | 'ollama_chat' | 'anthropic_messages' | 'app_server'
   baseUrl: string
   model: string
   apiKey?: string
@@ -21,6 +21,7 @@ export type ModelProfile = {
   id: string
   name: string
   settings: ModelSettings
+  verified: boolean
 }
 
 export type ModelRules = {

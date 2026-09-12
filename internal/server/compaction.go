@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -50,9 +49,14 @@ func (server *Server) compactIfNeeded(ctx context.Context, session *store.Sessio
 			{Role: agent.RoleUser, Content: compactionInput(plan.PreviousSummary, plan.Messages)},
 		},
 		MaxOutputTokens: compactionMaxOutput(settings.MaxOutputTokens),
+		// 摘要不进入用户可见的临时正文，但模型传输仍走 Adapter 的原生流式路径。
+		OnTextDelta: func(string) {},
 	}
 	response, err := model.Generate(ctx, request)
 	duration := time.Since(startedAt)
+	if err == nil {
+		err = agent.ValidateModelResponse(&response)
+	}
 	if err != nil {
 		traceErr := server.store.AppendEvent(session.ID, store.Event{
 			Kind: "compaction_end", Turn: turn, Status: "error", Name: settings.Model, Detail: err.Error(), DurationMS: duration.Milliseconds(), CreatedAt: time.Now(),
@@ -275,8 +279,7 @@ func estimateActiveContext(session store.Session, systemPrompt string, tools []a
 	}
 	total := estimateTextTokens(systemPrompt) + estimateTextTokens(previous.Summary) + estimateStoredMessages(active)
 	for _, tool := range tools {
-		data, _ := json.Marshal(tool.Spec)
-		total += estimateTextTokens(string(data))
+		total += estimateAgentToolTokens(tool.Spec)
 	}
 	return total
 }

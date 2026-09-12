@@ -1171,6 +1171,21 @@ func TestCompactionThresholdDoesNotReserveConfiguredOutput(t *testing.T) {
 	}
 }
 
+func TestAgentToolTokenEstimateIgnoresRuntimeOnlyMetadata(t *testing.T) {
+	base := agent.ToolSpec{Name: "read", Description: "读取文件", Parameters: map[string]any{"type": "object"}}
+	decorated := base
+	decorated.ActivityKind = "tool"
+	decorated.ActivitySource = strings.Repeat("internal-metadata", 20)
+	decorated.DisplayName = "读取"
+	decorated.Group = "files"
+	decorated.GroupDescription = strings.Repeat("group-description", 20)
+	decorated.Loader = true
+	decorated.DiscoveryOnly = true
+	if estimateAgentToolTokens(base) != estimateAgentToolTokens(decorated) {
+		t.Fatal("Provider 请求估算不应包含 Runtime-only ToolSpec 元数据")
+	}
+}
+
 func TestRuntimeThresholdDoesNotWasteSmallContextWindow(t *testing.T) {
 	settings := store.ModelSettings{ContextWindowTokens: 4096, MaxOutputTokens: 1600, CompressionThresholdPercent: 75}
 	if threshold := runtimeCompactionThreshold(settings); threshold != 3072 {
@@ -1352,6 +1367,30 @@ func TestCompactOversizedRecentToolResultKeepsProtocolAndBounds(t *testing.T) {
 	}
 }
 
+func TestAdaptiveCompactionPreservesStructuredResultAndBudgetMetadata(t *testing.T) {
+	rows := make([]map[string]any, 0, 100)
+	for index := 0; index < 100; index++ {
+		rows = append(rows, map[string]any{"id": index, "message": strings.Repeat("日志", 40)})
+	}
+	structured, _ := json.Marshal(map[string]any{"rows": rows, "status": "ok"})
+	toolResult := agent.ToolResult{StructuredContent: structured}
+	messages := []agent.Message{{Role: agent.RoleTool, Name: "query", ToolCallID: "call", Content: string(structured), ToolResult: &toolResult}}
+	before := estimateAgentMessageTokens(messages)
+	compacted, changed := compactOversizedToolResults(messages, before/4)
+	if !changed || compacted[0].ToolResult == nil || compacted[0].ToolResult.Truncation == nil {
+		t.Fatalf("typed result was not adaptively compacted: %+v", compacted[0])
+	}
+	if compacted[0].ToolResult.Truncation.Strategy != "adaptive_token_budget" || compacted[0].ToolResult.Truncation.OriginalTokens != estimateTextTokens(toolResult.ModelText()) {
+		t.Fatalf("truncation metadata = %+v", compacted[0].ToolResult.Truncation)
+	}
+	if !json.Valid(compacted[0].ToolResult.StructuredContent) || !strings.Contains(string(compacted[0].ToolResult.StructuredContent), "_easyagent_truncation") {
+		t.Fatalf("structured result lost JSON shape: %s", compacted[0].ToolResult.StructuredContent)
+	}
+	if estimateAgentMessageTokens(compacted) >= before || string(messages[0].ToolResult.StructuredContent) != string(structured) {
+		t.Fatal("request copy should shrink while the original full result remains unchanged")
+	}
+}
+
 func TestHistoricalToolNamesRestoreVisibleBuiltinCalls(t *testing.T) {
 	messages := []agent.Message{
 		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
@@ -1416,6 +1455,11 @@ func newTestApplication(t *testing.T, database *store.Store, assets fstest.MapFS
 
 func newTestServer(t *testing.T, database *store.Store, assets fstest.MapFS, environment *appenv.Environment) *Server {
 	t.Helper()
+	if settings, err := database.GetModelSettings(); err == nil && settings.Runtime != store.RuntimeCodex && settings.Model != "" {
+		if err := database.RecordModelCapabilityTest(modelCapabilityFingerprint(settings), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	application, err := newServer(database, assets, environment, serverOptions{})
 	if err != nil {
 		t.Fatal(err)

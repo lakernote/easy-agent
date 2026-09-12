@@ -33,6 +33,7 @@ type Config struct {
 	Timeout              time.Duration
 	DisableThinking      bool
 	KeepThinkingForTools bool
+	DisableContinuation  bool
 }
 
 type Client struct {
@@ -42,6 +43,7 @@ type Client struct {
 	httpClient           *http.Client
 	disableThinking      bool
 	keepThinkingForTools bool
+	disableContinuation  bool
 }
 
 func New(config Config) (*Client, error) {
@@ -68,6 +70,7 @@ func New(config Config) (*Client, error) {
 	return &Client{
 		baseURL: baseURL, apiKey: strings.TrimSpace(config.APIKey), protocol: protocol, httpClient: httpClient,
 		disableThinking: config.DisableThinking, keepThinkingForTools: config.KeepThinkingForTools,
+		disableContinuation: config.DisableContinuation,
 	}, nil
 }
 
@@ -93,6 +96,14 @@ func (client *Client) Generate(ctx context.Context, request core.Request) (core.
 	return client.generateChat(ctx, request)
 }
 
+func (client *Client) Capabilities() core.ModelCapabilities {
+	return core.ModelCapabilities{
+		Provider: "openai-compatible", Protocol: string(client.protocol), Streaming: true,
+		NativeTools: true, StructuredToolResults: false, ServerContinuation: client.protocol == Responses && !client.disableContinuation,
+		MultimodalInput: true,
+	}
+}
+
 func (client *Client) post(ctx context.Context, endpoint string, payload any, protocol string, decode func([]byte) (core.Response, error)) (core.Response, error) {
 	startedAt := time.Now()
 	body, err := json.Marshal(payload)
@@ -100,6 +111,7 @@ func (client *Client) post(ctx context.Context, endpoint string, payload any, pr
 		return core.Response{}, err
 	}
 	exchange := core.Exchange{Model: requestModel(payload), Protocol: protocol, Request: string(body)}
+	decorateRequestShape(&exchange, body)
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+endpoint, bytes.NewReader(body))
 	if err != nil {
 		return core.Response{Exchange: exchange}, err
@@ -132,7 +144,33 @@ func (client *Client) post(ctx context.Context, endpoint string, payload any, pr
 	response.Exchange = exchange
 	response.Exchange.Model = exchange.Model
 	response.Exchange.Usage = response.Usage
+	response.Exchange.StopReason = response.StopReason
+	response.Exchange.IncompleteReason = response.IncompleteReason
 	return response, err
+}
+
+func decorateRequestShape(exchange *core.Exchange, body []byte) {
+	var payload struct {
+		Messages           []json.RawMessage `json:"messages"`
+		Input              []json.RawMessage `json:"input"`
+		Tools              []json.RawMessage `json:"tools"`
+		PreviousResponseID string            `json:"previous_response_id"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		exchange.HistoryMode = "unknown"
+		return
+	}
+	exchange.ToolDefinitions = len(payload.Tools)
+	if exchange.Protocol == string(Responses) {
+		exchange.HistoryMode = "responses_full_input"
+		if strings.TrimSpace(payload.PreviousResponseID) != "" {
+			exchange.HistoryMode = "provider_continuation"
+		}
+		exchange.RequestMessages = len(payload.Input)
+		return
+	}
+	exchange.HistoryMode = "full_history"
+	exchange.RequestMessages = len(payload.Messages)
 }
 
 func modelHTTPError(response *http.Response, body []byte) error {

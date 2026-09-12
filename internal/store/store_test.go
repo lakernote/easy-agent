@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,6 +136,28 @@ func TestSessionMessagesAndTraceUseSeparateRows(t *testing.T) {
 	}
 	if loaded.Events[0].ID <= 0 {
 		t.Fatalf("Trace 事件必须返回 SQLite 主键，实际为 %+v", loaded.Events[0])
+	}
+}
+
+func TestStructuredToolResultRoundTripsWithoutFlattening(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	if _, err := value.CreateSession(CreateSessionParams{ID: "typed-tool", Title: "工具结果", Model: "fixture", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	want := json.RawMessage(`{"structuredContent":{"rows":[{"id":1},{"id":2}]},"isError":true,"error":{"code":"partial","message":"部分失败"}}`)
+	if err := value.AppendMessage("typed-tool", Message{Role: "tool", Name: "lookup", ToolCallID: "call-1", Content: `{"rows":[{"id":1},{"id":2}]}`, ToolResult: want}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := value.RuntimeSession("typed-tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 1 || !reflect.DeepEqual([]byte(loaded.Messages[0].ToolResult), []byte(want)) {
+		t.Fatalf("structured tool result changed: %s", loaded.Messages[0].ToolResult)
 	}
 }
 
@@ -512,5 +536,147 @@ func TestCountOtherSessionsUsingWorkspace(t *testing.T) {
 	count, err := value.CountOtherSessionsUsingWorkspace("source", "/tmp/project")
 	if err != nil || count != 1 {
 		t.Fatalf("共享工作区引用计数异常: count=%d err=%v", count, err)
+	}
+}
+
+func TestEnqueueTurnCommitsStateAndMessageAtomically(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	if _, err := value.CreateSession(CreateSessionParams{ID: "success", Title: "成功", Model: "old", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.EnqueueTurn("success", "new", Message{Role: "user", Content: "新问题", ToolCalls: []ToolCall{}}, now); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := value.LoadSession("success")
+	if err != nil || queued.Status != "queued" || queued.Model != "new" || len(queued.Messages) != 1 || queued.Messages[0].Content != "新问题" {
+		t.Fatalf("入队事务没有一起提交状态和消息: session=%+v err=%v", queued, err)
+	}
+
+	if _, err := value.CreateSession(CreateSessionParams{ID: "rollback", Title: "回滚", Model: "old", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	attachment := Attachment{ID: "same-attachment", Name: "a.txt", MIMEType: "text/plain", Kind: "text", Size: 1, Data: []byte("a")}
+	if err := value.AppendMessage("rollback", Message{Role: "user", Content: "旧问题", Attachments: []Attachment{attachment}, ToolCalls: []ToolCall{}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	err = value.EnqueueTurn("rollback", "new", Message{Role: "user", Content: "不应提交", Attachments: []Attachment{attachment}, ToolCalls: []ToolCall{}}, now.Add(time.Second))
+	if err == nil {
+		t.Fatal("重复附件应触发事务失败")
+	}
+	rolledBack, loadErr := value.LoadSession("rollback")
+	if loadErr != nil || rolledBack.Status != "idle" || rolledBack.Model != "old" || len(rolledBack.Messages) != 1 {
+		t.Fatalf("消息写入失败后 queued 状态没有回滚: session=%+v err=%v enqueueErr=%v", rolledBack, loadErr, err)
+	}
+}
+
+func TestQueuedTurnKeepsImmutableModelSnapshot(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	settings := DefaultModelSettings()
+	settings.ProfileID, settings.ProfileName, settings.Model, settings.APIKey = "profile", "Local", "qwen-old", "old-secret"
+	if _, err := value.CreateSession(CreateSessionParams{ID: "snapshot", Title: "snapshot", ProfileID: settings.ProfileID, Model: settings.Model, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.EnqueueTurnWithSettings("snapshot", settings, Message{Role: "user", Content: "run", ToolCalls: []ToolCall{}}, now); err != nil {
+		t.Fatal(err)
+	}
+	mutated := settings
+	mutated.Model, mutated.APIKey = "qwen-new", "new-secret"
+	if err := value.SaveModelProfile(mutated); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := value.LoadSession("snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok, err := queued.QueuedModelSettings()
+	if err != nil || !ok || snapshot.Model != "qwen-old" || snapshot.APIKey != "old-secret" {
+		t.Fatalf("queued model snapshot changed: value=%+v ok=%v err=%v", snapshot, ok, err)
+	}
+	encoded, _ := json.Marshal(queued)
+	if strings.Contains(string(encoded), "old-secret") || strings.Contains(string(encoded), "pending_model") {
+		t.Fatalf("queued credentials leaked through session JSON: %s", encoded)
+	}
+}
+
+func TestFinishSessionDoesNotOverwriteCancellation(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	if _, err := value.CreateSession(CreateSessionParams{ID: "race", Title: "race", Model: "fixture", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.QueueSession("race", "fixture", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.MarkRunning("race", now); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := value.CancelSession("race", now.Add(time.Second)); err != nil || !changed {
+		t.Fatalf("cancel = %v, %v", changed, err)
+	}
+	if err := value.FinishSession("race", "response", "provider", Usage{TotalTokens: 99}, now.Add(2*time.Second)); !errors.Is(err, ErrSessionNotRunning) {
+		t.Fatalf("late finish error = %v", err)
+	}
+	finished, err := value.LoadSession("race")
+	if err != nil || finished.Status != "canceled" || finished.Usage.TotalTokens != 0 {
+		t.Fatalf("late finish overwrote cancellation: session=%+v err=%v", finished, err)
+	}
+}
+
+func TestRecoverRunningMarksEasyAgentAndCodexToolsUnknown(t *testing.T) {
+	value, err := Open(filepath.Join(t.TempDir(), "easyagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer value.Close()
+	now := time.Now()
+	for _, runtime := range []string{RuntimeEasyAgent, RuntimeCodex} {
+		id := "session-" + runtime
+		if _, err := value.CreateSession(CreateSessionParams{ID: id, Title: runtime, Runtime: runtime, Model: "fixture", CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := value.QueueSession(id, "fixture", now); err != nil {
+			t.Fatal(err)
+		}
+		if err := value.MarkRunning(id, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := value.BeginToolOperation(id, ToolOperation{Runtime: runtime, Turn: 1, Step: 2, ActivityID: "call-1", Name: "write", Input: `{"path":"result.txt"}`, StartedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := value.BeginToolOperation(id, ToolOperation{Runtime: runtime, Turn: 1, Step: 3, ActivityID: "call-1", Name: "write", StartedAt: now}); err == nil {
+			t.Fatalf("%s 重复 activity id 不应允许第二次副作用", runtime)
+		}
+	}
+	if err := value.RecoverRunning(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for _, runtime := range []string{RuntimeEasyAgent, RuntimeCodex} {
+		id := "session-" + runtime
+		operations, err := value.ListToolOperations(id)
+		expectedGuarantee := ToolGuaranteeObserved
+		if runtime == RuntimeEasyAgent {
+			expectedGuarantee = ToolGuaranteePreEffect
+		}
+		if err != nil || len(operations) != 1 || operations[0].Status != ToolOperationUnknown || operations[0].Guarantee != expectedGuarantee {
+			t.Fatalf("%s 未完成工具没有标记 unknown: operations=%+v err=%v", runtime, operations, err)
+		}
+		events, _, _, err := value.ListEventsBefore(id, 0, 20)
+		if err != nil || len(events) != 1 || events[0].Kind != "tool_unknown" || events[0].Status != ToolOperationUnknown {
+			t.Fatalf("%s 缺少可见 unknown Trace: events=%+v err=%v", runtime, events, err)
+		}
 	}
 }

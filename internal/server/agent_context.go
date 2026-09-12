@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/lakernote/easy-agent/internal/agent"
-	"github.com/lakernote/easy-agent/internal/agent/openai"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -35,7 +34,7 @@ func decorateContext(session *store.Session, settings store.ModelSettings) {
 		info.CompressedMessages = latest.CompactedMessages
 		info.RetainedMessages = max(0, historyMessages-latest.CompactedMessages)
 	}
-	if settings.Protocol == string(openai.Responses) {
+	if settings.Protocol == "responses" {
 		info.HistoryMode = "responses_full_input"
 	}
 	info.UserTurns = userTurns

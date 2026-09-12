@@ -51,7 +51,7 @@ type Context struct {
 }
 
 // Render 生成一轮会话使用的 System Prompt。System Prompt 不注入日期与时间，
-// 这类会变化的实时事实由首轮常驻的 current_time 工具按需提供。
+// 这类会变化的事实由模型按需加载 current_time 后读取。
 func Render(context Context) string {
 	runtime := "当前会话使用默认工作区。"
 	if strings.TrimSpace(context.Workspace) != "" {

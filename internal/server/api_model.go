@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lakernote/easy-agent/internal/agent/modeladapter"
 	"github.com/lakernote/easy-agent/internal/store"
 )
 
@@ -34,7 +35,16 @@ func (server *Server) saveModel(response http.ResponseWriter, request *http.Requ
 }
 
 func (server *Server) activateModelProfile(response http.ResponseWriter, request *http.Request) {
-	value, err := server.store.SetActiveModelProfile(strings.TrimSpace(request.PathValue("id")))
+	id := strings.TrimSpace(request.PathValue("id"))
+	settings, err := server.store.GetModelSettingsByProfileID(id)
+	if err == nil {
+		err = server.requireVerifiedEasyAgent(settings)
+	}
+	if err != nil {
+		writeError(response, http.StatusConflict, err.Error())
+		return
+	}
+	value, err := server.store.SetActiveModelProfile(id)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, err.Error())
 		return
@@ -88,8 +98,8 @@ func validateModel(value store.ModelSettings) error {
 	if strings.TrimSpace(value.BaseURL) == "" || strings.TrimSpace(value.Model) == "" {
 		return errors.New("模型地址和名称不能为空")
 	}
-	if value.Protocol != "chat_completions" && value.Protocol != "responses" {
-		return errors.New("协议只能是 chat_completions 或 responses")
+	if !modeladapter.Supports(value.Protocol) {
+		return errors.New("不支持的模型协议；可用：" + strings.Join(modeladapter.Protocols(), "、"))
 	}
 	if value.MaxOutputTokens <= 0 {
 		return errors.New("最大输出 Token 必须大于 0")

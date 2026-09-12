@@ -1,9 +1,13 @@
 package store
 
 import (
+	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 )
+
+var ErrSessionNotRunning = errors.New("任务已不在运行状态")
 
 // 模型配置默认值集中在这里，避免 Store、HTTP API 和 Agent Runtime
 // 各自维护一份数字，后续调整时出现行为不一致。
@@ -14,7 +18,8 @@ const (
 	ChannelWeixin                      = "weixin"
 	ChannelAutomation                  = "automation"
 	DefaultModelProtocol               = "chat_completions"
-	DefaultOllamaBaseURL               = "http://127.0.0.1:11434/v1"
+	DefaultOllamaProtocol              = "ollama_chat"
+	DefaultOllamaBaseURL               = "http://127.0.0.1:11434"
 	DefaultMaxOutputTokens             = 4096
 	DefaultMaxSteps                    = 32
 	MinMaxSteps                        = 4
@@ -68,7 +73,7 @@ type ModelProfile struct {
 func DefaultModelSettings() ModelSettings {
 	return ModelSettings{
 		Provider:                    "ollama",
-		Protocol:                    DefaultModelProtocol,
+		Protocol:                    DefaultOllamaProtocol,
 		BaseURL:                     DefaultOllamaBaseURL,
 		Thinking:                    "disabled",
 		MaxOutputTokens:             DefaultMaxOutputTokens,
@@ -93,6 +98,9 @@ func (value ModelSettings) WithDefaults() ModelSettings {
 	}
 	if value.Protocol == "" {
 		value.Protocol = DefaultModelProtocol
+		if value.IsOllama() {
+			value.Protocol = DefaultOllamaProtocol
+		}
 	}
 	if value.MaxOutputTokens == 0 {
 		value.MaxOutputTokens = DefaultMaxOutputTokens
@@ -127,4 +135,15 @@ func (value ModelSettings) IsOllama() bool {
 func (value ModelSettings) IsOfficialOpenAI() bool {
 	parsed, err := url.Parse(strings.TrimSpace(value.BaseURL))
 	return err == nil && strings.EqualFold(parsed.Hostname(), "api.openai.com")
+}
+
+func (value Session) QueuedModelSettings() (ModelSettings, bool, error) {
+	if len(value.PendingModel) == 0 {
+		return ModelSettings{}, false, nil
+	}
+	var settings ModelSettings
+	if err := json.Unmarshal(value.PendingModel, &settings); err != nil {
+		return ModelSettings{}, false, err
+	}
+	return settings.WithDefaults(), true, nil
 }

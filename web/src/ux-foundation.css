@@ -107,14 +107,11 @@ button { touch-action: manipulation; }
   border-bottom: 1px solid #edf1f6;
   color: #53627a;
 }
-.composer-readiness > span { width: 7px; height: 7px; border-radius: 50%; background: #38a169; }
+.composer-readiness > span { width: 7px; height: 7px; border-radius: 50%; background: #c45249; }
 .composer-readiness > div { min-width: 0; }
 .composer-readiness strong,
 .composer-readiness small { display: inline; font-size: var(--type-caption); }
 .composer-readiness small { margin-left: 8px; color: #7b8798; }
-.composer-readiness.warning > span { background: #c98a24; }
-.composer-readiness.blocked > span { background: #c45249; }
-.composer-readiness.warning { color: #805f25; background: #fffbef; }
 .composer-readiness.blocked { color: #95463f; background: #fff7f5; }
 .composer-readiness button {
   min-height: 30px;

@@ -71,7 +71,7 @@ kill "$(cat easyagent.pid)" # 停止服务
 
 | Runtime | 适合场景 | 要求 |
 | --- | --- | --- |
-| EasyAgent | 使用 Ollama、OpenAI、Groq 等 OpenAI-compatible 模型和 EasyAgent 工具循环 | 在页面配置模型 |
+| EasyAgent | 使用原生 Ollama、Anthropic，或 OpenAI Chat/Responses 服务和 EasyAgent 工具循环 | 模型必须支持协议原生 Function Calling；四种协议均使用流式 API |
 | Codex | 使用 Codex thread、原生工具、Skill 和沙箱处理代码任务 | 服务器安装 Codex CLI |
 
 请在运行 EasyAgent 的服务器终端中手动安装 Codex CLI：
@@ -88,6 +88,16 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 - 支持排队、暂停、继续、停止和重启恢复；默认并发 4、单轮最长 12 小时，均可在设置中调整。
 - Git 项目可按会话创建 worktree；源仓库有未提交修改时不会自动隔离。Codex 会话还支持 thread 继续、读取和分支。
 
+开发环境可以用同一套原生 Function Calling 门禁比较多个模型。命令会按通过率、平均 Token、总耗时和首个可见输出时间排序；API Key 只允许通过指定环境变量读取，不接受命令行明文：
+
+```bash
+go run ./cmd/easyagent-eval \
+  -models qwen3:14b-16k,qwen2.5-coder:14b \
+  -runs 3
+```
+
+这是一项模型/Provider 资格测试，不等同于完整 coding-agent 排行榜；真实 Agent 质量还应使用固定仓库任务、隔离工作区和可验证断言评测。
+
 <p align="center">
   <img src="docs/images/model-and-tools.png" alt="EasyAgent 运行时与模型设置" width="920" />
 </p>
@@ -96,7 +106,9 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
 内置 Skills 聚焦项目理解、问题分析、代码审查、API 设计、测试与 E2E、事故 RCA、发布工程、文档维护、Git worktree 和网页研究。GitHub、Context7、Playwright、OpenAI Docs 等 MCP 可在设置页启用，供两个 Runtime 共用。
 
-Skills 和大型工具组按需加载，减少无关上下文。网页研究会先发现候选，再读取原始来源后回答。
+默认工具面参考 PI 保持为 `read`、`shell`、`edit`、`write` 小核心；只读模式改用文件探索核心。Skill 入口直接可用，其余内置工具和大型工具组按需加载，减少中小模型的无关 Schema 与往返。网页研究会先发现候选，再读取原始来源后回答。
+
+设计取舍和后续测试建设见 [PI 对照复审：搜索边界与 Agent 测试版图](docs/pi-runtime-review.md)。
 
 `web_research` 是模型唯一可见的联网入口。模型根据语义填写数据类型、查询对象、时间范围和研究深度；复杂问题还可给出 2–4 条互补检索式。Runtime 负责限制查询预算，并执行结构化数据读取、多源搜索、安全抓取、去重和引用整理。Tavily、SearXNG、Brave Search、Firecrawl、Reader 与 GitHub Token 可在 **设置 → 工具与 MCP → Web Research** 配置并执行真实连接测试，保存后下一轮立即生效；也可以继续使用环境变量部署。
 

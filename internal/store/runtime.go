@@ -36,7 +36,7 @@ func (store *Store) messagesAfter(id string, afterID int64) ([]Message, int, int
 	if err := store.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN role='user' THEN 1 ELSE 0 END),0) FROM ea_messages WHERE session_id=?`, id).Scan(&count, &userTurns); err != nil {
 		return nil, 0, 0, err
 	}
-	rows, err := store.db.Query(`SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? AND id>? ORDER BY seq`, id, afterID)
+	rows, err := store.db.Query(`SELECT id,role,content,tool_calls_json,tool_result_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? AND id>? ORDER BY seq`, id, afterID)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -44,14 +44,17 @@ func (store *Store) messagesAfter(id string, afterID int64) ([]Message, int, int
 	result := []Message{}
 	for rows.Next() {
 		var value Message
-		var data []byte
+		var data, toolResult []byte
 		var created string
-		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &value.ToolCallID, &value.Name, &created); err != nil {
+		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &toolResult, &value.ToolCallID, &value.Name, &created); err != nil {
 			return nil, 0, 0, err
 		}
 		_ = json.Unmarshal(data, &value.ToolCalls)
 		if value.ToolCalls == nil {
 			value.ToolCalls = []ToolCall{}
+		}
+		if len(toolResult) > 0 && json.Valid(toolResult) {
+			value.ToolResult = append(json.RawMessage(nil), toolResult...)
 		}
 		value.Attachments = []Attachment{}
 		value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -64,7 +67,7 @@ func (store *Store) messagesAfter(id string, afterID int64) ([]Message, int, int
 	for _, message := range result {
 		messageIDs = append(messageIDs, message.ID)
 	}
-	attachments, err := store.messageAttachmentsForIDs(id, messageIDs)
+	attachments, err := store.messageAttachmentsForIDs(id, messageIDs, true)
 	if err != nil {
 		return nil, 0, 0, err
 	}

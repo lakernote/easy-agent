@@ -94,15 +94,21 @@ func TestRunnerForcesUserSelectedTool(t *testing.T) {
 			}
 			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "call-1", Name: "calculate", Arguments: json.RawMessage(`{"expression":"17*19"}`)}}}}, nil
 		}
+		if len(request.Tools) != 1 || request.Tools[0].Name != "calculate" {
+			t.Fatalf("@tool 作用域必须在后续模型回合保持稳定: %+v", request.Tools)
+		}
 		return Response{Message: Message{Content: "323"}}, nil
 	})
-	runner, err := NewRunner(model, "fixture", []Tool{{
-		Spec: ToolSpec{Name: "calculate"},
-		Run: func(context.Context, json.RawMessage) (string, error) {
-			toolCalls++
-			return `{"result":"323"}`, nil
+	runner, err := NewRunner(model, "fixture", []Tool{
+		{
+			Spec: ToolSpec{Name: "calculate"},
+			Run: func(context.Context, json.RawMessage) (string, error) {
+				toolCalls++
+				return `{"result":"323"}`, nil
+			},
 		},
-	}})
+		{Spec: ToolSpec{Name: "shell"}, Run: func(context.Context, json.RawMessage) (string, error) { return "unused", nil }},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +236,32 @@ func TestRunnerRetriesTransientProviderErrorInSameStep(t *testing.T) {
 	}
 	if len(events) != 4 || events[0].Attempt != 1 || events[2].Attempt != 2 || events[1].Err == nil || events[3].Err != nil {
 		t.Fatalf("重试 Trace 不完整: %+v", events)
+	}
+}
+
+func TestRunnerResetsPartialOutputBeforeRetry(t *testing.T) {
+	calls := 0
+	visible := ""
+	resets := 0
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			request.OnTextDelta("stale")
+			return Response{Exchange: Exchange{StatusCode: 503}}, &ModelError{StatusCode: 503, Message: "temporarily unavailable", RetryAfter: time.Millisecond}
+		}
+		request.OnTextDelta("fresh")
+		return Response{Message: Message{Content: "fresh"}}, nil
+	}), "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), RunRequest{
+		Messages:    []Message{{Role: RoleUser, Content: "回答"}},
+		OnTextDelta: func(delta string) { visible += delta },
+		OnTextReset: func() { visible = ""; resets++ },
+	})
+	if err != nil || result.Answer != "fresh" || visible != "fresh" || resets != 1 {
+		t.Fatalf("重试没有原子替换上一 Attempt 输出: result=%+v visible=%q resets=%d err=%v", result, visible, resets, err)
 	}
 }
 
@@ -792,5 +824,166 @@ func TestRunnerDoesNotTraceModelStartBeforePreparation(t *testing.T) {
 	})
 	if !errors.Is(err, prepareErr) || modelCalls != 0 || len(events) != 0 {
 		t.Fatalf("准备失败前不应写入 model_start: err=%v calls=%d events=%+v", err, modelCalls, events)
+	}
+}
+
+func TestRunnerRejectsTruncatedToolCallWithoutExecutingIt(t *testing.T) {
+	toolRuns := 0
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		return Response{
+			Message:          Message{ToolCalls: []ToolCall{{ID: "danger-1", Name: "write", Arguments: json.RawMessage(`{"path":"result.txt"}`)}}},
+			StopReason:       StopReasonLength,
+			IncompleteReason: "max_output_tokens",
+		}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "write"},
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			toolRuns++
+			return "ok", nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "写文件"}}})
+	var incomplete *IncompleteModelResponseError
+	if !errors.As(err, &incomplete) || incomplete.StopReason != StopReasonLength || toolRuns != 0 {
+		t.Fatalf("截断响应不应执行工具: err=%v incomplete=%+v toolRuns=%d", err, incomplete, toolRuns)
+	}
+}
+
+func TestRunnerPersistsToolStartBeforeSideEffect(t *testing.T) {
+	toolRuns := 0
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		return Response{Message: Message{ToolCalls: []ToolCall{{ID: "write-1", Name: "write", Arguments: json.RawMessage(`{}`)}}}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "write"},
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			toolRuns++
+			return "ok", nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerErr := errors.New("sqlite unavailable")
+	_, err = runner.Run(context.Background(), RunRequest{
+		Messages: []Message{{Role: RoleUser, Content: "写文件"}},
+		OnToolLifecycle: func(event Event) error {
+			if event.Kind == EventToolStart {
+				return ledgerErr
+			}
+			return nil
+		},
+	})
+	if !errors.Is(err, ledgerErr) || toolRuns != 0 {
+		t.Fatalf("工具账本开始记录失败时仍执行了副作用: err=%v toolRuns=%d", err, toolRuns)
+	}
+}
+
+func TestRunnerRejectsOversizedToolResultWithoutPersistingPayload(t *testing.T) {
+	calls := 0
+	var second Request
+	var toolEvent Event
+	runner, err := NewRunner(modelFunc(func(_ context.Context, request Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "large-1", Name: "large", Arguments: json.RawMessage(`{}`)}}}}, nil
+		}
+		second = request
+		return Response{Message: Message{Content: "工具结果过大"}}, nil
+	}), "fixture", []Tool{{
+		Spec: ToolSpec{Name: "large"},
+		Execute: func(context.Context, json.RawMessage) (ToolResult, error) {
+			return ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Repeat("x", MaxToolResultBlockBytes+1)}}}, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) {
+		if event.Kind == EventToolEnd {
+			toolEvent = event
+		}
+	}
+	result, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "运行"}}})
+	if err != nil || result.Answer != "工具结果过大" || toolEvent.Err == nil || len(second.NewMessages) != 1 {
+		t.Fatalf("超大结果处理异常: result=%+v event=%+v request=%+v err=%v", result, toolEvent, second, err)
+	}
+	output := second.NewMessages[0].Content
+	if len(output) > 4096 || !strings.Contains(output, "tool_result_too_large") {
+		t.Fatalf("超大原文不应进入历史，只应保存结构化错误: len=%d output=%q", len(output), output)
+	}
+}
+
+func TestRunnerRejectsOversizedFailedToolResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		execute func(context.Context, json.RawMessage) (ToolResult, error)
+	}{
+		{
+			name: "partial payload",
+			execute: func(context.Context, json.RawMessage) (ToolResult, error) {
+				return ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Repeat("x", MaxToolResultBlockBytes+1)}}}, errors.New("上游失败")
+			},
+		},
+		{
+			name: "error metadata",
+			execute: func(context.Context, json.RawMessage) (ToolResult, error) {
+				return ToolResult{}, errors.New(strings.Repeat("x", MaxToolResultBlockBytes+1))
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+				return Response{}, nil
+			}), "fixture", []Tool{{Spec: ToolSpec{Name: "large"}, Execute: test.execute}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, runErr, _, lifecycleErr, started := runner.runTool(context.Background(), 1, ToolCall{ID: "large-1", Name: "large", Arguments: json.RawMessage(`{}`)}, time.Second, nil)
+			var failure *ToolError
+			if !started || lifecycleErr != nil || !errors.As(runErr, &failure) || failure.Code != "tool_result_too_large" {
+				t.Fatalf("失败工具没有经过结果大小门禁: started=%v err=%v lifecycle=%v", started, runErr, lifecycleErr)
+			}
+			output := result.ModelText()
+			if len(output) > 4096 || !strings.Contains(output, "tool_result_too_large") {
+				t.Fatalf("超大失败结果没有替换为有界错误: len=%d output=%q", len(output), output)
+			}
+		})
+	}
+}
+
+func TestRunnerEmitsRejectedEventForToolThatNeverStarted(t *testing.T) {
+	calls := 0
+	events := []Event{}
+	runner, err := NewRunner(modelFunc(func(context.Context, Request) (Response, error) {
+		calls++
+		if calls == 1 {
+			return Response{Message: Message{ToolCalls: []ToolCall{{ID: "missing-1", Name: "missing", Arguments: json.RawMessage(`{}`)}}}}, nil
+		}
+		return Response{Message: Message{Content: "无法执行"}}, nil
+	}), "fixture", []Tool{{Spec: ToolSpec{Name: "available"}, Run: func(context.Context, json.RawMessage) (string, error) { return "ok", nil }}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.Observe = func(event Event) { events = append(events, event) }
+	if _, err := runner.Run(context.Background(), RunRequest{Messages: []Message{{Role: RoleUser, Content: "运行"}}}); err != nil {
+		t.Fatal(err)
+	}
+	rejected, started, ended := 0, 0, 0
+	for _, event := range events {
+		switch event.Kind {
+		case EventToolReject:
+			rejected++
+		case EventToolStart:
+			started++
+		case EventToolEnd:
+			ended++
+		}
+	}
+	if rejected != 1 || started != 0 || ended != 0 {
+		t.Fatalf("未执行工具的生命周期不正确: rejected=%d started=%d ended=%d events=%+v", rejected, started, ended, events)
 	}
 }

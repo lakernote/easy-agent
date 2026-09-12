@@ -21,8 +21,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const maxToolOutput = 24 * 1024
-
 var invalidToolName = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 // ToolInfo 是连接测试返回给页面的精简工具说明。
@@ -76,24 +74,29 @@ func Connect(ctx context.Context, environment *appenv.Environment, config Config
 		name := prefix + safeName(remote.Name)
 		schema := normalizeSchema(remote.InputSchema)
 		connection.Info = append(connection.Info, ToolInfo{Name: name, Description: remote.Description})
+		execute := func(callContext context.Context, raw json.RawMessage) (agent.ToolResult, error) {
+			var arguments any = map[string]any{}
+			if len(raw) > 0 && string(raw) != "null" {
+				if err := json.Unmarshal(raw, &arguments); err != nil {
+					return agent.ToolResult{}, fmt.Errorf("MCP 工具参数错误: %w", err)
+				}
+			}
+			result, err := session.CallTool(callContext, &mcp.CallToolParams{Name: remote.Name, Arguments: arguments})
+			if err != nil {
+				return agent.ToolResult{}, err
+			}
+			output := convertResult(result)
+			if output.IsError {
+				return output, &agent.ToolError{Code: "mcp_tool_error", Message: "MCP 工具 " + remote.Name + " 返回失败", Retryable: false}
+			}
+			return output, nil
+		}
 		connection.Tools = append(connection.Tools, agent.Tool{
-			Spec: agent.ToolSpec{Name: name, Description: remote.Description, Parameters: schema, ActivityKind: "mcp", ActivitySource: config.ID, DisplayName: remote.Name},
+			Spec:    agent.ToolSpec{Name: name, Description: remote.Description, Parameters: schema, ActivityKind: "mcp", ActivitySource: config.ID, DisplayName: remote.Name},
+			Execute: execute,
 			Run: func(callContext context.Context, raw json.RawMessage) (string, error) {
-				var arguments any = map[string]any{}
-				if len(raw) > 0 && string(raw) != "null" {
-					if err := json.Unmarshal(raw, &arguments); err != nil {
-						return "", fmt.Errorf("MCP 工具参数错误: %w", err)
-					}
-				}
-				result, err := session.CallTool(callContext, &mcp.CallToolParams{Name: remote.Name, Arguments: arguments})
-				if err != nil {
-					return "", err
-				}
-				output := formatResult(result)
-				if result.IsError {
-					return output, errors.New(output)
-				}
-				return output, nil
+				result, err := execute(callContext, raw)
+				return result.ModelText(), err
 			},
 		})
 	}
@@ -167,34 +170,38 @@ func normalizeSchema(value any) map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": true}
 }
 
-func formatResult(result *mcp.CallToolResult) string {
+func convertResult(result *mcp.CallToolResult) agent.ToolResult {
 	if result == nil {
-		return "{}"
+		return agent.NewToolResult("{}")
 	}
+	converted := agent.ToolResult{IsError: result.IsError}
 	if result.StructuredContent != nil {
 		if data, err := json.Marshal(result.StructuredContent); err == nil {
-			return truncate(string(data))
+			converted.StructuredContent = data
 		}
 	}
-	parts := make([]string, 0, len(result.Content))
 	for _, content := range result.Content {
-		if text, ok := content.(*mcp.TextContent); ok {
-			parts = append(parts, text.Text)
-			continue
-		}
-		if data, err := content.MarshalJSON(); err == nil {
-			parts = append(parts, string(data))
+		switch value := content.(type) {
+		case *mcp.TextContent:
+			converted.Content = append(converted.Content, agent.ContentBlock{Type: "text", Text: value.Text})
+		case *mcp.ImageContent:
+			converted.Content = append(converted.Content, agent.ContentBlock{Type: "image", MIMEType: value.MIMEType, Data: append([]byte(nil), value.Data...)})
+		case *mcp.AudioContent:
+			converted.Content = append(converted.Content, agent.ContentBlock{Type: "audio", MIMEType: value.MIMEType, Data: append([]byte(nil), value.Data...)})
+		case *mcp.ResourceLink:
+			converted.Content = append(converted.Content, agent.ContentBlock{Type: "resource_link", Name: value.Name, MIMEType: value.MIMEType, URI: value.URI})
+		default:
+			if data, err := content.MarshalJSON(); err == nil {
+				converted.Content = append(converted.Content, agent.ContentBlock{Type: "json", JSON: data})
+			}
 		}
 	}
-	return truncate(strings.Join(parts, "\n"))
-}
-
-func truncate(value string) string {
-	if len(value) <= maxToolOutput {
-		return value
+	if converted.Empty() {
+		fallback := agent.NewToolResult("{}")
+		fallback.IsError = result.IsError
+		return fallback
 	}
-	half := maxToolOutput / 2
-	return value[:half] + fmt.Sprintf("\n… MCP 输出已截断 %d 字节 …\n", len(value)-maxToolOutput) + value[len(value)-half:]
+	return converted
 }
 
 func safeName(value string) string {

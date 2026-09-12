@@ -26,6 +26,13 @@ export type Message = {
   id: number
   role: 'user' | 'assistant' | 'tool' | 'system'
   content?: string
+  toolResult?: {
+    content?: Array<{ type: string; text?: string; json?: unknown; name?: string; mimeType?: string; artifactId?: string; uri?: string }>
+    structuredContent?: unknown
+    isError?: boolean
+    error?: { code?: string; message: string; hint?: string; retryable?: boolean }
+    truncation?: { strategy: string; originalTokens: number; retainedTokens: number; omittedItems?: number }
+  }
   attachments: Attachment[]
   toolCalls: ToolCall[]
   toolCallId?: string
@@ -47,6 +54,8 @@ export type TraceEvent = {
   activitySource?: string
   displayName?: string
   status: string
+  stopReason?: string
+  incompleteReason?: string
   detail?: string
   input?: string
   output?: string

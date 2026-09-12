@@ -71,6 +71,7 @@ export function useChatComposer({ session, data, onSession, onRefresh, onError, 
     const settings = selectedProfile.settings
     if (!settings.provider || !settings.baseUrl || !settings.model) return { tone: 'blocked', label: '配置不完整', detail: '请补全 Provider、服务地址和模型名称。', canSend: false }
     if (settings.provider.toLocaleLowerCase() === 'ollama' && !data.ollama.running) return { tone: 'blocked', label: 'Ollama 未连接', detail: data.ollama.message || '请先启动 Ollama，再重新选择模型。', canSend: false }
+    if (!selectedProfile.verified) return { tone: 'blocked', label: '模型尚未验证', detail: '请到模型配置运行一次测试；EasyAgent 只接受协议原生 Function Call。', canSend: false }
     if (settings.provider.toLocaleLowerCase() !== 'ollama' && !settings.secretConfigured) return { tone: 'warning', label: '建议先测试', detail: '当前配置没有已保存的 API Key；无需认证的兼容服务仍可直接使用。', canSend: true }
     return { tone: 'warning', label: '配置已保存', detail: `${settings.provider} · ${settings.model}；发送时由 Provider 实际验证，建议先测试连接。`, canSend: true }
   }, [data.codex, data.ollama.message, data.ollama.running, isCodexRuntime, selectedProfile, selectedProject, session])

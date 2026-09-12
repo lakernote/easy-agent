@@ -90,9 +90,20 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	}
 	var lastProgressAt time.Time
 	var lastProgressName string
+	var observedUsage codexruntime.Usage
 	effectiveModel := strings.TrimSpace(settings.Model)
 	completedActivities := make(map[string]struct{})
-	result, runErr := codexruntime.RunMessage(ctx, codexruntime.Config{
+	activityIDs := newCodexActivityResolver()
+	runtimeContext, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
+	var persistenceErr error
+	recordPersistenceError := func(err error) {
+		if err != nil && persistenceErr == nil {
+			persistenceErr = err
+			cancelRuntime()
+		}
+	}
+	result, runErr := codexruntime.RunMessage(runtimeContext, codexruntime.Config{
 		Path: status.Path, Workspace: workspace, AdditionalDirectories: directories, Model: settings.Model, Provider: settings.Provider, ThreadID: session.ResponseID,
 		DeveloperInstructions: codexDeveloperInstructions,
 		Timeout:               time.Duration(turnTimeoutSeconds) * time.Second,
@@ -108,6 +119,7 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 			}
 		},
 		OnUsage: func(value codexruntime.Usage) {
+			observedUsage = value
 			server.tasks.setUsage(session.ID, store.Usage{
 				InputTokens: value.InputTokens, OutputTokens: value.OutputTokens,
 				CachedTokens: value.CachedInputTokens, CacheWriteTokens: value.CacheWriteInputTokens,
@@ -118,6 +130,31 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 		},
 		OnEvent: func(event codexruntime.Event) {
 			server.tasks.setProgress(session.ID, codexProgress(event))
+			if event.Kind == "codex_item" && (event.ActivityKind == "tool" || event.ActivityKind == "mcp") {
+				identity := activityIDs.resolve(event)
+				event.ActivityID = identity.ID
+				now := time.Now()
+				operation := store.ToolOperation{
+					Runtime: store.RuntimeCodex, Turn: session.UserTurnCount,
+					Guarantee:  identity.Guarantee,
+					ActivityID: event.ActivityID, Name: event.Name, ActivityKind: event.ActivityKind,
+					ActivitySource: event.ActivitySource, DisplayName: event.DisplayName,
+					Input: redactTraceAttachmentData(event.Input), Output: redactTraceAttachmentData(event.Output),
+					StartedAt: now,
+				}
+				if event.Status == "started" {
+					recordPersistenceError(server.store.BeginToolOperation(session.ID, operation))
+				} else {
+					operation.StartedAt = now.Add(-event.Duration)
+					operation.CompletedAt = now
+					operation.Status = store.ToolOperationSucceeded
+					if event.Status == "error" {
+						operation.Status = store.ToolOperationFailed
+						operation.Error = event.Detail
+					}
+					recordPersistenceError(server.store.SettleToolOperation(session.ID, operation))
+				}
+			}
 			if isCompletedCodexBusinessActivity(event) {
 				key := strings.TrimSpace(event.ActivityID)
 				if key == "" {
@@ -144,17 +181,60 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 				lastProgressAt = time.Now()
 				lastProgressName = event.Name
 			}
-			_ = server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, ProtocolMethod: event.ProtocolMethod, RawPayload: redactTraceAttachmentData(event.RawPayload), Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: redactTraceAttachmentData(event.Input), Output: redactTraceAttachmentData(event.Output), ActivityID: event.ActivityID, ActivityKind: event.ActivityKind, ActivitySource: event.ActivitySource, DisplayName: event.DisplayName, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()})
+			recordPersistenceError(server.store.AppendEvent(session.ID, store.Event{Kind: event.Kind, ProtocolMethod: event.ProtocolMethod, RawPayload: redactTraceAttachmentData(event.RawPayload), Turn: session.UserTurnCount, Status: event.Status, Name: event.Name, Detail: event.Detail, Input: redactTraceAttachmentData(event.Input), Output: redactTraceAttachmentData(event.Output), ActivityID: event.ActivityID, ActivityKind: event.ActivityKind, ActivitySource: event.ActivitySource, DisplayName: event.DisplayName, DurationMS: event.Duration.Milliseconds(), CreatedAt: time.Now()}))
 		},
 		OnServerRequest: func(request codexruntime.ServerRequest) (any, error) {
-			return server.awaitCodexRequest(ctx, session.ID, request)
+			return server.awaitCodexRequest(runtimeContext, session.ID, request)
 		},
 	}, message)
+	unknownReason := "Codex app-server 未提供可确定配对的工具终态；该账本仅表示已观察到通知，不会自动重放"
+	if ledgerErr := server.store.MarkUnfinishedToolOperationsUnknown(session.ID, store.RuntimeCodex, session.UserTurnCount, unknownReason, time.Now()); ledgerErr != nil {
+		if runErr == nil {
+			runErr = fmt.Errorf("收敛 Codex 工具账本失败: %w", ledgerErr)
+		} else {
+			runErr = fmt.Errorf("%v；收敛 Codex 工具账本失败: %w", runErr, ledgerErr)
+		}
+	}
+	if persistenceErr != nil {
+		runErr = fmt.Errorf("保存 Codex 工具账本或 Trace 失败: %w", persistenceErr)
+	}
 	if runErr != nil {
+		stopReason := "error"
+		incompleteReason := runErr.Error()
+		var termination *codexruntime.TurnTerminationError
+		if errors.As(runErr, &termination) {
+			stopReason = termination.StopReason
+			incompleteReason = termination.Detail
+		}
 		if errors.Is(runErr, context.DeadlineExceeded) {
 			runErr = fmt.Errorf("Codex 整轮任务超过 %d 秒上限: %w", turnTimeoutSeconds, runErr)
+			stopReason = "interrupted"
+			incompleteReason = runErr.Error()
+		} else if errors.Is(runErr, context.Canceled) {
+			stopReason = "interrupted"
+			incompleteReason = "Codex turn 已取消；不会接受或续跑部分结果"
 		}
-		_ = server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "error", Name: effectiveModel, Detail: runErr.Error(), DurationMS: time.Since(startedAt).Milliseconds(), CreatedAt: time.Now()})
+		failureDuration := time.Since(startedAt)
+		if observedUsage.Reported {
+			usage.ModelCalls++
+			usage.ModelDurationMS += failureDuration.Milliseconds()
+			usage.InputTokens += observedUsage.InputTokens
+			usage.OutputTokens += observedUsage.OutputTokens
+			usage.CachedTokens += observedUsage.CachedInputTokens
+			usage.CacheWriteTokens += observedUsage.CacheWriteInputTokens
+			usage.TotalTokens += observedUsage.TotalTokens
+			usage.CacheReported = true
+			usage.ContextWindowTokens = observedUsage.ModelContextWindow
+			_ = server.store.AppendEvent(session.ID, store.Event{
+				Kind: "codex_usage", Turn: session.UserTurnCount, Status: "error", Name: effectiveModel,
+				ProtocolMethod: "thread/tokenUsage/updated", Detail: "本轮未完整结束；保留已上报用量",
+				InputTokens: observedUsage.InputTokens, OutputTokens: observedUsage.OutputTokens,
+				CachedTokens: observedUsage.CachedInputTokens, CacheWriteTokens: observedUsage.CacheWriteInputTokens,
+				CacheReported: true, TotalTokens: observedUsage.TotalTokens,
+				ContextWindowTokens: observedUsage.ModelContextWindow, Protocol: "codex_app_server", CreatedAt: time.Now(),
+			})
+		}
+		_ = server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "error", StopReason: stopReason, IncompleteReason: incompleteReason, Name: effectiveModel, Detail: runErr.Error(), DurationMS: failureDuration.Milliseconds(), CreatedAt: time.Now()})
 		return runErr
 	}
 	if model := strings.TrimSpace(result.Model); model != "" {
@@ -184,11 +264,51 @@ func (server *Server) runCodexTurn(ctx context.Context, session store.Session, s
 	if err := server.store.AppendMessage(session.ID, store.Message{Role: "assistant", Content: result.Answer, ToolCalls: []store.ToolCall{}, Attachments: []store.Attachment{}, CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex 回答: %w", err)
 	}
-	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", Name: effectiveModel, Output: result.Answer, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
+	if err := server.store.AppendEvent(session.ID, store.Event{Kind: "codex_end", Turn: session.UserTurnCount, Status: "success", StopReason: result.StopReason, Name: effectiveModel, Output: result.Answer, Protocol: "codex_app_server", DurationMS: result.Duration.Milliseconds(), CreatedAt: time.Now()}); err != nil {
 		return fmt.Errorf("保存 Codex Trace: %w", err)
 	}
 	providerKey := strings.Join([]string{"codex", effectiveModel, status.Path}, "|")
 	return server.store.FinishSession(session.ID, result.ThreadID, providerKey, *usage, time.Now())
+}
+
+type codexActivityIdentity struct {
+	ID        string
+	Guarantee string
+}
+
+type codexActivityResolver struct {
+	sequence int
+	pending  map[string][]string
+}
+
+func newCodexActivityResolver() *codexActivityResolver {
+	return &codexActivityResolver{pending: make(map[string][]string)}
+}
+
+func (resolver *codexActivityResolver) nextID() string {
+	resolver.sequence++
+	return fmt.Sprintf("codex-fallback-%d", resolver.sequence)
+}
+
+// resolve only pairs a missing-ID terminal event when exactly one matching
+// start is pending. Multiple identical concurrent calls are intentionally left
+// unknown instead of guessing FIFO and attaching a result to the wrong effect.
+func (resolver *codexActivityResolver) resolve(event codexruntime.Event) codexActivityIdentity {
+	if id := strings.TrimSpace(event.ActivityID); id != "" {
+		return codexActivityIdentity{ID: id, Guarantee: store.ToolGuaranteeObserved}
+	}
+	key := event.Name + "\x00" + event.Input
+	if event.Status == "started" {
+		id := resolver.nextID()
+		resolver.pending[key] = append(resolver.pending[key], id)
+		return codexActivityIdentity{ID: id, Guarantee: store.ToolGuaranteeObserved}
+	}
+	pending := resolver.pending[key]
+	if len(pending) == 1 {
+		delete(resolver.pending, key)
+		return codexActivityIdentity{ID: pending[0], Guarantee: store.ToolGuaranteeObserved}
+	}
+	return codexActivityIdentity{ID: resolver.nextID(), Guarantee: store.ToolGuaranteeUncorrelated}
 }
 
 func isCompletedCodexBusinessActivity(event codexruntime.Event) bool {

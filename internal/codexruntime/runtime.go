@@ -191,15 +191,36 @@ type eventTimers struct {
 }
 
 type Result struct {
-	ThreadID     string
-	Model        string
-	Provider     string
-	Answer       string
-	Usage        Usage
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-	Duration     time.Duration
+	ThreadID         string
+	Model            string
+	Provider         string
+	Answer           string
+	StopReason       string
+	IncompleteReason string
+	Usage            Usage
+	InputTokens      int
+	OutputTokens     int
+	TotalTokens      int
+	Duration         time.Duration
+}
+
+// TurnTerminationError preserves the app-server turn status instead of
+// collapsing interrupted, failed, and protocol-incomplete turns into a generic
+// error. Callers can persist the exact outcome without accepting partial text.
+type TurnTerminationError struct {
+	Status     string
+	StopReason string
+	Detail     string
+}
+
+func (failure *TurnTerminationError) Error() string {
+	if failure == nil {
+		return ""
+	}
+	if strings.TrimSpace(failure.Detail) != "" {
+		return failure.Detail
+	}
+	return fmt.Sprintf("Codex turn 未完整结束（%s）", failure.Status)
 }
 
 type rpcMessage struct {
@@ -556,8 +577,9 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			}
 			_ = json.Unmarshal(message.Params, &params)
 			consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
-			if codexStatus(params.Turn.Status) == "error" {
-				return Result{}, rpcError(params.Turn.Error)
+			stopReason, detail := codexTurnTermination(params.Turn.Status, params.Turn.Error)
+			if stopReason != "stop" {
+				return Result{}, &TurnTerminationError{Status: params.Turn.Status, StopReason: stopReason, Detail: detail}
 			}
 			if answer.Len() == 0 {
 				answer.WriteString(extractCompletedAgentText(message.Params))
@@ -565,9 +587,34 @@ func RunMessage(ctx context.Context, config Config, userMessage string) (Result,
 			if strings.TrimSpace(answer.String()) == "" {
 				return Result{}, errors.New("Codex Runtime 未返回可用回答")
 			}
-			return Result{ThreadID: threadID, Model: thread.Model, Provider: thread.ModelProvider, Answer: strings.TrimSpace(answer.String()), Usage: latestUsage, Duration: time.Since(startedAt)}, nil
+			return Result{ThreadID: threadID, Model: thread.Model, Provider: thread.ModelProvider, Answer: strings.TrimSpace(answer.String()), StopReason: stopReason, Usage: latestUsage, Duration: time.Since(startedAt)}, nil
 		}
 		consumeNotificationWithAnswer(message, config, &answer, timers, &latestUsage)
+	}
+}
+
+func codexTurnTermination(status string, rawError json.RawMessage) (string, string) {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	normalized = strings.ReplaceAll(strings.ReplaceAll(normalized, "_", ""), "-", "")
+	detail := rpcErrorText(rawError)
+	switch normalized {
+	case "completed":
+		return "stop", ""
+	case "interrupted", "canceled", "cancelled":
+		if detail == "" {
+			detail = "Codex turn 已中断；不会接受或续跑部分结果"
+		}
+		return "interrupted", detail
+	case "failed", "error":
+		if detail == "" {
+			detail = "Codex turn 执行失败"
+		}
+		return "error", detail
+	default:
+		if detail == "" {
+			detail = fmt.Sprintf("Codex app-server 返回非终态或未知状态 %q", status)
+		}
+		return "incomplete", detail
 	}
 }
 

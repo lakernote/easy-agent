@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -11,12 +13,12 @@ func (store *Store) messagesWindow(id string, limit int, before int64) ([]Messag
 	if err := store.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN role='user' THEN 1 ELSE 0 END),0) FROM ea_messages WHERE session_id=?`, id).Scan(&count, &userTurns); err != nil {
 		return nil, 0, 0, false, false, err
 	}
-	query := `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq`
+	query := `SELECT id,role,content,tool_calls_json,tool_result_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=? ORDER BY seq`
 	args := []any{id}
 	truncated := false
 	hasMore := false
 	if limit > 0 {
-		query = `SELECT id,role,content,tool_calls_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=?`
+		query = `SELECT id,role,content,tool_calls_json,tool_result_json,tool_call_id,name,created_at FROM ea_messages WHERE session_id=?`
 		if before > 0 {
 			query += ` AND id < ?`
 			args = append(args, before)
@@ -33,14 +35,17 @@ func (store *Store) messagesWindow(id string, limit int, before int64) ([]Messag
 	result := []Message{}
 	for rows.Next() {
 		var value Message
-		var data []byte
+		var data, toolResult []byte
 		var created string
-		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &value.ToolCallID, &value.Name, &created); err != nil {
+		if err := rows.Scan(&value.ID, &value.Role, &value.Content, &data, &toolResult, &value.ToolCallID, &value.Name, &created); err != nil {
 			return nil, 0, 0, false, false, err
 		}
 		_ = json.Unmarshal(data, &value.ToolCalls)
 		if value.ToolCalls == nil {
 			value.ToolCalls = []ToolCall{}
+		}
+		if len(toolResult) > 0 && json.Valid(toolResult) {
+			value.ToolResult = append(json.RawMessage(nil), toolResult...)
 		}
 		value.Attachments = []Attachment{}
 		value.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -66,7 +71,9 @@ func (store *Store) messagesWindow(id string, limit int, before int64) ([]Messag
 	for _, message := range result {
 		messageIDs = append(messageIDs, message.ID)
 	}
-	attachments, err := store.messageAttachmentsForIDs(id, messageIDs)
+	// Full session loads are used for operations such as Codex thread forking and
+	// need attachment bytes. Bounded HTTP windows return metadata only.
+	attachments, err := store.messageAttachmentsForIDs(id, messageIDs, limit <= 0)
 	if err != nil {
 		return nil, 0, 0, false, false, err
 	}
@@ -85,10 +92,14 @@ func (store *Store) ListMessagesBefore(id string, before int64, limit int) ([]Me
 	return result, count, hasMore, err
 }
 
-func (store *Store) messageAttachmentsForIDs(sessionID string, messageIDs []int64) (map[int64][]Attachment, error) {
-	query := `SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size,a.data
-FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
-	WHERE m.session_id=?`
+func (store *Store) messageAttachmentsForIDs(sessionID string, messageIDs []int64, includeData bool) (map[int64][]Attachment, error) {
+	query := `SELECT a.id,a.message_id,a.name,a.mime_type,a.kind,a.size`
+	if includeData {
+		query += `,a.data`
+	}
+	query += `
+	FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
+		WHERE m.session_id=?`
 	args := []any{sessionID}
 	if messageIDs != nil {
 		if len(messageIDs) == 0 {
@@ -111,7 +122,11 @@ FROM ea_attachments a JOIN ea_messages m ON m.id=a.message_id
 	for rows.Next() {
 		var messageID int64
 		var value Attachment
-		if err := rows.Scan(&value.ID, &messageID, &value.Name, &value.MIMEType, &value.Kind, &value.Size, &value.Data); err != nil {
+		columns := []any{&value.ID, &messageID, &value.Name, &value.MIMEType, &value.Kind, &value.Size}
+		if includeData {
+			columns = append(columns, &value.Data)
+		}
+		if err := rows.Scan(columns...); err != nil {
 			return nil, err
 		}
 		result[messageID] = append(result[messageID], value)
@@ -235,6 +250,13 @@ func (store *Store) AppendMessages(id string, values []Message) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := appendMessagesTx(tx, id, values); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func appendMessagesTx(tx *sql.Tx, id string, values []Message) error {
 	for _, value := range values {
 		data, err := encode(value.ToolCalls)
 		if err != nil {
@@ -243,8 +265,12 @@ func (store *Store) AppendMessages(id string, values []Message) error {
 		if value.CreatedAt.IsZero() {
 			value.CreatedAt = time.Now()
 		}
-		inserted, err := tx.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_call_id,name,created_at)
-VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?,?,?,?,?)`, id, id, value.Role, value.Content, data, value.ToolCallID, value.Name, formatTime(value.CreatedAt))
+		toolResult := string(value.ToolResult)
+		if toolResult != "" && !json.Valid([]byte(toolResult)) {
+			return fmt.Errorf("tool result 不是有效 JSON")
+		}
+		inserted, err := tx.Exec(`INSERT INTO ea_messages(session_id,seq,role,content,tool_calls_json,tool_result_json,tool_call_id,name,created_at)
+VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?,?,?,?,?,?)`, id, id, value.Role, value.Content, data, toolResult, value.ToolCallID, value.Name, formatTime(value.CreatedAt))
 		if err != nil {
 			return err
 		}
@@ -259,10 +285,22 @@ VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_messages WHERE session_id=?),1),?,?
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (store *Store) AppendEvent(id string, value Event) error {
+	tx, err := store.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := appendEventTx(tx, id, value); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func appendEventTx(tx *sql.Tx, id string, value Event) error {
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = time.Now()
 	}
@@ -270,7 +308,7 @@ func (store *Store) AppendEvent(id string, value Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = store.db.Exec(`INSERT INTO ea_events(session_id,seq,event_json,created_at)
+	_, err = tx.Exec(`INSERT INTO ea_events(session_id,seq,event_json,created_at)
 VALUES(?,COALESCE((SELECT MAX(seq)+1 FROM ea_events WHERE session_id=?),1),?,?)`, id, id, data, formatTime(value.CreatedAt))
 	return err
 }

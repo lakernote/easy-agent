@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
-	"github.com/lakernote/easy-agent/internal/agent/openai"
 	"github.com/lakernote/easy-agent/internal/store"
 	"github.com/lakernote/easy-agent/internal/tracevalue"
 )
@@ -53,6 +52,8 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 			value.TotalTokens = event.Exchange.Usage.TotalTokens
 			value.Protocol = event.Exchange.Protocol
 			value.StatusCode = event.Exchange.StatusCode
+			value.StopReason = string(event.Exchange.StopReason)
+			value.IncompleteReason = event.Exchange.IncompleteReason
 			value.HistoryMode, value.RequestMessages, value.ToolDefinitions = modelRequestShape(event.Exchange)
 		}
 		if event.Kind == agent.EventToolEnd {
@@ -60,6 +61,9 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 				usage.ToolCalls++
 				usage.ToolDurationMS += event.Duration.Milliseconds()
 			}
+			value.Output = event.Output
+		}
+		if event.Kind == agent.EventToolReject {
 			value.Output = event.Output
 		}
 		if event.Err != nil {
@@ -72,7 +76,7 @@ func (server *Server) newTraceObserver(id string, turn int, usage *store.Usage, 
 		if err := server.store.AppendEvent(id, value); err != nil && onTraceError != nil {
 			onTraceError(err)
 		}
-		if event.Kind == agent.EventModelEnd || event.Kind == agent.EventToolEnd {
+		if event.Kind == agent.EventModelEnd || event.Kind == agent.EventToolEnd || event.Kind == agent.EventToolReject {
 			// SQLite 只在整轮结束时保存累计 Usage；运行中的指标由 taskManager
 			// 提供。每个完成事件后同步一次，避免 Trace 已经出现而顶部仍显示 0。
 			server.tasks.setUsage(id, *usage)
@@ -120,6 +124,9 @@ func redactTraceAttachmentData(value string) string {
 // Chat Completions 每次发送完整 messages；Responses 有 previous_response_id
 // 时只发送本轮新增 input，历史由 Provider 续接。
 func modelRequestShape(exchange agent.Exchange) (string, int, int) {
+	if exchange.HistoryMode != "" {
+		return exchange.HistoryMode, exchange.RequestMessages, exchange.ToolDefinitions
+	}
 	var payload struct {
 		Messages           []json.RawMessage `json:"messages"`
 		Input              []json.RawMessage `json:"input"`
@@ -129,7 +136,7 @@ func modelRequestShape(exchange agent.Exchange) (string, int, int) {
 	if json.Unmarshal([]byte(exchange.Request), &payload) != nil {
 		return "unknown", 0, 0
 	}
-	if exchange.Protocol == string(openai.Responses) {
+	if exchange.Protocol == "responses" {
 		mode := "responses_full_input"
 		if strings.TrimSpace(payload.PreviousResponseID) != "" {
 			mode = "provider_continuation"

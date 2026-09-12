@@ -8,7 +8,7 @@ import (
 	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
-const sessionSelectColumns = `id,title,project_id,status,error,runtime,channel,profile_id,model,permissions_json,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at`
+const sessionSelectColumns = `id,title,project_id,status,error,runtime,channel,profile_id,model,pending_model_json,permissions_json,workspace,source_workspace,worktree_branch,workspace_notice,response_id,provider_key,input_tokens,output_tokens,cached_tokens,cache_write_tokens,total_tokens,model_duration_ms,tool_duration_ms,model_calls,tool_calls,created_at,updated_at`
 
 type CreateSessionParams struct {
 	ID          string
@@ -94,12 +94,14 @@ func scanSession(row rowScanner) (Session, error) {
 	var value Session
 	var created, updated string
 	var permissionsJSON []byte
-	err := row.Scan(&value.ID, &value.Title, &value.ProjectID, &value.Status, &value.Error, &value.Runtime, &value.Channel, &value.ProfileID, &value.Model, &permissionsJSON, &value.Workspace, &value.SourceWorkspace, &value.WorktreeBranch, &value.WorkspaceNotice, &value.ResponseID, &value.ProviderKey,
+	var pendingModelJSON []byte
+	err := row.Scan(&value.ID, &value.Title, &value.ProjectID, &value.Status, &value.Error, &value.Runtime, &value.Channel, &value.ProfileID, &value.Model, &pendingModelJSON, &permissionsJSON, &value.Workspace, &value.SourceWorkspace, &value.WorktreeBranch, &value.WorkspaceNotice, &value.ResponseID, &value.ProviderKey,
 		&value.Usage.InputTokens, &value.Usage.OutputTokens, &value.Usage.CachedTokens, &value.Usage.CacheWriteTokens, &value.Usage.TotalTokens,
 		&value.Usage.ModelDurationMS, &value.Usage.ToolDurationMS, &value.Usage.ModelCalls, &value.Usage.ToolCalls, &created, &updated)
 	if err != nil {
 		return Session{}, err
 	}
+	value.PendingModel = json.RawMessage(pendingModelJSON)
 	if len(permissionsJSON) > 0 && string(permissionsJSON) != "{}" {
 		if err := json.Unmarshal(permissionsJSON, &value.Permissions); err != nil {
 			return Session{}, err

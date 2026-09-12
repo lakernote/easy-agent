@@ -16,6 +16,11 @@ import (
 	"github.com/lakernote/easy-agent/internal/permissions"
 )
 
+type emptySkillSource struct{}
+
+func (emptySkillSource) EnabledSkills() []Skill     { return nil }
+func (emptySkillSource) Skill(string) (Skill, bool) { return Skill{}, false }
+
 func testEnvironment(t *testing.T, workspace string) *appenv.Environment {
 	t.Helper()
 	environment, err := appenv.Open(appenv.Config{Home: filepath.Join(t.TempDir(), "home"), Workspace: workspace})
@@ -34,6 +39,15 @@ func TestCurrentTimeIncludesOffset(t *testing.T) {
 	for _, expected := range []string{`"timezone": "Asia/Shanghai"`, `"utc_offset": "+08:00"`, `"weekday"`} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("current_time 缺少 %s: %s", expected, output)
+		}
+	}
+}
+
+func TestCatalogOmitsSkillLoaderWhenNoSkillIsEnabled(t *testing.T) {
+	environment := testEnvironment(t, t.TempDir())
+	for _, tool := range Catalog(environment, emptySkillSource{}) {
+		if tool.Spec.Name == "load_skill" {
+			t.Fatal("没有启用 Skill 时不应向模型暴露 load_skill")
 		}
 	}
 }

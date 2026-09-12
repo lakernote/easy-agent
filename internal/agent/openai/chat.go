@@ -71,7 +71,8 @@ type chatResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Message chatMessage `json:"message"`
+		Message      chatMessage `json:"message"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
 	Usage chatUsage `json:"usage"`
 }
@@ -123,12 +124,13 @@ type chatStreamChunk struct {
 }
 
 // chatStreamTrace 是写入 Trace 的流式响应快照。final_response 是 EasyAgent
-// 将各个 SSE Chunk 聚合后的最终事实；raw_chunks 保留 Provider 原始分片，
+// 将各个 SSE event 聚合后的最终事实；raw_events 保留 Provider 原始事件，
 // 方便需要时逐段审计，而不是强迫页面只展示零散 Delta。
 type chatStreamTrace struct {
 	Stream        bool                    `json:"stream"`
+	Transport     string                  `json:"transport"`
 	FinalResponse chatStreamFinalResponse `json:"final_response"`
-	RawChunks     []json.RawMessage       `json:"raw_chunks"`
+	RawEvents     []json.RawMessage       `json:"raw_events"`
 }
 
 type chatStreamFinalResponse struct {
@@ -203,6 +205,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		return core.Response{}, err
 	}
 	exchange := core.Exchange{Model: payload.Model, Protocol: string(ChatCompletions), Request: string(body)}
+	decorateRequestShape(&exchange, body)
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return core.Response{Exchange: exchange}, err
@@ -237,6 +240,8 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		result, decodeErr := decodeChatResponse(responseBody)
 		result.Exchange = exchange
 		result.Exchange.Usage = result.Usage
+		result.Exchange.StopReason = result.StopReason
+		result.Exchange.IncompleteReason = result.IncompleteReason
 		if result.Message.Content != "" {
 			onTextDelta(result.Message.Content)
 		}
@@ -256,8 +261,30 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 	chunkBytes := 0
 	responseID, model := "", payload.Model
 	finishReason := ""
+	sawDone := false
 	usage := chatUsage{}
 	var streamFailure error
+	recordPartialTrace := func() {
+		normalizedUsage := usageFromChat(usage)
+		traceResponse, _ := json.Marshal(chatStreamTrace{
+			Stream: true, Transport: "sse",
+			FinalResponse: chatStreamFinalResponse{
+				ID: responseID, Model: model,
+				Message:      chatStreamFinalMessage{Role: string(core.RoleAssistant), Content: content.String()},
+				FinishReason: finishReason,
+				Usage: chatStreamFinalUsage{
+					InputTokens: normalizedUsage.InputTokens, OutputTokens: normalizedUsage.OutputTokens,
+					CachedInputTokens: normalizedUsage.CachedInputTokens, CacheWriteTokens: normalizedUsage.CacheWriteTokens,
+					TotalTokens: normalizedUsage.TotalTokens, CacheReported: normalizedUsage.CacheReported,
+				},
+			},
+			RawEvents: chunks,
+		})
+		exchange.Response = string(traceResponse)
+		exchange.Duration = time.Since(startedAt)
+		exchange.Model = model
+		exchange.Usage = normalizedUsage
+	}
 	scanner := bufio.NewScanner(httpResponse.Body)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -270,18 +297,22 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		}
 		data := bytes.TrimSpace([]byte(strings.TrimPrefix(line, "data:")))
 		if bytes.Equal(data, []byte("[DONE]")) {
+			sawDone = true
 			break
 		}
 		if !json.Valid(data) {
+			recordPartialTrace()
 			return core.Response{Exchange: exchange}, errors.New("模型流返回了无效 JSON")
 		}
 		chunkBytes += len(data)
 		if chunkBytes > 8*1024*1024 {
+			recordPartialTrace()
 			return core.Response{Exchange: exchange}, errors.New("模型流响应超过 8 MiB")
 		}
 		chunks = append(chunks, append(json.RawMessage(nil), data...))
 		var chunk chatStreamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
+			recordPartialTrace()
 			return core.Response{Exchange: exchange}, err
 		}
 		if chunk.Error != nil {
@@ -342,7 +373,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		exchange.Duration = time.Since(startedAt)
+		recordPartialTrace()
 		return core.Response{Exchange: exchange}, err
 	}
 	message := core.Message{Role: core.RoleAssistant, Content: content.String(), Reasoning: reasoning.String()}
@@ -363,6 +394,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		encodedArguments, _ := json.Marshal(arguments)
 		normalized, err := normalizeArguments(encodedArguments)
 		if err != nil {
+			recordPartialTrace()
 			return core.Response{Exchange: exchange}, fmt.Errorf("工具 %s 参数无法解析: %w", partial.name, err)
 		}
 		message.ToolCalls = append(message.ToolCalls, core.ToolCall{ID: partial.id, Name: partial.name, Arguments: normalized})
@@ -373,7 +405,7 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 		finalMessage.ToolCalls = append(finalMessage.ToolCalls, chatStreamFinalTool{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 	}
 	traceResponse, _ := json.Marshal(chatStreamTrace{
-		Stream: true,
+		Stream: true, Transport: "sse",
 		FinalResponse: chatStreamFinalResponse{
 			ID: responseID, Model: model, Message: finalMessage, FinishReason: finishReason,
 			Usage: chatStreamFinalUsage{
@@ -382,13 +414,23 @@ func (client *Client) streamChat(ctx context.Context, payload chatRequest, onTex
 				TotalTokens: normalizedUsage.TotalTokens, CacheReported: normalizedUsage.CacheReported,
 			},
 		},
-		RawChunks: chunks,
+		RawEvents: chunks,
 	})
 	exchange.Response = string(traceResponse)
 	exchange.Duration = time.Since(startedAt)
 	exchange.Model = model
 	exchange.Usage = normalizedUsage
-	result := core.Response{ID: responseID, Message: message, Usage: normalizedUsage, Exchange: exchange}
+	stopReason, incompleteReason := normalizeChatStopReason(finishReason, len(message.ToolCalls) > 0)
+	if !sawDone && strings.TrimSpace(finishReason) == "" && streamFailure == nil {
+		stopReason = core.StopReasonIncomplete
+		incompleteReason = "SSE 流结束但没有 [DONE] 或 finish_reason"
+	}
+	exchange.StopReason = stopReason
+	exchange.IncompleteReason = incompleteReason
+	result := core.Response{
+		ID: responseID, Message: message, Usage: normalizedUsage, Exchange: exchange,
+		StopReason: stopReason, IncompleteReason: incompleteReason,
+	}
 	if streamFailure != nil {
 		return result, streamFailure
 	}
@@ -412,8 +454,12 @@ func argumentFragment(raw json.RawMessage) string {
 func encodeChatMessages(messages []core.Message) []chatMessage {
 	result := make([]chatMessage, 0, len(messages))
 	for _, message := range messages {
+		content := encodeChatContent(message)
+		if message.Role == core.RoleTool && message.ToolResult != nil {
+			content = message.ToolResult.ModelText()
+		}
 		item := chatMessage{
-			Role: string(message.Role), Content: encodeChatContent(message), ToolCallID: message.ToolCallID, Name: message.Name,
+			Role: string(message.Role), Content: content, ToolCallID: message.ToolCallID, Name: message.Name,
 			Reasoning: message.Reasoning, ReasoningDetails: message.ReasoningDetails,
 		}
 		for _, call := range message.ToolCalls {
@@ -430,12 +476,29 @@ func encodeChatMessages(messages []core.Message) []chatMessage {
 }
 
 func encodeChatContent(message core.Message) any {
-	if len(message.Attachments) == 0 {
+	if len(message.Parts) == 0 && len(message.Attachments) == 0 {
 		return message.Content
 	}
-	parts := make([]any, 0, len(message.Attachments)+1)
+	parts := make([]any, 0, len(message.Parts)+len(message.Attachments)+1)
 	if strings.TrimSpace(message.Content) != "" {
 		parts = append(parts, map[string]any{"type": "text", "text": message.Content})
+	}
+	for _, block := range message.Parts {
+		switch block.Type {
+		case "text":
+			parts = append(parts, map[string]any{"type": "text", "text": block.Text})
+		case "image":
+			imageURL := block.URI
+			if imageURL == "" {
+				imageURL = contentBlockDataURL(block)
+			}
+			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": imageURL, "detail": "auto"}})
+		case "json":
+			parts = append(parts, map[string]any{"type": "text", "text": string(block.JSON)})
+		default:
+			encoded, _ := json.Marshal(block)
+			parts = append(parts, map[string]any{"type": "text", "text": string(encoded)})
+		}
 	}
 	for _, attachment := range message.Attachments {
 		switch attachment.Kind {
@@ -448,6 +511,14 @@ func encodeChatContent(message core.Message) any {
 		}
 	}
 	return parts
+}
+
+func contentBlockDataURL(block core.ContentBlock) string {
+	mimeType := strings.TrimSpace(block.MIMEType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(block.Data)
 }
 
 func attachmentDataURL(attachment core.Attachment) string {
@@ -506,7 +577,29 @@ func decodeChatResponse(body []byte) (core.Response, error) {
 		message.ToolCalls = append(message.ToolCalls, core.ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: arguments})
 	}
 	usage := usageFromChat(payload.Usage)
-	return core.Response{ID: payload.ID, Message: message, Usage: usage}, nil
+	stopReason, incompleteReason := normalizeChatStopReason(payload.Choices[0].FinishReason, len(message.ToolCalls) > 0)
+	return core.Response{ID: payload.ID, Message: message, Usage: usage, StopReason: stopReason, IncompleteReason: incompleteReason}, nil
+}
+
+func normalizeChatStopReason(value string, hasToolCalls bool) (core.StopReason, string) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "":
+		if hasToolCalls {
+			return core.StopReasonToolUse, ""
+		}
+		return core.StopReasonStop, ""
+	case "stop":
+		return core.StopReasonStop, ""
+	case "tool_calls", "function_call":
+		return core.StopReasonToolUse, ""
+	case "length", "max_tokens":
+		return core.StopReasonLength, normalized
+	case "content_filter":
+		return core.StopReasonIncomplete, normalized
+	default:
+		return core.StopReasonIncomplete, normalized
+	}
 }
 
 // appendReasoningDetails 保留 OpenRouter 等兼容网关在流式 Tool Call 中返回的

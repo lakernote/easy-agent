@@ -52,7 +52,7 @@ func selectedSkillNames(messages []store.Message) map[string]struct{} {
 }
 
 // selectedToolNames 返回 UI 通过 @tool:name 明确选择的工具。它不分析自然语言，
-// 只把用户的显式选择转换成首轮预加载和首轮工具约束。
+// 只把用户的显式选择转换成本轮预加载和整轮工具作用域。
 func selectedToolNames(messages []store.Message) []string {
 	matches := capabilityMentionPattern.FindAllStringSubmatch(latestUserMessage(messages), -1)
 	seen := make(map[string]struct{})

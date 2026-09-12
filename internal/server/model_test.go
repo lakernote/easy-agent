@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -58,8 +59,90 @@ func TestRunModelTestRejectsTextThatPretendsToBeToolCall(t *testing.T) {
 	_, err := runModelTest(request, store.ModelSettings{
 		Protocol: "chat_completions", BaseURL: provider.URL, Model: "test", RequestTimeoutSeconds: 30,
 	})
-	if err == nil || !strings.Contains(err.Error(), "没有返回原生 tool_calls") {
+	if err == nil || !strings.Contains(err.Error(), "没有返回协议原生 Function Call") {
 		t.Fatalf("普通 JSON 文本不能被误判为工具调用: %v", err)
+	}
+}
+
+func TestEasyAgentProfileActivationRequiresMatchingCapabilityTest(t *testing.T) {
+	database, err := store.Open(t.TempDir() + "/easyagent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	settings := store.DefaultModelSettings()
+	settings.ProfileID, settings.ProfileName, settings.Model = "local", "Local", "qwen-test"
+	if err := database.SaveModelProfile(settings); err != nil {
+		t.Fatal(err)
+	}
+	application := &Server{store: database}
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/model/local/active", strings.NewReader(`{}`))
+	request.SetPathValue("id", settings.ProfileID)
+	response := httptest.NewRecorder()
+	application.activateModelProfile(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Function Calling") {
+		t.Fatalf("untested profile activation = HTTP %d %s", response.Code, response.Body.String())
+	}
+	if err := database.RecordModelCapabilityTest(modelCapabilityFingerprint(settings), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	application.activateModelProfile(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("verified profile activation = HTTP %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestModelProfileViewsExposeCapabilityStatusWithoutSecrets(t *testing.T) {
+	database, err := store.Open(t.TempDir() + "/easyagent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	verified := store.DefaultModelSettings()
+	verified.ProfileID, verified.ProfileName, verified.Model, verified.APIKey = "verified", "Verified", "qwen-verified", "private"
+	unverified := verified
+	unverified.ProfileID, unverified.ProfileName, unverified.Model = "unverified", "Unverified", "qwen-unverified"
+	if err := database.RecordModelCapabilityTest(modelCapabilityFingerprint(verified), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	application := &Server{store: database}
+	views, err := application.modelProfileViews([]store.ModelProfile{
+		{ID: verified.ProfileID, Name: verified.ProfileName, Settings: verified},
+		{ID: unverified.ProfileID, Name: unverified.ProfileName, Settings: unverified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 2 || !views[0].Verified || views[1].Verified {
+		t.Fatalf("unexpected verification status: %+v", views)
+	}
+	if views[0].Settings.APIKey != "" || !views[0].Settings.SecretConfigured {
+		t.Fatalf("bootstrap profile leaked or lost secret status: %+v", views[0].Settings)
+	}
+}
+
+func TestModelCapabilityFingerprintChangesWithExecutionShape(t *testing.T) {
+	settings := store.DefaultModelSettings()
+	settings.Model = "qwen-test"
+	baseline := modelCapabilityFingerprint(settings)
+	for name, mutate := range map[string]func(*store.ModelSettings){
+		"model":    func(value *store.ModelSettings) { value.Model = "another" },
+		"protocol": func(value *store.ModelSettings) { value.Protocol = "chat_completions" },
+		"base URL": func(value *store.ModelSettings) { value.BaseURL = "http://127.0.0.1:11435" },
+		"secret":   func(value *store.ModelSettings) { value.APIKey = "changed" },
+		"thinking": func(value *store.ModelSettings) { value.Thinking = "" },
+		"context":  func(value *store.ModelSettings) { value.ContextWindowTokens = 16384 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := settings
+			mutate(&candidate)
+			if got := modelCapabilityFingerprint(candidate); got == baseline {
+				t.Fatalf("fingerprint did not change for %s", name)
+			}
+		})
 	}
 }
 
@@ -142,6 +225,13 @@ func TestSaveModelPreservesEditedProfileSecretWithoutActivating(t *testing.T) {
 
 	activateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/model/second/active", strings.NewReader(`{}`))
 	activateRequest.SetPathValue("id", second.ProfileID)
+	verifiedSecond, err := database.GetModelSettingsByProfileID(second.ProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.RecordModelCapabilityTest(modelCapabilityFingerprint(verifiedSecond), time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	activateResponse := httptest.NewRecorder()
 	application.activateModelProfile(activateResponse, activateRequest)
 	if activateResponse.Code != http.StatusOK {

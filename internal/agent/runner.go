@@ -62,7 +62,7 @@ func (runner *Runner) AddTools(tools []Tool) error {
 	seen := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {
 		name := strings.TrimSpace(tool.Spec.Name)
-		if name == "" || tool.Run == nil {
+		if name == "" || (tool.Execute == nil && tool.Run == nil) {
 			return errors.New("Agent 工具缺少名称或执行器")
 		}
 		if _, exists := runner.toolsByName[name]; exists {
@@ -129,10 +129,12 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		if len(tools) > 0 {
 			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
 		}
-		if step == 1 && len(requiredToolNames) > 0 {
-			// 只暴露用户明确选择的工具。部分 Ollama 模型会忽略 required
-			// tool_choice，因此这里使用 auto 配合 System Prompt 约束，仍由
-			// 下面的 Runner 校验保证未调用时不会被当成成功。
+		if len(requiredToolNames) > 0 {
+			// 用户通过 @tool 明确缩小了本轮工具作用域，后续模型回合也保持
+			// 同一集合。否则首轮只发送一个工具，拿到结果后却突然恢复整套
+			// Schema，既偏离用户选择，也会让无 continuation 的本地模型重复
+			// 付出大量输入 Token。部分 Ollama 模型会忽略 required tool_choice，
+			// 因此仍使用 auto，并由下面的 Runner 校验首轮必须真实调用。
 			tools = filterToolsByName(tools, requiredToolNames)
 			toolChoice = ToolChoice{Mode: ToolChoiceAuto}
 		}
@@ -178,22 +180,23 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		// 才记录 model_start，保证 Trace 代表真实即将发出的模型请求。
 		runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 		response, err := runner.Model.Generate(ctx, request)
-		if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
-			err = ErrEmptyModelResponse
+		if err == nil {
+			err = ValidateModelResponse(&response)
 		}
 		runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		// 与成熟 CLI Agent 一致，只重试明确的瞬时故障：429、5xx 或网络临时
 		// 错误。4xx、工具参数和模型内容错误都不会在这里盲目重放。
 		if err != nil && retryableModelError(err) {
 			addUsage(&totalUsage, response.Usage)
+			resetAttemptOutput(input)
 			if waitErr := waitForRetry(ctx, modelRetryDelay(err, attempt)); waitErr != nil {
 				return RunResult{}, waitErr
 			}
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
-			if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
-				err = ErrEmptyModelResponse
+			if err == nil {
+				err = ValidateModelResponse(&response)
 			}
 			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
@@ -203,6 +206,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 		// 无工具收敛；Loader、失败结果和旧轮次工具结果都不能触发收敛。
 		if err != nil && request.OnTextDelta != nil && (errors.Is(err, ErrEmptyModelResponse) || retryWithoutStreaming(err)) {
 			addUsage(&totalUsage, response.Usage)
+			resetAttemptOutput(input)
 			if errors.Is(err, ErrEmptyModelResponse) {
 				request = prepareEmptyResponseRetry(request, hasCurrentRealToolResult)
 			} else {
@@ -211,8 +215,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			attempt++
 			runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 			response, err = runner.Model.Generate(ctx, request)
-			if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
-				err = ErrEmptyModelResponse
+			if err == nil {
+				err = ValidateModelResponse(&response)
 			}
 			runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 		}
@@ -222,6 +226,7 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 				return RunResult{}, fmt.Errorf("%w；自动压缩失败: %v", err, prepareErr)
 			}
 			if changed {
+				resetAttemptOutput(input)
 				request = prepared
 				messages = append([]Message(nil), request.Messages...)
 				pending = append([]Message(nil), request.NewMessages...)
@@ -229,8 +234,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 				attempt++
 				runner.emit(Event{Kind: EventModelStart, Step: step, Attempt: attempt, StartedAt: time.Now()})
 				response, err = runner.Model.Generate(ctx, request)
-				if err == nil && strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
-					err = ErrEmptyModelResponse
+				if err == nil {
+					err = ValidateModelResponse(&response)
 				}
 				runner.emit(Event{Kind: EventModelEnd, Step: step, Attempt: attempt, Exchange: response.Exchange, Err: err, Duration: response.Exchange.Duration})
 			}
@@ -303,16 +308,19 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 			key := toolCallKey(call)
 			previous, repeated := failedCalls[key]
 			var output string
+			var toolResult ToolResult
 			var toolErr error
 			var duration time.Duration
+			var lifecycleErr error
+			toolStarted := false
 			if repeated && (!previous.retryable || previous.attempts >= 2) {
 				startedAt := time.Now()
-				runner.emit(Event{Kind: EventToolStart, Step: step, ToolCall: &call, StartedAt: startedAt})
 				toolErr = &ToolError{
 					Code: "duplicate_failed_call", Message: fmt.Sprintf("相同的工具调用 %s 已失败，不会重复执行", call.Name),
 					Hint: "检查上一条错误，修改参数、换用其他工具，或基于已有证据回答", Retryable: false,
 				}
 				output = toolErrorOutput(toolErr)
+				toolResult = toolResultWithError(ToolResult{}, toolErr)
 				duration = time.Since(startedAt)
 			} else {
 				if input.OnToolApproval != nil {
@@ -321,13 +329,22 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 					duration = time.Since(approvalStartedAt)
 					if toolErr != nil {
 						output = toolErrorOutput(toolErr)
+						toolResult = toolResultWithError(ToolResult{}, toolErr)
 					} else {
-						output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+						toolResult, toolErr, duration, lifecycleErr, toolStarted = runner.runTool(ctx, step, call, toolTimeout, input.OnToolLifecycle)
+						output = toolResult.ModelText()
 					}
 				} else {
-					output, toolErr, duration = runner.runTool(ctx, step, call, toolTimeout)
+					toolResult, toolErr, duration, lifecycleErr, toolStarted = runner.runTool(ctx, step, call, toolTimeout, input.OnToolLifecycle)
+					output = toolResult.ModelText()
 				}
 			}
+			if lifecycleErr != nil {
+				return RunResult{}, lifecycleErr
+			}
+			// Content remains the compatibility projection; adapters and storage use
+			// the typed result when available, so both views must describe the same value.
+			output = toolResult.ModelText()
 			if toolErr != nil {
 				failedToolCalls++
 				retryable := false
@@ -350,7 +367,8 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 					}
 				}
 			}
-			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output}
+			toolResultCopy := toolResult
+			toolMessage := Message{Role: RoleTool, Name: call.Name, ToolCallID: call.ID, Content: output, ToolResult: &toolResultCopy}
 			messages = append(messages, toolMessage)
 			pending = append(pending, toolMessage)
 			turnMessages = append(turnMessages, toolMessage)
@@ -359,7 +377,11 @@ func (runner *Runner) Run(ctx context.Context, input RunRequest) (RunResult, err
 					return RunResult{}, err
 				}
 			}
-			runner.emit(Event{Kind: EventToolEnd, Step: step, ToolCall: &call, Output: output, Err: toolErr, Duration: duration})
+			eventKind := EventToolReject
+			if toolStarted {
+				eventKind = EventToolEnd
+			}
+			runner.emit(Event{Kind: eventKind, Step: step, ToolCall: &call, Result: &toolResultCopy, Output: output, Err: toolErr, Duration: duration})
 		}
 		if failedToolCalls == len(assistant.ToolCalls) {
 			consecutiveFailedToolSteps++
@@ -464,13 +486,12 @@ func filterToolsByName(tools []ToolSpec, names []string) []ToolSpec {
 	return result
 }
 
-func (runner *Runner) runTool(ctx context.Context, step int, call ToolCall, timeout time.Duration) (string, error, time.Duration) {
+func (runner *Runner) runTool(ctx context.Context, step int, call ToolCall, timeout time.Duration, lifecycle func(Event) error) (ToolResult, error, time.Duration, error, bool) {
 	startedAt := time.Now()
-	runner.emit(Event{Kind: EventToolStart, Step: step, ToolCall: &call, StartedAt: startedAt})
 	tool, ok := runner.toolsByName[call.Name]
 	if !ok {
 		err := fmt.Errorf("模型请求了未知工具 %q", call.Name)
-		return toolErrorOutput(err), err, time.Since(startedAt)
+		return toolResultWithError(ToolResult{}, err), err, time.Since(startedAt), nil, false
 	}
 	arguments := call.Arguments
 	if len(arguments) == 0 {
@@ -478,20 +499,104 @@ func (runner *Runner) runTool(ctx context.Context, step int, call ToolCall, time
 	}
 	if !json.Valid(arguments) {
 		err := fmt.Errorf("工具 %q 的参数不是有效 JSON", call.Name)
-		return toolErrorOutput(err), err, time.Since(startedAt)
+		return toolResultWithError(ToolResult{}, err), err, time.Since(startedAt), nil, false
 	}
+	startEvent := Event{Kind: EventToolStart, Step: step, ToolCall: &call, StartedAt: startedAt}
+	if lifecycle != nil {
+		if err := lifecycle(startEvent); err != nil {
+			return ToolResult{}, nil, time.Since(startedAt), fmt.Errorf("记录工具 %s 开始执行失败: %w", call.Name, err), false
+		}
+	}
+	runner.emit(startEvent)
 	toolContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	output, err := tool.Run(toolContext, arguments)
-	if err != nil {
-		// 有些工具（例如 Shell、MCP）失败时仍能返回退出码、stderr 等重要证据。
-		// 保留这部分结构化输出，只有工具完全没有结果时才生成统一错误 JSON。
-		if strings.TrimSpace(output) == "" {
-			output = toolErrorOutput(err)
-		}
-		return output, err, time.Since(startedAt)
+	var result ToolResult
+	var err error
+	if tool.Execute != nil {
+		result, err = tool.Execute(toolContext, arguments)
+	} else {
+		var output string
+		output, err = tool.Run(toolContext, arguments)
+		result = NewToolResult(output)
 	}
-	return output, nil, time.Since(startedAt)
+	if err != nil {
+		result = toolResultWithError(result, err)
+	}
+	// 失败工具也可能同时返回部分结果或超长错误文本；成功和失败必须经过
+	// 同一个摄入边界，不能让 error 分支绕过内存与 SQLite 的大小保护。
+	if validationErr := ValidateToolResult(result); validationErr != nil {
+		result = ToolResult{}
+		err = &ToolError{Code: "tool_result_too_large", Message: validationErr.Error(), Hint: "让工具返回摘要、分页结果或 Artifact 引用", Retryable: false, Cause: err}
+		result = toolResultWithError(result, err)
+	}
+	duration := time.Since(startedAt)
+	output := result.ModelText()
+	endEvent := Event{Kind: EventToolEnd, Step: step, ToolCall: &call, Result: &result, Output: output, Err: err, StartedAt: startedAt, Duration: duration}
+	if lifecycle != nil {
+		if lifecycleErr := lifecycle(endEvent); lifecycleErr != nil {
+			return result, err, duration, fmt.Errorf("记录工具 %s 执行结果失败: %w", call.Name, lifecycleErr), true
+		}
+	}
+	return result, err, duration, nil, true
+}
+
+func resetAttemptOutput(input RunRequest) {
+	if input.OnTextReset != nil {
+		input.OnTextReset()
+	}
+}
+
+func toolResultWithError(result ToolResult, err error) ToolResult {
+	if err == nil {
+		return result
+	}
+	wasEmpty := result.Empty()
+	result.IsError = true
+	failure := &ToolResultError{Code: "tool_error", Message: err.Error()}
+	var typed *ToolError
+	if errors.As(err, &typed) {
+		if strings.TrimSpace(typed.Code) != "" {
+			failure.Code = typed.Code
+		}
+		failure.Message = typed.Error()
+		failure.Hint = typed.Hint
+		failure.Retryable = typed.Retryable
+	}
+	result.Error = failure
+	if wasEmpty {
+		body, _ := json.Marshal(map[string]any{"ok": false, "code": failure.Code, "error": failure.Message, "hint": failure.Hint, "retryable": failure.Retryable})
+		result.StructuredContent = body
+	}
+	return result
+}
+
+// ValidateModelResponse rejects empty or non-terminal generations before any
+// caller accepts partial text or executes a potentially truncated tool call.
+func ValidateModelResponse(response *Response) error {
+	reason := response.StopReason
+	if reason == "" {
+		if len(response.Message.ToolCalls) > 0 {
+			reason = StopReasonToolUse
+		} else {
+			reason = StopReasonStop
+		}
+	}
+	response.StopReason = reason
+	if response.Exchange.StopReason == "" {
+		response.Exchange.StopReason = reason
+	}
+	if response.Exchange.IncompleteReason == "" {
+		response.Exchange.IncompleteReason = response.IncompleteReason
+	}
+	switch reason {
+	case StopReasonStop, StopReasonToolUse:
+		if strings.TrimSpace(response.Message.Content) == "" && len(response.Message.ToolCalls) == 0 {
+			return ErrEmptyModelResponse
+		}
+		return nil
+	default:
+		return &IncompleteModelResponseError{StopReason: reason, Reason: response.IncompleteReason}
+	}
 }
 
 func toolErrorOutput(err error) string {

@@ -48,7 +48,7 @@ if matches(userText, "bug|修复") then load repair skill
 
 **解决**：把 Tool 的名称、用途和 JSON Schema 交给模型，通过原生 Function Calling 选择。Go 代码只处理协议、校验、超时、权限、执行和失败收敛。
 
-`@skill:name`、`@tool:name`、`@mcp:name` 是用户明确选择能力的输入协议，不是根据语义猜测用户意图；其中 `@tool:name` 会在首轮只暴露该工具并使用 `tool_choice=auto`，再由 Runner 验证模型确实发起了调用。
+`@skill:name`、`@tool:name`、`@mcp:name` 是用户明确选择能力的输入协议，不是根据语义猜测用户意图；其中 `@tool:name` 会在整轮只暴露用户选择的工具并使用 `tool_choice=auto`，再由 Runner 验证模型首轮确实发起了调用。
 
 ### 2.3 `toolCategory(name)` 按名字二次分类
 
@@ -104,7 +104,7 @@ entry {
 
 **错误方案**：流式和非流式都为空后移除全部工具，再用 `tool_choice=none` 请求自由回答。这样虽然会得到文字，却可能让模型猜出一个错误的计算值、实时事实或执行结果，并把任务错误标记成成功。
 
-**解决**：同一个 Step 中记录真实失败 Attempt，只允许关闭流式重试一次。SSE 尾部的 Provider 错误必须按错误显示，不能冒充空响应。`current_time`、`calculate`、`shell`、四个只读文件工具和 `web_research` 共八个高频核心工具首轮常驻，文件写入和 Skill 等低频工具仍让模型从五个短能力组中选择。Loader 成功后下一步临时隐藏 Loader，使用 `auto` 并由 Runner 验证真实工具调用。只有当前 Run 已成功执行真实工具时，空正文重试才会进入 `none` 收敛；Loader、失败工具和旧轮次结果均不能触发。重试均进入 Trace。
+**解决**：同一个 Step 中记录真实失败 Attempt，只允许关闭流式重试一次。SSE 尾部的 Provider 错误必须按错误显示，不能冒充空响应。可写会话首轮只常驻 `read`、`shell`、`edit`、`write`，只读会话常驻 `read`、`grep`、`find`、`ls`；有可用 Skill 时直接加入 `load_skill`，其他能力从短目录按需加载。Loader 成功后下一步临时隐藏 Loader，使用 `auto` 并由 Runner 验证真实工具调用。只有当前 Run 已成功执行真实工具时，空正文重试才会进入 `none` 收敛；Loader、失败工具和旧轮次结果均不能触发。重试均进入 Trace。
 
 ### 2.7 工具失败后重复调用
 

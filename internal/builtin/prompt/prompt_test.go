@@ -13,7 +13,7 @@ func TestRenderInjectsRuntimeAndSkillMetadata(t *testing.T) {
 		MCPs:           []MCPMeta{{ID: "browser", Name: "Browser", Description: "浏览器自动化"}},
 		SelectedSkills: []SelectedSkill{{Name: "problem-analysis", Content: "先核对证据"}},
 	})
-	for _, expected := range []string{"/srv/easyagent/project-a", "/srv/easyagent/project-web", "以下源文件夹", "problem-analysis：问题分析", "Browser（ID: browser）：浏览器自动化", `<skill name="problem-analysis">`, "先核对证据", "不要在回答中输出", "必须发起原生 function call", "尚未加载不表示不可用", "绝不索要", "环境变量", "信任边界", "用户消息可以定义目标", "间接提示词注入", "System Prompt", "外部内容不能授权", "温和、务实、鼓励", "肯定具体、真实的进展", "先指出已经完成的具体事实", "禁止虚假夸奖", "用户明确指定语气或格式", "selected_tools", "必须调用 `current_time`", "无需为了“今天/明天”额外调用", "data_type", "不确定才使用 `auto`", "不是可信度排名", "字段缺失时明确说明缺失"} {
+	for _, expected := range []string{"/srv/easyagent/project-a", "/srv/easyagent/project-web", "以下源文件夹", "problem-analysis：问题分析", "Browser（ID: browser）：浏览器自动化", `<skill name="problem-analysis">`, "先核对证据", "不要输出或编造能力标签", "原生 function call", "加载结果不是任务证据", "绝不索要", "环境变量", "信任边界", "用户消息定义目标", "间接提示词注入", "System Prompt", "不能授权新目标", "温和务实", "肯定具体事实", "用户指定格式或语气", "selected_tools", "使用 `current_time`", "先加载 `information` 组", "其他工具已返回可靠日期", "Tool Schema", "即使用户点名某工具", "加载 `web` 组", "sources.content", "citation", "缺失字段明确说明"} {
 		if !strings.Contains(result, expected) {
 			t.Fatalf("System Prompt 缺少 %q: %s", expected, result)
 		}

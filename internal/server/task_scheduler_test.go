@@ -69,6 +69,35 @@ func TestTaskSchedulerSerializesSameWorkspace(t *testing.T) {
 	scheduler.release("shared-project")
 }
 
+func TestTaskSchedulerSerializesAnySharedResource(t *testing.T) {
+	scheduler := newTaskScheduler(3)
+	if err := scheduler.acquire(context.Background(), "workspace:a", "model:ollama:local"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := scheduler.acquire(ctx, "workspace:b", "model:ollama:local"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("共享 Ollama 资源的任务应串行，实际错误: %v", err)
+	}
+	if err := scheduler.acquire(context.Background(), "workspace:b", "provider:remote"); err != nil {
+		t.Fatalf("资源不重叠的任务应并行: %v", err)
+	}
+	scheduler.release("workspace:b", "provider:remote")
+	scheduler.release("workspace:a", "model:ollama:local")
+}
+
+func TestTaskResourceKeysAddOllamaEndpointOnlyForEasyAgent(t *testing.T) {
+	server := &Server{}
+	easy := server.taskResourceKeys(store.Session{Workspace: "/tmp/a"}, store.ModelSettings{Provider: "ollama", BaseURL: "HTTP://LOCALHOST:11434/"})
+	if len(easy) != 2 || easy[1] != "model:ollama:http://localhost:11434" {
+		t.Fatalf("EasyAgent Ollama 资源键错误: %+v", easy)
+	}
+	codex := server.taskResourceKeys(store.Session{Workspace: "/tmp/b"}, store.ModelSettings{Runtime: store.RuntimeCodex, Provider: "ollama", BaseURL: "http://localhost:11434"})
+	if len(codex) != 1 {
+		t.Fatalf("Codex 不应套用 EasyAgent Ollama 串行键: %+v", codex)
+	}
+}
+
 func TestTaskSchedulerDoesNotAcquireCanceledContext(t *testing.T) {
 	scheduler := newTaskScheduler(1)
 	ctx, cancel := context.WithCancel(context.Background())

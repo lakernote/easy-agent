@@ -25,7 +25,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const [savingCodexConfig, setSavingCodexConfig] = useState(false)
   const [deletingCodexProvider, setDeletingCodexProvider] = useState(false)
 
-  useEffect(() => setModel({ ...data.model }), [data.model])
+  useEffect(() => { if (!modelEditorOpen) setModel({ ...data.model }) }, [data.model, modelEditorOpen])
   useEffect(() => setCodexConfig({ ...data.codexConfig }), [data.codexConfig])
 
   const saveModel = async (clearAPIKey = false) => {
@@ -46,6 +46,7 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     setTestingModel(true); setModelNotice(null); onError('')
     try {
       const result = await api.testModel(model)
+      await onRefresh()
       setModelNotice({
         ready: true,
         title: model.runtime === 'codex' ? 'Codex app-server · 实际会话通过' : `${result.model} · Agent 能力可用`,
@@ -84,8 +85,8 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     return {
       ...common,
       provider: saved?.provider || (data.ollama.running ? 'ollama' : 'openai'),
-      protocol: saved?.protocol && saved.protocol !== 'app_server' ? saved.protocol : 'chat_completions',
-      baseUrl: saved?.baseUrl || (data.ollama.running ? `${ollamaBase}/v1` : ''),
+      protocol: saved?.protocol && saved.protocol !== 'app_server' ? saved.protocol : (data.ollama.running ? 'ollama_chat' : 'chat_completions'),
+      baseUrl: saved?.baseUrl || (data.ollama.running ? ollamaBase : ''),
       model: saved?.model || '',
       thinking: saved?.thinking || '',
     }
@@ -185,7 +186,10 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
     if (savingModel || profile.id === data.activeModelProfileId) { selectProfile(profile); return }
     setModel({ ...profile.settings, profileId: profile.id, profileName: profile.name })
     setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.activateModelProfile(profile.id); await onRefresh() }
+    try {
+      if (profile.settings.runtime === 'easyagent') await api.testModel(profile.settings)
+      await api.activateModelProfile(profile.id); await onRefresh()
+    }
     catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }
@@ -193,9 +197,9 @@ export function useModelConfiguration({ data, onRefresh, onError }: ModelConfigu
   const activateOllamaModel = async (name: string) => {
     const existing = data.modelProfiles.find((profile) => profile.settings.runtime === 'easyagent' && profile.settings.model === name)
     if (existing) { await activateProfile(existing); return }
-    const next: ModelSettings = { ...data.model, profileId: `easyagent-${Date.now()}`, profileName: `Ollama · ${name}`, runtime: 'easyagent', provider: 'ollama', protocol: 'chat_completions', baseUrl: `${data.ollama.baseUrl}/v1`, model: name }
+    const next: ModelSettings = { ...data.model, profileId: `easyagent-${Date.now()}`, profileName: `Ollama · ${name}`, runtime: 'easyagent', provider: 'ollama', protocol: 'ollama_chat', baseUrl: data.ollama.baseUrl, model: name }
     setModel(next); setSavingModel(true); setModelNotice(null); onError('')
-    try { await api.saveModel(next); await api.activateModelProfile(next.profileId!); await onRefresh() }
+    try { await api.saveModel(next); await api.testModel(next); await api.activateModelProfile(next.profileId!); await onRefresh() }
     catch (reason) { onError((reason as Error).message) }
     finally { setSavingModel(false) }
   }

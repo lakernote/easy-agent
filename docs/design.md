@@ -98,7 +98,7 @@ SQLite 会话历史 ──→ 可选上下文检查点
 System Prompt + 历史消息 + Tool Schema
     ↓
 Runner（唯一循环）
-    ├── Model Adapter：Chat Completions / Responses
+    ├── Model Adapter：Chat Completions / Responses / Ollama Chat / Anthropic Messages
     ├── Built-in Tool
     ├── load_skill → Skill 正文
     └── search_mcp_tools → 少量相关 MCP Tool
@@ -114,7 +114,7 @@ function handleUserMessage(sessionId, content, attachments):
     enqueue(sessionId)
 
 function runSession(sessionId):
-    settings = loadModelSettings()
+    settings = loadQueuedModelSnapshot()
     history  = loadSessionHistory(sessionId)
     prompt   = renderStableSystemPrompt(skillMetadata, mcpMetadata)
     history  = compactIfContextIsFull(history, settings)
@@ -174,7 +174,7 @@ MCP   = 外部系统提供什么能力（按需连接的 Tool）
 
 EasyAgent 只管理 MCP 自己的私有包和连接配置，不管理项目语言运行时。MCP 所需的 Node.js、Python 或 Java 从服务器 PATH 检测；缺少时给出明确提示，由宿主机、容器或项目工具链提供。这样扩展能力不会演变成另一套 SDK 管理器。
 
-内置 Tool 使用分层渐进披露：首轮常驻 `current_time`、`calculate`、`shell`、`read`、`grep`、`find`、`ls`、`web_research`，同时保留 `load_tools` 的自解释能力组；文件写入和 Skill 等低频能力由模型选择组后再加入下一轮。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader，使用 `tool_choice=auto` 交给 Provider，再由 Runner 验证至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时仍只按准确名称预加载。保留在协议历史中的内置 function call 会自动恢复同名 Schema。工具模式的空响应或 SSE 尾部工具校验错误可以从流式切到非流式重试一次；只有本轮已成功执行真实工具时，空正文重试才可进入无工具收敛。
+内置 Tool 使用分层渐进披露。可写会话首轮采用 PI 风格的小核心：`read`、`shell`、`edit`、`write`；只读会话首轮提供 `read`、`grep`、`find`、`ls`。存在已启用 Skill 时额外直接提供 `load_skill`，避免先加载工具再加载正文的双重往返；`current_time`、`calculate`、`web_research` 和其余文件检索能力通过 `load_tools` 的短能力目录按需加入。组是工具自身的声明式元数据，代码不读取用户自然语言做关键词或正则路由。Loader 成功后，下一步会临时隐藏 Loader，使用 `tool_choice=auto` 交给 Provider，再由 Runner 验证至少调用一个真实工具，避免把“已经加载”误当成“已经核验”。用户在输入框明确 `@tool:name` 时只按准确名称预加载，并在整轮保持这个工具作用域。保留在协议历史中的内置 function call 会自动恢复同名 Schema。工具模式的空响应或 SSE 尾部工具校验错误可以从流式切到非流式重试一次；只有本轮已成功执行真实工具时，空正文重试才可进入无工具收敛。
 
 `web_research` 是直接可见的高层 Research Tool，在一次受控执行中返回实际读取的 sources、发布时间、抓取时间、可点击 citation 和本次调用内稳定的 source ID；`S1`、`S2` 只是来源编号，不是质量排名。模型必须根据 sources 回答并使用 `[S1]` 等 ID 引用，缺失字段不能补猜。低层搜索和网页读取不再作为模型工具暴露。模型通过 `data_type`、`subject` 和 `time_range_days` 表达语义意图；复杂通用研究还可提交 2–4 条互补 `subqueries`，Runtime 统一去重并按 quick/normal/deep 限制为 2/5/8 条实际查询。Tool 内部确定性执行天气、GitHub、行情或实体 adapter；只有 `data_type=auto` 时才保留词法兼容兜底。Runner 不扫描用户文本，也不替模型选择 Tool。
 
@@ -195,7 +195,7 @@ Skill 和 MCP 同样先提供简短元数据：模型调用 `load_skill` 后读�
 - 调用了哪个工具，参数、工作目录、输出和错误是什么；
 - 是否发生上下文压缩，以及哪些历史由检查点代表。
 
-流式响应保存两层数据：页面默认展示聚合后的完整响应，展开后查看原始 SSE Delta。两者属于同一次 Attempt，不能拆成多个 Step。
+流式响应保存两层数据：页面默认展示聚合后的完整响应，展开后按 `transport` 查看原始 SSE 或 NDJSON Event。两者属于同一次 Attempt，不能拆成多个 Step；失败前已经收到的原始事件也必须保留。
 
 ## 8. 保持简单的约束
 

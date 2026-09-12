@@ -374,19 +374,22 @@ type EasyAgentSettingsProps = {
 export function EasyAgentSettings({ data, model, setModel, notice, testing, saving, onTest, onSave, onActivateOllama }: EasyAgentSettingsProps) {
   const [clearAPIKey, setClearAPIKey] = useState(false)
   useEffect(() => setClearAPIKey(false), [model.profileId])
+  const legacyOllamaProtocol = model.provider.trim().toLocaleLowerCase() === 'ollama' && model.protocol !== 'ollama_chat'
+  const useNativeOllama = () => setModel({ ...model, protocol: 'ollama_chat', baseUrl: model.baseUrl.replace(/\/v1\/?$/, '') || data.ollama.baseUrl })
 
   return (
     <div className="section-block easyagent-config">
       <div className="section-heading">
-        <div><h2>模型连接</h2><p>EasyAgent 支持 OpenAI Chat Completions 和 Responses 兼容接口。</p></div>
+        <div><h2>模型连接</h2><p>EasyAgent 支持原生 Ollama、Anthropic，以及 OpenAI Chat/Responses 兼容接口。</p></div>
         <span className="tag">{model.protocol}</span>
       </div>
       {model.provider.trim().toLocaleLowerCase() === 'ollama' && <OllamaModelCatalog data={data} saving={saving} onActivate={onActivateOllama} />}
+      {legacyOllamaProtocol && <div className="ollama-protocol-warning"><div><strong>当前 Ollama 配置走兼容协议</strong><small>建议改用原生 Ollama Chat：流式 NDJSON、工具调用和上下文参数都由专用适配器处理。切换后仍需测试并保存。</small></div><button className="ghost-button" type="button" onClick={useNativeOllama}>改为原生协议</button></div>}
       <div className="form-grid">
         <label>提供方<input value={model.provider} onChange={(event) => setModel({ ...model, provider: event.target.value })} /></label>
         <label>协议
           <select value={model.protocol} onChange={(event) => setModel({ ...model, protocol: event.target.value as ModelSettings['protocol'] })}>
-            <option value="chat_completions">Chat Completions</option><option value="responses">Responses</option>
+            <option value="ollama_chat">Ollama Chat（原生）</option><option value="anthropic_messages">Anthropic Messages（原生）</option><option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option>
           </select>
         </label>
         <label className="wide">Base URL<input value={model.baseUrl} onChange={(event) => setModel({ ...model, baseUrl: event.target.value })} /></label>

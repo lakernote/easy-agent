@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lakernote/easy-agent/internal/agent"
-	"github.com/lakernote/easy-agent/internal/agent/openai"
+	"github.com/lakernote/easy-agent/internal/agent/qualification"
 	"github.com/lakernote/easy-agent/internal/codexruntime"
 	"github.com/lakernote/easy-agent/internal/store"
 )
@@ -121,68 +121,59 @@ func (server *Server) testModel(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadGateway, "模型能力测试失败："+err.Error())
 		return
 	}
+	if err := server.store.RecordModelCapabilityTest(modelCapabilityFingerprint(settings), time.Now()); err != nil {
+		writeError(response, http.StatusInternalServerError, "保存模型能力验证失败："+err.Error())
+		return
+	}
 	writeJSON(response, http.StatusOK, result)
 }
 
+func modelCapabilityFingerprint(settings store.ModelSettings) string {
+	settings = settings.WithDefaults()
+	secretHash := sha256.Sum256([]byte(settings.APIKey))
+	payload := struct {
+		Provider, Protocol, BaseURL, Model, Thinking, Secret string
+		ContextWindowTokens, MaxOutputTokens                 int
+	}{
+		Provider: strings.ToLower(strings.TrimSpace(settings.Provider)),
+		Protocol: strings.TrimSpace(settings.Protocol), BaseURL: strings.TrimRight(strings.TrimSpace(settings.BaseURL), "/"),
+		Model: strings.TrimSpace(settings.Model), Thinking: strings.TrimSpace(settings.Thinking),
+		Secret: fmt.Sprintf("%x", secretHash[:]), ContextWindowTokens: settings.ContextWindowTokens, MaxOutputTokens: settings.MaxOutputTokens,
+	}
+	data, _ := json.Marshal(payload)
+	fingerprint := sha256.Sum256(data)
+	return fmt.Sprintf("%x", fingerprint[:])
+}
+
+func (server *Server) requireVerifiedEasyAgent(settings store.ModelSettings) error {
+	if settings.Runtime == store.RuntimeCodex {
+		return nil
+	}
+	verified, err := server.store.HasModelCapabilityTest(modelCapabilityFingerprint(settings))
+	if err != nil {
+		return fmt.Errorf("读取模型能力验证: %w", err)
+	}
+	if !verified {
+		return errors.New("当前模型配置尚未通过原生 Function Calling 能力测试；请先在设置中测试当前模型。EasyAgent 不会解析文本伪工具调用")
+	}
+	return nil
+}
+
 func runModelTest(request *http.Request, settings store.ModelSettings) (modelTestResult, error) {
-	apiKey := settings.APIKey
-	client, err := openai.New(openai.Config{
-		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
-		DisableThinking: settings.Thinking == "disabled", KeepThinkingForTools: settings.IsOllama(),
-		Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second,
-	})
+	client, err := newModelAdapter(settings)
 	if err != nil {
 		return modelTestResult{}, err
 	}
-	tool := agent.ToolSpec{
-		Name:        "easyagent_diagnostic_echo",
-		Description: "EasyAgent 模型能力测试工具；收到要求时必须调用。",
-		Parameters: map[string]any{
-			"type": "object", "additionalProperties": false,
-			"properties": map[string]any{"text": map[string]any{"type": "string"}},
-			"required":   []string{"text"},
-		},
+	result, err := qualification.Run(request.Context(), client, settings.Model)
+	value := modelTestResult{
+		OK: err == nil, Model: result.Model, ToolCall: result.ToolCall, Answer: result.Answer,
+		InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, DurationMS: result.Duration.Milliseconds(),
 	}
-	messages := []agent.Message{
-		{Role: agent.RoleSystem, Content: "这是 EasyAgent Function Calling 能力测试。必须先调用提供的工具，参数 text 必须为 ping；拿到工具结果后，只回答结果中的 answer。"},
-		{Role: agent.RoleUser, Content: "开始测试。"},
-	}
-	startedAt := time.Now()
-	first, err := client.Generate(request.Context(), agent.Request{
-		Model: settings.Model, Messages: messages, Tools: []agent.ToolSpec{tool},
-		ToolChoice: agent.ToolChoice{Mode: agent.ToolChoiceAuto}, MaxOutputTokens: 128,
-	})
 	if err != nil {
-		return modelTestResult{}, err
-	}
-	if len(first.Message.ToolCalls) != 1 || first.Message.ToolCalls[0].Name != tool.Name {
-		return modelTestResult{}, fmt.Errorf("没有返回原生 tool_calls，而是返回了普通文本 %q", strings.TrimSpace(first.Message.Content))
-	}
-	var arguments struct {
-		Text string `json:"text"`
-	}
-	if json.Unmarshal(first.Message.ToolCalls[0].Arguments, &arguments) != nil || arguments.Text != "ping" {
-		return modelTestResult{}, fmt.Errorf("工具参数不符合 JSON Schema：%s", string(first.Message.ToolCalls[0].Arguments))
-	}
-	call := first.Message.ToolCalls[0]
-	messages = append(messages, first.Message, agent.Message{
-		Role: agent.RoleTool, Name: tool.Name, ToolCallID: call.ID, Content: `{"answer":"EASYAGENT_OK"}`,
-	})
-	second, err := client.Generate(request.Context(), agent.Request{
-		Model: settings.Model, Messages: messages, Tools: []agent.ToolSpec{tool},
-		ToolChoice: agent.ToolChoice{Mode: agent.ToolChoiceNone}, MaxOutputTokens: 64,
-	})
-	if err != nil {
-		return modelTestResult{}, err
-	}
-	answer := strings.TrimSpace(second.Message.Content)
-	if !strings.Contains(answer, "EASYAGENT_OK") {
-		return modelTestResult{}, fmt.Errorf("模型没有正确使用工具结果：%q", answer)
+		return value, err
 	}
 	return modelTestResult{
-		OK: true, Model: settings.Model, ToolCall: tool.Name, Answer: answer,
-		InputTokens:  first.Usage.InputTokens + second.Usage.InputTokens,
-		OutputTokens: first.Usage.OutputTokens + second.Usage.OutputTokens,
-		DurationMS:   time.Since(startedAt).Milliseconds(),
+		OK: true, Model: result.Model, ToolCall: result.ToolCall, Answer: result.Answer,
+		InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, DurationMS: result.Duration.Milliseconds(),
 	}, nil
 }

@@ -65,7 +65,7 @@ func (server *Server) detectOllama(parent context.Context) ollamaStatus {
 func ollamaServerURL() string {
 	value := strings.TrimSpace(os.Getenv("EASYAGENT_OLLAMA_URL"))
 	if value == "" {
-		value = strings.TrimSuffix(store.DefaultOllamaBaseURL, "/v1")
+		value = store.DefaultOllamaBaseURL
 	}
 	if !strings.Contains(value, "://") {
 		value = "http://" + value
@@ -137,8 +137,16 @@ func (server *Server) useOllama(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	model := store.DefaultModelSettings()
-	model.BaseURL = strings.TrimRight(status.BaseURL, "/") + "/v1"
+	model.BaseURL = strings.TrimRight(status.BaseURL, "/")
 	model.Model = input.Model
+	if _, err := runModelTest(request, model); err != nil {
+		writeError(response, http.StatusBadGateway, "模型能力测试失败："+err.Error())
+		return
+	}
+	if err := server.store.RecordModelCapabilityTest(modelCapabilityFingerprint(model), time.Now()); err != nil {
+		writeError(response, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := server.store.SaveModelSettings(model); err != nil {
 		writeError(response, 500, err.Error())
 		return

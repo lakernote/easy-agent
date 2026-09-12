@@ -13,7 +13,7 @@ func (store *Store) TouchSession(id string, now time.Time) error {
 }
 
 func (store *Store) QueueSession(id, model string, now time.Time) error {
-	result, err := store.db.Exec(`UPDATE ea_sessions SET status='queued',error='',model=?,updated_at=? WHERE id=? AND status NOT IN ('queued','running','paused')`, model, formatTime(now), id)
+	result, err := store.db.Exec(`UPDATE ea_sessions SET status='queued',error='',model=?,pending_model_json=X'',updated_at=? WHERE id=? AND status NOT IN ('queued','running','paused')`, model, formatTime(now), id)
 	if err != nil {
 		return err
 	}
@@ -22,6 +22,44 @@ func (store *Store) QueueSession(id, model string, now time.Time) error {
 		return errors.New("Agent 正在处理或已暂停上一条消息")
 	}
 	return nil
+}
+
+// EnqueueTurn 把会话状态与本轮用户消息放进同一个事务。服务即使在提交边界
+// 崩溃，也只会看到“旧状态+旧历史”或“queued+新消息”，不会让恢复队列拿
+// 上一轮用户消息再次执行。EasyAgent 与 Codex Runtime 共用这个入口。
+func (store *Store) EnqueueTurn(id, model string, value Message, now time.Time) error {
+	return store.EnqueueTurnWithSettings(id, ModelSettings{Model: model}, value, now)
+}
+
+func (store *Store) EnqueueTurnWithSettings(id string, settings ModelSettings, value Message, now time.Time) error {
+	settings = settings.WithDefaults()
+	snapshot, err := encode(settings)
+	if err != nil {
+		return err
+	}
+	tx, err := store.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE ea_sessions SET status='queued',error='',model=?,pending_model_json=?,updated_at=? WHERE id=? AND status NOT IN ('queued','running','paused')`, settings.Model, snapshot, formatTime(now), id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return errors.New("Agent 正在处理或已暂停上一条消息")
+	}
+	if value.CreatedAt.IsZero() {
+		value.CreatedAt = now
+	}
+	if err := appendMessagesTx(tx, id, []Message{value}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (store *Store) MarkRunning(id string, now time.Time) error {
@@ -37,12 +75,22 @@ func (store *Store) MarkRunning(id string, now time.Time) error {
 }
 
 func (store *Store) FinishSession(id, responseID, providerKey string, usage Usage, now time.Time) error {
-	_, err := store.db.Exec(`UPDATE ea_sessions SET status='idle',error='',response_id=?,provider_key=?,
+	result, err := store.db.Exec(`UPDATE ea_sessions SET status='idle',error='',response_id=?,provider_key=?,pending_model_json=X'',
 input_tokens=input_tokens+?,output_tokens=output_tokens+?,cached_tokens=cached_tokens+?,cache_write_tokens=cache_write_tokens+?,total_tokens=total_tokens+?,
 model_duration_ms=model_duration_ms+?,tool_duration_ms=tool_duration_ms+?,model_calls=model_calls+?,tool_calls=tool_calls+?,updated_at=? WHERE id=? AND status='running'`,
 		responseID, providerKey, usage.InputTokens, usage.OutputTokens, usage.CachedTokens, usage.CacheWriteTokens, usage.TotalTokens,
 		usage.ModelDurationMS, usage.ToolDurationMS, usage.ModelCalls, usage.ToolCalls, formatTime(now), id)
-	return err
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrSessionNotRunning
+	}
+	return nil
 }
 
 func (store *Store) FailSession(id string, runError error, usage Usage, now time.Time) error {
@@ -51,6 +99,7 @@ func (store *Store) FailSession(id string, runError error, usage Usage, now time
 	_, err := store.db.Exec(`UPDATE ea_sessions SET
 status=CASE WHEN status IN ('canceled','paused') THEN status ELSE 'failed' END,
 error=CASE WHEN status IN ('canceled','paused') THEN error ELSE ? END,
+	pending_model_json=CASE WHEN status='paused' THEN pending_model_json ELSE X'' END,
 input_tokens=input_tokens+?,output_tokens=output_tokens+?,cached_tokens=cached_tokens+?,cache_write_tokens=cache_write_tokens+?,total_tokens=total_tokens+?,
 model_duration_ms=model_duration_ms+?,tool_duration_ms=tool_duration_ms+?,model_calls=model_calls+?,tool_calls=tool_calls+?,updated_at=? WHERE id=?`,
 		runError.Error(), usage.InputTokens, usage.OutputTokens, usage.CachedTokens, usage.CacheWriteTokens, usage.TotalTokens,
@@ -80,7 +129,7 @@ func (store *Store) ResumePausedSession(id string, now time.Time) (bool, error) 
 
 // CancelSession 只取消仍在排队或运行的任务，返回是否真的改变了状态。
 func (store *Store) CancelSession(id string, now time.Time) (bool, error) {
-	result, err := store.db.Exec(`UPDATE ea_sessions SET status='canceled',error='用户已停止任务',updated_at=? WHERE id=? AND status IN ('queued','running','paused')`, formatTime(now), id)
+	result, err := store.db.Exec(`UPDATE ea_sessions SET status='canceled',error='用户已停止任务',pending_model_json=X'',updated_at=? WHERE id=? AND status IN ('queued','running','paused')`, formatTime(now), id)
 	if err != nil {
 		return false, err
 	}
@@ -96,8 +145,19 @@ func (store *Store) DeleteSession(id string) error {
 func (store *Store) RecoverRunning(now time.Time) error {
 	// running 任务可能已经执行过命令或写文件，进程消失后自动重跑会重复副作用；
 	// queued 任务尚未开始，保留状态交给新进程恢复执行。
-	_, err := store.db.Exec(`UPDATE ea_sessions SET status='failed',error='服务重启时任务正在运行，已标记为中断；可确认工作区状态后重新发送消息',updated_at=? WHERE status='running'`, formatTime(now))
-	return err
+	tx, err := store.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	reason := "服务重启时工具仍在执行，结果未知；为避免重复副作用不会自动重放"
+	if err := markUnfinishedToolOperationsUnknownTx(tx, "", "", 0, reason, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE ea_sessions SET status='failed',error='服务重启时任务正在运行，已标记为中断；可确认工作区状态后重新发送消息',pending_model_json=X'',updated_at=? WHERE status='running'`, formatTime(now)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (store *Store) ListQueuedSessions() ([]Session, error) {

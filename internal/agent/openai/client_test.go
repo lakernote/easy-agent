@@ -120,7 +120,7 @@ func TestChatCompletionsStreamsTextAndUsage(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.Exchange.Response), &trace); err != nil {
 		t.Fatalf("流式响应应可格式化审计: %v\n%s", err, result.Exchange.Response)
 	}
-	if !trace.Stream || trace.FinalResponse.Message.Content != "你好" || trace.FinalResponse.Usage.TotalTokens != 14 || len(trace.RawChunks) != 3 {
+	if !trace.Stream || trace.Transport != "sse" || trace.FinalResponse.Message.Content != "你好" || trace.FinalResponse.Usage.TotalTokens != 14 || len(trace.RawEvents) != 3 {
 		t.Fatalf("Trace 应同时保存聚合响应和原始 Delta: %+v", trace)
 	}
 }
@@ -146,7 +146,7 @@ func TestChatCompletionsSurfacesEmbeddedStreamError(t *testing.T) {
 	if !errors.As(err, &failure) || failure.StatusCode != http.StatusBadRequest || !failure.RetryWithoutStreaming {
 		t.Fatalf("SSE 尾部错误没有暴露为可兼容重试的 Provider 错误: err=%v failure=%+v", err, failure)
 	}
-	if result.Exchange.StatusCode != http.StatusBadRequest || !strings.Contains(result.Exchange.Response, `"raw_chunks"`) || !strings.Contains(result.Exchange.Response, `"code":"tool_use_failed"`) || !strings.Contains(result.Exchange.Response, `"status_code":400`) {
+	if result.Exchange.StatusCode != http.StatusBadRequest || !strings.Contains(result.Exchange.Response, `"raw_events"`) || !strings.Contains(result.Exchange.Response, `"code":"tool_use_failed"`) || !strings.Contains(result.Exchange.Response, `"status_code":400`) {
 		t.Fatalf("SSE 错误 Trace 没有保留真实状态和原始分片: %+v", result.Exchange)
 	}
 	if errors.Is(err, core.ErrEmptyModelResponse) {
@@ -176,6 +176,47 @@ func TestChatCompletionsStreamsToolCallArguments(t *testing.T) {
 	}
 	if len(result.Message.ToolCalls) != 1 || result.Message.ToolCalls[0].Name != "weather" || string(result.Message.ToolCalls[0].Arguments) != `{"location":"上海"}` {
 		t.Fatalf("流式 Tool Call 组装错误: %+v", result.Message.ToolCalls)
+	}
+}
+
+func TestChatCompletionsRejectsStreamEOFWithoutTerminalEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(response, `data: {"choices":[{"delta":{"content":"partial"}}]}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Protocol: ChatCompletions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Generate(context.Background(), core.Request{
+		Model: "fixture", Messages: []core.Message{{Role: core.RoleUser, Content: "hello"}}, OnTextDelta: func(string) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validationErr := core.ValidateModelResponse(&result)
+	var incomplete *core.IncompleteModelResponseError
+	if !errors.As(validationErr, &incomplete) || result.StopReason != core.StopReasonIncomplete || !strings.Contains(result.IncompleteReason, "SSE") {
+		t.Fatalf("unterminated stream must be incomplete: response=%+v err=%v", result, validationErr)
+	}
+}
+
+func TestChatCompletionsKeepsPartialTraceOnMalformedStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(response, `data: {"choices":[{"delta":{"content":"partial"}}]}`)
+		_, _ = fmt.Fprintln(response, "data: {malformed")
+	}))
+	defer server.Close()
+	client, _ := New(Config{BaseURL: server.URL, Protocol: ChatCompletions})
+	result, err := client.Generate(context.Background(), core.Request{Model: "fixture", OnTextDelta: func(string) {}})
+	if err == nil {
+		t.Fatal("malformed stream should fail")
+	}
+	var trace chatStreamTrace
+	if json.Unmarshal([]byte(result.Exchange.Response), &trace) != nil || trace.Transport != "sse" || len(trace.RawEvents) != 1 || trace.FinalResponse.Message.Content != "partial" {
+		t.Fatalf("partial stream trace = %s", result.Exchange.Response)
 	}
 }
 
@@ -357,6 +398,92 @@ func TestResponsesUsesPreviousResponseAndFunctionOutput(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamsSSEAndKeepsFinalAudit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body responsesRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Stream || request.Header.Get("Accept") != "text/event-stream" {
+			t.Fatalf("stream request mismatch: stream=%v headers=%v", body.Stream, request.Header)
+		}
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.output_text.delta","delta":"你"}`)
+		_, _ = fmt.Fprintln(response)
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.output_text.delta","delta":"好"}`)
+		_, _ = fmt.Fprintln(response)
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.completed","response":{"id":"resp_stream","model":"gpt-test","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"你好"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`)
+		_, _ = fmt.Fprintln(response)
+		_, _ = fmt.Fprintln(response, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL, Protocol: Responses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas strings.Builder
+	result, err := client.Generate(context.Background(), core.Request{
+		Model: "gpt-test", Messages: []core.Message{{Role: core.RoleUser, Content: "hello"}},
+		OnTextDelta: func(delta string) { deltas.WriteString(delta) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ID != "resp_stream" || result.Message.Content != "你好" || deltas.String() != "你好" || result.StopReason != core.StopReasonStop || result.Usage.TotalTokens != 7 {
+		t.Fatalf("stream response = %+v deltas=%q", result, deltas.String())
+	}
+	var trace responsesStreamTrace
+	if json.Unmarshal([]byte(result.Exchange.Response), &trace) != nil || !trace.Stream || len(trace.RawEvents) != 3 {
+		t.Fatalf("stream trace = %s", result.Exchange.Response)
+	}
+	if !client.Capabilities().Streaming {
+		t.Fatal("Responses adapter must advertise streaming only after implementing it")
+	}
+}
+
+func TestResponsesKeepsPartialTraceOnStreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.output_text.delta","delta":"partial"}`)
+		_, _ = fmt.Fprintln(response, `data: {"type":"error","error":{"message":"provider stopped"}}`)
+	}))
+	defer server.Close()
+	client, _ := New(Config{BaseURL: server.URL, Protocol: Responses})
+	result, err := client.Generate(context.Background(), core.Request{Model: "fixture", OnTextDelta: func(string) {}})
+	if err == nil {
+		t.Fatal("stream error should fail")
+	}
+	var trace responsesStreamTrace
+	if json.Unmarshal([]byte(result.Exchange.Response), &trace) != nil || trace.Transport != "sse" || len(trace.RawEvents) != 2 || len(trace.FinalResponse.Output) != 1 {
+		t.Fatalf("partial Responses trace = %s", result.Exchange.Response)
+	}
+}
+
+func TestResponsesStreamAcceptsOnlyNativeFunctionCallItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_native","name":"lookup","arguments":"{\"id\":9}"}}`)
+		_, _ = fmt.Fprintln(response)
+		_, _ = fmt.Fprintln(response, `data: {"type":"response.completed","response":{"id":"resp_tool","model":"gpt-test","status":"completed","usage":{"input_tokens":4,"output_tokens":3,"total_tokens":7}}}`)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Protocol: Responses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Generate(context.Background(), core.Request{
+		Model: "gpt-test", Messages: []core.Message{{Role: core.RoleUser, Content: "find"}},
+		OnTextDelta: func(string) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StopReason != core.StopReasonToolUse || len(result.Message.ToolCalls) != 1 || result.Message.ToolCalls[0].ID != "call_native" || string(result.Message.ToolCalls[0].Arguments) != `{"id":9}` {
+		t.Fatalf("stream function call = %+v", result)
+	}
+}
+
 func TestResponsesCacheDetails(t *testing.T) {
 	response, err := decodeResponsesResponse([]byte(`{
 		"id":"resp-1",
@@ -365,5 +492,40 @@ func TestResponsesCacheDetails(t *testing.T) {
 	}`))
 	if err != nil || !response.Usage.CacheReported || response.Usage.CachedInputTokens != 8 {
 		t.Fatalf("Responses 缓存统计异常: %+v, %v", response.Usage, err)
+	}
+}
+
+func TestOpenAIAdaptersDoNotParseTextAsToolCall(t *testing.T) {
+	chat, err := decodeChatResponse([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\"name\":\"lookup\",\"arguments\":{}}"}}]}`))
+	if err != nil || len(chat.Message.ToolCalls) != 0 || chat.Message.Content == "" {
+		t.Fatalf("Chat text must remain text: response=%+v err=%v", chat, err)
+	}
+	responses, err := decodeResponsesResponse([]byte(`{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"lookup\",\"arguments\":{}}"}]}]}`))
+	if err != nil || len(responses.Message.ToolCalls) != 0 || responses.Message.Content == "" {
+		t.Fatalf("Responses text must remain text: response=%+v err=%v", responses, err)
+	}
+}
+
+func TestChatFinishReasonLengthIsPreserved(t *testing.T) {
+	response, err := decodeChatResponse([]byte(`{
+		"id":"chat-1",
+		"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"partial","tool_calls":[{"id":"call-1","type":"function","function":{"name":"write","arguments":"{}"}}]}}],
+		"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}
+	}`))
+	if err != nil || response.StopReason != core.StopReasonLength || response.IncompleteReason != "length" {
+		t.Fatalf("Chat 截断原因没有归一化: response=%+v err=%v", response, err)
+	}
+}
+
+func TestResponsesIncompleteWithoutOutputPreservesUsageAndReason(t *testing.T) {
+	response, err := decodeResponsesResponse([]byte(`{
+		"id":"resp-incomplete",
+		"status":"incomplete",
+		"incomplete_details":{"reason":"max_output_tokens"},
+		"output":[],
+		"usage":{"input_tokens":20,"output_tokens":8,"total_tokens":28}
+	}`))
+	if err != nil || response.StopReason != core.StopReasonLength || response.IncompleteReason != "max_output_tokens" || response.Usage.TotalTokens != 28 {
+		t.Fatalf("Responses incomplete 语义或 Usage 丢失: response=%+v err=%v", response, err)
 	}
 }

@@ -28,7 +28,7 @@ export function TracePanel({ session, onLoadOlder, onError, onClose }: { session
   }), [events])
   const visibleEvents = useMemo(() => {
     return events.filter((event) => {
-      return filter === 'error' ? event.status === 'error' : filter === 'all' || traceCategory(event) === filter
+      return filter === 'error' ? event.status === 'error' || event.status === 'unknown' : filter === 'all' || traceCategory(event) === filter
     })
   }, [events, filter])
   const groups = useMemo(() => groupEventsByTurn(visibleEvents), [visibleEvents])
@@ -71,7 +71,7 @@ function TraceHistoryControls({ session, loading, onLoadOlder }: { session: Sess
 function TraceTurn({ label, events, fallbackModel }: { label: string; events: TraceEvent[]; fallbackModel: string }) {
   const usage = events.reduce((total, event) => total + (event.kind === 'codex_usage' || event.kind === 'model_end' ? event.totalTokens || 0 : 0), 0)
   const toolCalls = events.filter((event) => traceCategory(event) === 'tool' && event.status !== 'started').length
-  const failed = events.some((event) => event.status === 'error')
+  const failed = events.some((event) => event.status === 'error' || event.status === 'unknown')
   const model = [...events].reverse().find((event) => ['codex_usage', 'codex_end', 'model_end'].includes(event.kind))?.name
   return <section className={`trace-turn ${failed ? 'error' : ''}`}><div className="trace-turn-head"><div><strong>{label}</strong><small>{model || fallbackModel}</small></div><div>{usage > 0 && <span><b>{formatTokenCount(usage)}</b> Token</span>}{toolCalls > 0 && <span><b>{toolCalls}</b> 工具调用</span>}<em>{failed ? '有失败' : '已完成'}</em></div></div>{events.map((event) => <TraceRow key={event.id} event={event} />)}</section>
 }
@@ -86,13 +86,13 @@ export function TraceRow({ event }: { event: TraceEvent }) {
   const category = traceCategory(event)
   const summaryDetail = traceSummaryDetail(event)
   const isTurnRequest = event.kind === 'codex_rpc' && event.protocolMethod === 'turn/start'
-  const hasDetails = Boolean(event.detail || event.input || event.output || event.rawPayload || showsUsage || event.protocolMethod)
-  return <details className={`trace-row ${event.status} ${event.activityKind || ''}`} open={event.status === 'error'}>
+  const hasDetails = Boolean(event.detail || event.incompleteReason || event.stopReason || event.input || event.output || event.rawPayload || showsUsage || event.protocolMethod)
+  return <details className={`trace-row ${event.status} ${event.activityKind || ''}`} open={event.status === 'error' || event.status === 'unknown'}>
     <summary aria-label={`${title}，${eventStatusLabel(event.status)}`}><span className="trace-node" /><div className="trace-summary-copy"><div><span className={`trace-kind ${category}`}>{traceCategoryLabel(category)}</span><strong>{title}</strong></div><small>{summaryDetail ? `${summaryDetail} · ` : ''}{location}{eventDurationLabel(event)}{event.totalTokens ? ` · ${formatTokenCount(event.totalTokens)} Token` : tokenMissing ? ' · Token 未上报' : ''}</small></div><div className="trace-summary-state"><time>{formatTraceTime(event.createdAt)}</time><em>{eventStatusLabel(event.status)}</em>{hasDetails && <span className="trace-chevron" aria-hidden="true" />}</div></summary>
     <div className="trace-row-body">
-      <dl className="trace-meta"><div><dt>事件类型</dt><dd>{event.kind}</dd></div>{event.protocolMethod && <div><dt>JSON-RPC 方法</dt><dd><code>{event.protocolMethod}</code></dd></div>}{event.activityId && <div><dt>活动 ID</dt><dd><code>{event.activityId}</code></dd></div>}{event.protocol && <div><dt>协议</dt><dd><code>{event.protocol}</code></dd></div>}{event.statusCode ? <div><dt>HTTP 状态</dt><dd>{event.statusCode}</dd></div> : null}</dl>
+      <dl className="trace-meta"><div><dt>事件类型</dt><dd>{event.kind}</dd></div>{event.protocolMethod && <div><dt>JSON-RPC 方法</dt><dd><code>{event.protocolMethod}</code></dd></div>}{event.activityId && <div><dt>活动 ID</dt><dd><code>{event.activityId}</code></dd></div>}{event.protocol && <div><dt>协议</dt><dd><code>{event.protocol}</code></dd></div>}{event.stopReason && <div><dt>停止原因</dt><dd><code>{event.stopReason}</code></dd></div>}{event.statusCode ? <div><dt>HTTP 状态</dt><dd>{event.statusCode}</dd></div> : null}</dl>
       {isTurnRequest ? <CodexTurnRequestDetails event={event} /> : <>
-        {event.detail && <p className={event.status === 'error' ? 'event-error' : 'event-detail'}>{event.detail}</p>}
+        {(event.detail || event.incompleteReason) && <p className={event.status === 'error' || event.status === 'unknown' ? 'event-error' : 'event-detail'}>{event.detail || event.incompleteReason}</p>}
         {showsUsage && <div className="event-usage"><span>本次输入 <b>{tokenMissing ? '未上报' : (event.inputTokens || 0).toLocaleString()}</b></span><span>本次输出 <b>{tokenMissing ? '未上报' : (event.outputTokens || 0).toLocaleString()}</b></span><span>缓存命中 <b>{event.cacheReported ? (event.cachedTokens || 0).toLocaleString() : '未上报'}</b></span><span>缓存写入 <b>{event.cacheReported ? (event.cacheWriteTokens || 0).toLocaleString() : '未上报'}</b></span><span>请求消息 <b>{historyModeLabel(event.historyMode || '')} · {event.requestMessages || 0} 项</b></span><span>工具定义 <b>{event.toolDefinitions || 0}</b></span><span>缓存率 <b>{event.cacheReported ? `${cacheRate}%` : '未上报'}</b></span></div>}
         {(event.input || event.output) && <div className={`trace-io ${event.input && event.output ? 'split' : ''}`}>{event.input && <TracePayload label={event.kind === 'codex_rpc' ? '请求参数' : isModelResult ? '模型请求 · 实际发送' : '输入'} value={event.input} />}{event.output && (isModelResult ? <ModelTraceResponse value={event.output} /> : <TracePayload label={event.kind === 'codex_rpc' ? '响应结果' : '输出'} value={event.output} />)}</div>}
         {event.rawPayload && <details className="trace-raw"><summary><span>{event.kind === 'codex_rpc' ? '原始 JSONL 请求' : '原始 JSONL 事件'}</span><code>{event.protocolMethod || event.kind}</code></summary><TracePayload value={event.rawPayload} copyLabel={event.kind === 'codex_rpc' ? '复制请求' : '复制事件'} /></details>}
@@ -160,7 +160,7 @@ function aggregateTraceCalls(events: TraceEvent[]) {
     const key = `${category}:${label}`
     const current = result.get(key) || { key, label, category, count: 0, failed: 0, duration: 0 }
     current.count++
-    if (event.status === 'error') current.failed++
+    if (event.status === 'error' || event.status === 'unknown') current.failed++
     current.duration += event.durationMs || 0
     result.set(key, current)
   }
@@ -271,11 +271,12 @@ function traceEventTitle(event: TraceEvent) {
   if (event.kind === 'codex_request') return `反向请求 · ${event.protocolMethod || event.name}`
   if (event.kind === 'codex_turn') return 'Codex Turn 生命周期'
   if (event.kind === 'agent_guidance') return 'Agent 校验 · 原始来源核验'
+  if (event.kind === 'tool_unknown') return `工具结果未知 · ${event.displayName || event.name || '工具'}`
   if (event.kind === 'capability') {
     if (event.activityKind === 'skill') return `应用 Skill · ${event.displayName || event.name}`
     return `选择 MCP · ${formatActivitySource(event.activitySource || event.name || 'MCP')}`
   }
-  if (event.kind === 'tool_start' || event.kind === 'tool_end') return toolEventTitle(event)
+  if (event.kind === 'tool_start' || event.kind === 'tool_end' || event.kind === 'tool_rejected') return toolEventTitle(event)
   if (event.kind === 'codex_item') {
     if (event.activityKind === 'mcp' || event.name === 'mcpToolCall') return `MCP · ${activityIdentity(event)}`
     return `${codexItemLabel(event.name || '')}${event.displayName && event.displayName !== codexItemLabel(event.name || '') ? ` · ${event.displayName}` : ''}`
@@ -384,7 +385,7 @@ function isTerminalLifecycle(event: TraceEvent) {
 function lifecycleKey(event: TraceEvent) {
   if ((event.kind === 'codex_item' || event.kind === 'codex_progress') && event.activityId && (event.activityKind === 'tool' || event.activityKind === 'mcp')) return `codex-activity:${event.activityId}`
   if (event.kind === 'codex_item' && event.activityId) return `codex-item:${event.activityId}`
-  if ((event.kind === 'tool_start' || event.kind === 'tool_end') && event.activityId) return `tool:${event.activityId}`
+  if ((event.kind === 'tool_start' || event.kind === 'tool_end' || event.kind === 'tool_rejected') && event.activityId) return `tool:${event.activityId}`
   if (event.kind === 'model_start' || event.kind === 'model_end') return `model:${event.turn || 0}:${event.step}:${event.attempt || 0}`
   if (event.kind === 'compaction_start' || event.kind === 'compaction_end') return `compaction:${event.turn || 0}:${event.step}:${event.attempt || 0}`
   if (event.kind === 'codex_turn') return `codex-turn:${event.turn || 0}`
@@ -421,7 +422,7 @@ function traceCategory(event: TraceEvent): Exclude<TraceFilter, 'all' | 'error'>
   if (event.kind === 'codex_usage') return 'usage'
   if ((event.kind === 'codex_rpc' && event.protocolMethod === 'turn/start') || (event.kind === 'codex_item' && event.name === 'userMessage')) return 'input'
   if (event.kind === 'model_start' || event.kind === 'model_end' || event.kind === 'compaction_start' || event.kind === 'compaction_end' || event.kind === 'codex_end' || event.name === 'reasoning' || event.name === 'agentMessage') return 'llm'
-  if (event.kind === 'tool_start' || event.kind === 'tool_end' || event.kind === 'capability' || event.activityKind === 'tool' || event.activityKind === 'mcp' || event.activityKind === 'skill' || event.activityKind === 'loader' || event.activityKind === 'mcp_loader') return 'tool'
+  if (event.kind === 'tool_start' || event.kind === 'tool_end' || event.kind === 'tool_rejected' || event.kind === 'capability' || event.activityKind === 'tool' || event.activityKind === 'mcp' || event.activityKind === 'skill' || event.activityKind === 'loader' || event.activityKind === 'mcp_loader') return 'tool'
   return 'status'
 }
 
@@ -492,22 +493,25 @@ function codexItemLabel(value: string) {
   return labels[value] || value
 }
 
-export function eventStatusLabel(status: string) { return status === 'started' ? '开始' : status === 'success' ? '成功' : status === 'error' ? '失败' : status === 'progress' ? '进行中' : status === 'updated' ? '已更新' : status === 'resolved' ? '已处理' : status }
+export function eventStatusLabel(status: string) { return status === 'started' ? '开始' : status === 'success' ? '成功' : status === 'error' ? '失败' : status === 'unknown' ? '结果未知' : status === 'progress' ? '进行中' : status === 'updated' ? '已更新' : status === 'resolved' ? '已处理' : status }
 
 function codexProgressLabel(value: string) {
   const labels: Record<string, string> = { plan: '更新计划', commandExecution: '命令输出', fileChange: '文件变更', mcpToolCall: 'MCP 进度', reasoning: '思考摘要', thread: '线程状态', serverRequest: '请求状态' }
   return labels[value] || value
 }
 
-type StreamTracePayload = { stream?: boolean; final_response?: unknown; raw_chunks?: unknown[] }
+type StreamTracePayload = { stream?: boolean; transport?: string; final_response?: unknown; raw_events?: unknown[]; raw_chunks?: unknown[] }
 
 export function ModelTraceResponse({ value }: { value: string }) {
   const streamed = useMemo<StreamTracePayload | null>(() => {
     try {
       const parsed = JSON.parse(value)
-      return parsed && parsed.stream === true && parsed.final_response && Array.isArray(parsed.raw_chunks) ? parsed : null
+      if (!parsed || parsed.stream !== true || !parsed.final_response) return null
+      const events = Array.isArray(parsed.raw_events) ? parsed.raw_events : parsed.raw_chunks
+      return Array.isArray(events) ? { ...parsed, raw_events: events } : null
     } catch { return null }
   }, [value])
   if (!streamed) return <TracePayload label="模型响应 · Provider 原始返回" value={value} />
-  return <div className="model-trace-response"><TracePayload label="模型响应 · 最终聚合" value={JSON.stringify(streamed.final_response)} /><details className="raw-deltas"><summary><span>原始流式 Delta</span><em>{streamed.raw_chunks?.length || 0} 个 SSE Chunk</em></summary><Payload value={JSON.stringify(streamed.raw_chunks)} /></details></div>
+  const transport = streamed.transport === 'ndjson' ? 'NDJSON' : 'SSE'
+  return <div className="model-trace-response"><TracePayload label="模型响应 · 最终聚合" value={JSON.stringify(streamed.final_response)} /><details className="raw-deltas"><summary><span>原始流事件</span><em>{streamed.raw_events?.length || 0} 个 {transport} Event</em></summary><Payload value={JSON.stringify(streamed.raw_events)} /></details></div>
 }

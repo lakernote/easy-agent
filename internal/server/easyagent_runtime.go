@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/lakernote/easy-agent/internal/agent"
-	"github.com/lakernote/easy-agent/internal/agent/openai"
 	"github.com/lakernote/easy-agent/internal/appenv"
 	"github.com/lakernote/easy-agent/internal/builtin/prompt"
 	builtintools "github.com/lakernote/easy-agent/internal/builtin/tools"
@@ -52,8 +51,8 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	if err != nil {
 		return err
 	}
-	// 只把少量高频工具常驻首轮；文件、网页和 Skill 等较大能力
-	// 仍只发送精简目录，避免“全量 Schema”在每个模型回合重复计费。
+	// 默认只提供 PI 风格的读、执行、修改小核心以及可用的 Skill 入口；
+	// 时间、计算、联网和额外文件检索通过精简目录按需加入。
 	selectedToolNamesForTurn := selectedToolNames(session.Messages)
 	activeTools := toolLoader.PreloadCore()
 	activeTools = append(activeTools, toolLoader.Tool())
@@ -77,13 +76,7 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 		activeTools = append(activeTools, selectedMCPTools...)
 		activeTools = append(activeTools, mcpLoader.Tool())
 	}
-	apiKey := settings.APIKey
-	client, err := openai.New(openai.Config{
-		BaseURL: settings.BaseURL, APIKey: apiKey, Protocol: openai.Protocol(settings.Protocol),
-		DisableThinking:      settings.Thinking == "disabled",
-		KeepThinkingForTools: settings.IsOllama(),
-		Timeout:              time.Duration(settings.RequestTimeoutSeconds) * time.Second,
-	})
+	client, err := newModelAdapter(settings)
 	if err != nil {
 		return err
 	}
@@ -133,9 +126,9 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 	}
 	providerKey := strings.Join([]string{settings.Provider, settings.Protocol, settings.BaseURL, settings.Model}, "|")
 	previousID := ""
-	// Ollama 的 Responses 兼容端点目前不支持 previous_response_id，
-	// 因此继续发送完整 input；真正支持服务端会话的 Provider 才续接 ID。
-	if !didCompact && settings.Protocol == "responses" && session.ProviderKey == providerKey && !settings.IsOllama() {
+	// Provider continuation is a declared adapter capability. Native Ollama and
+	// Anthropic keep complete history; Responses-compatible adapters can resume.
+	if !didCompact && agent.CapabilitiesOf(client).ServerContinuation && session.ProviderKey == providerKey {
 		previousID = session.ResponseID
 	}
 	newMessages := []agent.Message{coreMessages[len(coreMessages)-1]}
@@ -161,6 +154,33 @@ func (server *Server) runEasyAgentTurn(ctx context.Context, id string, session s
 				return nil
 			}
 			return server.awaitEasyAgentApproval(ctx, id, call, runEnvironment.Workspace())
+		},
+		OnToolLifecycle: func(event agent.Event) error {
+			if event.ToolCall == nil {
+				return nil
+			}
+			operation := store.ToolOperation{
+				Runtime: store.RuntimeEasyAgent, Turn: turn, Step: event.Step,
+				Guarantee:  store.ToolGuaranteePreEffect,
+				ActivityID: event.ToolCall.ID, Name: event.ToolCall.Name,
+				ActivityKind: event.ToolCall.ActivityKind, ActivitySource: event.ToolCall.ActivitySource,
+				DisplayName: event.ToolCall.DisplayName, Input: string(event.ToolCall.Arguments),
+				StartedAt: event.StartedAt,
+			}
+			if event.Kind == agent.EventToolStart {
+				return server.store.BeginToolOperation(id, operation)
+			}
+			if event.Kind != agent.EventToolEnd {
+				return nil
+			}
+			operation.Output = event.Output
+			operation.Status = store.ToolOperationSucceeded
+			operation.CompletedAt = event.StartedAt.Add(event.Duration)
+			if event.Err != nil {
+				operation.Status = store.ToolOperationFailed
+				operation.Error = event.Err.Error()
+			}
+			return server.store.SettleToolOperation(id, operation)
 		},
 		IsContextError: isContextLengthError,
 	})
