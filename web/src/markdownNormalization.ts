@@ -1,6 +1,6 @@
-// CommonMark 不允许强强调的闭合符同时满足“前一个字符是标点/符号”且
-// “后一个字符是正文”。模型常生成 **标题：**正文，这会把星号原样显示。
-// 这里只在普通 Markdown 文本中补分隔空格；代码围栏和行内代码保持原样。
+// 部分 CommonMark 实现无法正确识别模型常生成的 **标题：**正文 边界，
+// 会把星号原样显示。这里只在成对的强调标记后补必要的分隔空格，避免把
+// 相邻强调片段的结束符和开始符错误配对；代码围栏和行内代码保持原样。
 export function normalizeAssistantMarkdown(content: string) {
   const parts = content.split(/(\r?\n)/)
   let fence: { marker: string; length: number } | null = null
@@ -57,7 +57,54 @@ function findBacktickRun(value: string, start: number, length: number) {
 }
 
 function normalizeStrongBoundary(value: string) {
-  return value
-    .replace(/(^|[^\p{L}\p{N}])\*\*([^*\n]*?[\p{P}\p{S}])\*\*(?=[\p{L}\p{N}])/gu, '$1**$2** ')
-    .replace(/(^|[^\p{L}\p{N}])__([^_\n]*?[\p{P}\p{S}])__(?=[\p{L}\p{N}])/gu, '$1__$2__ ')
+  const opening = new Map<string, number>()
+  const insertionPoints: number[] = []
+  let index = 0
+  while (index < value.length - 1) {
+    const marker = value.slice(index, index + 2)
+    if ((marker !== '**' && marker !== '__') || !isStandaloneDelimiter(value, index, marker)) {
+      index++
+      continue
+    }
+    const openingIndex = opening.get(marker)
+    if (openingIndex === undefined) {
+      opening.set(marker, index)
+    } else {
+      const previous = characterBefore(value, index)
+      const next = characterAt(value, index + marker.length)
+      if (index > openingIndex + marker.length && /[\p{P}\p{S}]/u.test(previous) && /[\p{L}\p{N}]/u.test(next)) {
+        insertionPoints.push(index + marker.length)
+      }
+      opening.delete(marker)
+    }
+    index += marker.length
+  }
+  if (insertionPoints.length === 0) return value
+  let result = ''
+  let start = 0
+  for (const point of insertionPoints) {
+    result += `${value.slice(start, point)} `
+    start = point
+  }
+  return result + value.slice(start)
+}
+
+function isStandaloneDelimiter(value: string, index: number, marker: string) {
+  const character = marker[0]
+  if (value[index - 1] === character || value[index + marker.length] === character) return false
+  let backslashes = 0
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor--) backslashes++
+  return backslashes % 2 === 0
+}
+
+function characterBefore(value: string, index: number) {
+  if (index <= 0) return ''
+  const trailing = value.charCodeAt(index - 1)
+  if (trailing >= 0xDC00 && trailing <= 0xDFFF && index > 1) return value.slice(index - 2, index)
+  return value[index - 1]
+}
+
+function characterAt(value: string, index: number) {
+  const codePoint = value.codePointAt(index)
+  return codePoint === undefined ? '' : String.fromCodePoint(codePoint)
 }
