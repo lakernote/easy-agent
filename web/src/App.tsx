@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { APIError, api } from './api'
+import { APIError, api, onAuthenticationRequired } from './api'
 import type { Bootstrap, ModelSettings, Session } from './types'
 import { isActive, mergeSessionHistory, mergeSessionSnapshot, sessionDisplayTitle, updateSessionSummary, type Page } from './sessionState'
 import { ForkDialog, WorktreeDialog, friendlyError, type ForkWorkspaceMode } from './dialogs'
@@ -31,11 +31,28 @@ export default function App() {
   const [updatingRunState, setUpdatingRunState] = useState(false)
   const [settingsModelRuntime, setSettingsModelRuntime] = useState<ModelSettings['runtime']>()
 
+  const clearAuthentication = useCallback((message = '') => {
+    setAuthenticated(false)
+    setData(null)
+    setSession(null)
+    setPage('chat')
+    setTraceOpen(false)
+    setForkOpen(false)
+    setWorktreeOpen(false)
+    setSettingsModelRuntime(undefined)
+    setError('')
+    setAuthError(message)
+  }, [])
+
   const refresh = useCallback(async () => {
     const next = await api.bootstrap()
     setData(next)
     return next
   }, [])
+
+  useEffect(() => onAuthenticationRequired(() => {
+    clearAuthentication('登录状态已失效，请重新登录。')
+  }), [clearAuthentication])
 
   useEffect(() => {
     api.me().then(async (status) => {
@@ -47,6 +64,32 @@ export default function App() {
     }).finally(() => setLoading(false))
   }, [refresh])
 
+  useEffect(() => {
+    if (!authenticated) return
+    let checking = false
+    const verifyAuthentication = async () => {
+      if (checking) return
+      checking = true
+      try {
+        const status = await api.me()
+        if (!status.authenticated) clearAuthentication('登录状态已失效，请重新登录。')
+      } catch {
+        // 短暂断网不应清除仍可能有效的本地登录状态；业务请求会显示具体错误。
+      } finally {
+        checking = false
+      }
+    }
+    const verifyWhenVisible = () => {
+      if (document.visibilityState === 'visible') void verifyAuthentication()
+    }
+    window.addEventListener('focus', verifyAuthentication)
+    document.addEventListener('visibilitychange', verifyWhenVisible)
+    return () => {
+      window.removeEventListener('focus', verifyAuthentication)
+      document.removeEventListener('visibilitychange', verifyWhenVisible)
+    }
+  }, [authenticated, clearAuthentication])
+
   const afterLogin = useCallback(async () => {
     await refresh()
     setAuthenticated(true)
@@ -56,11 +99,9 @@ export default function App() {
 
   const logout = useCallback(async () => {
     try { await api.logout() } finally {
-      setAuthenticated(false)
-      setData(null)
-      setSession(null)
+      clearAuthentication()
     }
-  }, [])
+  }, [clearAuthentication])
 
   const openSession = useCallback(async (id: string) => {
     setPage('chat')

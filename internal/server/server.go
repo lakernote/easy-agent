@@ -49,6 +49,7 @@ type Server struct {
 }
 
 const authCookieName = "easyagent_session"
+const authenticationRequiredCode = "authentication_required"
 
 type authSession struct {
 	ExpiresAt time.Time
@@ -147,7 +148,7 @@ func (server *Server) Handler() http.Handler {
 		}
 		if server.requiresAuthentication(request) && !server.isAuthenticated(request) {
 			response.Header().Set("Cache-Control", "no-store")
-			writeError(response, http.StatusUnauthorized, "需要登录")
+			writeCodedError(response, http.StatusUnauthorized, authenticationRequiredCode, "需要登录")
 			return
 		}
 		server.mux.ServeHTTP(response, request)
@@ -158,7 +159,7 @@ func (server *Server) requiresAuthentication(request *http.Request) bool {
 	if !server.authEnabled {
 		return false
 	}
-	if request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/auth/me" || request.URL.Path == "/api/v1/health" {
+	if request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/auth/logout" || request.URL.Path == "/api/v1/auth/me" || request.URL.Path == "/api/v1/health" {
 		return false
 	}
 	return strings.HasPrefix(request.URL.Path, "/api/v1/")

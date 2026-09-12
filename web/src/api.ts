@@ -3,11 +3,25 @@ import type { AutomationTask } from './types/automation'
 
 export class APIError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  code: string
+  constructor(message: string, status: number, code = '') {
     super(message)
     this.name = 'APIError'
     this.status = status
+    this.code = code
   }
+}
+
+const authenticationRequiredCode = 'authentication_required'
+const authenticationRequiredListeners = new Set<() => void>()
+
+export function onAuthenticationRequired(listener: () => void) {
+  authenticationRequiredListeners.add(listener)
+  return () => { authenticationRequiredListeners.delete(listener) }
+}
+
+function notifyAuthenticationRequired() {
+  authenticationRequiredListeners.forEach((listener) => listener())
 }
 
 export type DirectoryBrowserResponse = {
@@ -22,8 +36,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { 'Content-Type': 'application/json', ...(init.headers || {}) } : init?.headers,
   })
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
-    throw new APIError(payload.error || `HTTP ${response.status}`, response.status)
+    const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}`, code: '' })) as { error?: string; code?: string }
+    const code = payload.code || ''
+    if (response.status === 401 && code === authenticationRequiredCode) notifyAuthenticationRequired()
+    throw new APIError(payload.error || `HTTP ${response.status}`, response.status, code)
   }
   if (response.status === 204) return undefined as T
   return response.json()

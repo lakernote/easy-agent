@@ -5,6 +5,7 @@ import type { Session } from '../types'
 import { formatBytes } from '../attachments'
 import { FileIcon, Logo } from '../ui'
 import { markdownComponents } from '../markdownComponents'
+import { normalizeAssistantMarkdown } from '../markdownNormalization'
 import { Payload } from './Payload'
 import { capabilityResultLabel, describeToolCall, SelectedCapabilities } from './CapabilityActivity'
 
@@ -146,7 +147,7 @@ function MessageAttachments({ attachments }: { attachments: Session['messages'][
 export function Avatar() { return <div className="avatar"><Logo /></div> }
 
 export function Markdown({ children, researchCitations = [] }: { children: string; researchCitations?: ResearchCitation[] }) {
-  const content = addResearchCitationDefinitions(children, researchCitations)
+  const content = addResearchCitationDefinitions(normalizeAssistantMarkdown(children), researchCitations)
   if (hasMath(content)) return <Suspense fallback={<ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>}><MathMarkdown>{content}</MathMarkdown></Suspense>
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
 }

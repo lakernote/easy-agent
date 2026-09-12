@@ -125,9 +125,17 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	if response, err := client.Get(httpServer.URL + "/api/v1/bootstrap"); err != nil {
 		t.Fatal(err)
 	} else {
-		response.Body.Close()
 		if response.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("未登录 API 应拒绝: %d", response.StatusCode)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if payload["code"] != authenticationRequiredCode || payload["error"] != "需要登录" {
+			t.Fatalf("未登录 API 应返回可识别的认证错误: %+v", payload)
 		}
 	}
 	loginBody := bytes.NewBufferString(`{"username":"admin","password":"admin"}`)
@@ -147,6 +155,22 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 			t.Fatalf("登录后 API 仍被拒绝: %d", response.StatusCode)
 		}
 	}
+	wrongPasswordBody := bytes.NewBufferString(`{"currentPassword":"wrong","newPassword":"new-admin-password"}`)
+	wrongPasswordRequest, _ := http.NewRequest(http.MethodPut, httpServer.URL+"/api/v1/auth/password", wrongPasswordBody)
+	wrongPasswordRequest.Header.Set("Content-Type", "application/json")
+	wrongPassword, err := client.Do(wrongPasswordRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrongPasswordPayload map[string]string
+	if err := json.NewDecoder(wrongPassword.Body).Decode(&wrongPasswordPayload); err != nil {
+		wrongPassword.Body.Close()
+		t.Fatal(err)
+	}
+	wrongPassword.Body.Close()
+	if wrongPassword.StatusCode != http.StatusUnauthorized || wrongPasswordPayload["code"] != "" {
+		t.Fatalf("密码错误不应被标记为登录过期: HTTP=%d payload=%+v", wrongPassword.StatusCode, wrongPasswordPayload)
+	}
 	changeBody := bytes.NewBufferString(`{"currentPassword":"admin","newPassword":"new-admin-password"}`)
 	request, _ := http.NewRequest(http.MethodPut, httpServer.URL+"/api/v1/auth/password", changeBody)
 	request.Header.Set("Content-Type", "application/json")
@@ -157,6 +181,14 @@ func TestHTTPAuthenticationAndPasswordRotation(t *testing.T) {
 	changed.Body.Close()
 	if changed.StatusCode != http.StatusOK {
 		t.Fatalf("改密失败: %d", changed.StatusCode)
+	}
+	logout, err := client.Post(httpServer.URL+"/api/v1/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logout.Body.Close()
+	if logout.StatusCode != http.StatusNoContent {
+		t.Fatalf("退出登录应为幂等操作: %d", logout.StatusCode)
 	}
 	oldLogin, err := client.Post(httpServer.URL+"/api/v1/auth/login", "application/json", bytes.NewBufferString(`{"username":"admin","password":"admin"}`))
 	if err != nil {

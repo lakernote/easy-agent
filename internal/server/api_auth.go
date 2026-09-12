@@ -45,7 +45,9 @@ func (server *Server) logout(response http.ResponseWriter, request *http.Request
 }
 
 func (server *Server) me(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-store")
 	if !server.isAuthenticated(request) {
+		server.clearAuthSession(response, request)
 		writeJSON(response, http.StatusOK, map[string]any{"authenticated": false, "username": ""})
 		return
 	}
