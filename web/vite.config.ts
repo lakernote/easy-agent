@@ -7,7 +7,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          markdown: ['react-markdown', 'remark-gfm', 'remark-math', 'rehype-katex'],
+          markdown: ['react-markdown', 'remark-gfm', 'remark-math'],
+          katex: ['katex', 'rehype-katex'],
         },
       },
     },
